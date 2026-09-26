@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data   # SQLite database
+      - ./gpx:/gpx     # GPX library (originals are never modified; uploads go to gpx/uploads/)
+    restart: unless-stopped
+  # Phase 3 adds a `brouter` service here.

@@ -1,0 +1,8 @@
+fastapi==0.141.1
+uvicorn==0.54.0
+python-multipart==0.0.32
+SQLAlchemy==2.1.1
+gpxpy==1.6.2
+shapely==2.1.2
+pyproj==3.8.0
+numpy==2.5.3

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gravel Route Manager</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Gravel Route Manager</h1>
+  <nav>
+    <button class="tab active" data-view="library">Library</button>
+    <button class="tab" data-view="import">Import</button>
+  </nav>
+</header>
+
+<main>
+  <!-- Library -->
+  <section id="view-library" class="view">
+    <form id="filters" class="filters" autocomplete="off">
+      <label class="wide">Search <input type="search" name="q" placeholder="name or notes"></label>
+      <label>Distance (km)
+        <span class="range"><input type="number" name="min_distance" min="0" step="1" placeholder="min">–<input type="number" name="max_distance" min="0" step="1" placeholder="max"></span>
+      </label>
+      <label>Elevation gain (m)
+        <span class="range"><input type="number" name="min_gain" min="0" step="10" placeholder="min">–<input type="number" name="max_gain" min="0" step="10" placeholder="max"></span>
+      </label>
+      <label>Paved (%)
+        <span class="range"><input type="number" name="min_paved" min="0" max="100" placeholder="min">–<input type="number" name="max_paved" min="0" max="100" placeholder="max"></span>
+      </label>
+      <label>Quality
+        <select name="min_quality">
+          <option value="">any</option>
+          <option value="1">★ 1+</option><option value="2">★ 2+</option><option value="3">★ 3+</option>
+          <option value="4">★ 4+</option><option value="5">★ 5</option>
+        </select>
+      </label>
+      <label>Source <select name="source"><option value="">any</option></select></label>
+      <label>Loop
+        <select name="loop"><option value="">any</option><option value="true">loops</option><option value="false">point-to-point</option></select>
+      </label>
+      <label class="wide">Tags (all of) <input type="text" name="tags" list="tag-list" placeholder="comma separated"></label>
+      <datalist id="tag-list"></datalist>
+      <button type="reset" class="secondary">Clear</button>
+    </form>
+
+    <p id="count" class="muted"></p>
+    <div class="table-wrap">
+      <table id="routes">
+        <thead>
+          <tr>
+            <th data-sort="name">Name</th>
+            <th data-sort="distance_km" class="num">Distance</th>
+            <th data-sort="elevation_gain_m" class="num">Gain</th>
+            <th data-sort="is_loop">Loop</th>
+            <th data-sort="paved_pct" class="num">Paved</th>
+            <th data-sort="quality_rating">Quality</th>
+            <th>Tags</th>
+            <th data-sort="source_name">Source</th>
+            <th data-sort="imported_at">Imported</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Import -->
+  <section id="view-import" class="view" hidden>
+    <div class="batch">
+      <label>Source name (whole batch) <input type="text" id="batch-source-name" list="source-list" placeholder="e.g. gravelroutedatabase.be"></label>
+      <label>Source URL (whole batch) <input type="url" id="batch-source-url" placeholder="https://…"></label>
+      <datalist id="source-list"></datalist>
+    </div>
+    <div id="dropzone">
+      <p>Drop GPX files here, or <label class="link">choose files<input type="file" id="file-input" accept=".gpx,application/gpx+xml" multiple hidden></label></p>
+    </div>
+    <table id="pending" hidden>
+      <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="actions">
+      <button id="import-btn" disabled>Import</button>
+      <span id="import-status" class="muted"></span>
+    </p>
+    <div id="import-results"></div>
+  </section>
+</main>
+
+<!-- Route detail panel -->
+<aside id="detail" hidden>
+  <div class="detail-head">
+    <h2 id="d-title"></h2>
+    <button id="d-close" class="icon" title="Close">✕</button>
+  </div>
+  <div id="d-map"></div>
+  <dl id="d-stats" class="stats"></dl>
+  <form id="d-form">
+    <label>Name <input name="name" required></label>
+    <div class="row">
+      <label>Quality
+        <select name="quality_rating">
+          <option value="">–</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+        </select>
+      </label>
+      <label>Paved % <input type="number" name="paved_pct" min="0" max="100" step="1"></label>
+    </div>
+    <label>Tags <input name="tags" list="tag-list" placeholder="comma separated"></label>
+    <label>Notes <textarea name="notes" rows="3"></textarea></label>
+    <label>Source name <input name="source_name" list="source-list"></label>
+    <label>Source URL <input type="url" name="source_url"></label>
+    <div class="actions">
+      <button type="submit">Save</button>
+      <a id="d-download" class="button secondary" href="#">Download GPX</a>
+      <button type="button" id="d-delete" class="danger">Remove</button>
+      <span id="d-status" class="muted"></span>
+    </div>
+  </form>
+  <p id="d-file" class="muted small"></p>
+  <h3>Similar / overlapping routes</h3>
+  <ul id="d-similar" class="muted"><li>…</li></ul>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
