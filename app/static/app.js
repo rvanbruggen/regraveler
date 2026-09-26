@@ -44,6 +44,24 @@ const fmt = {
 
 const splitTags = (s) => s.split(",").map((t) => t.trim()).filter(Boolean);
 
+const ACTIVITY_LABELS = { gravel: "Gravel", road: "Road", hiking: "Hiking" };
+const activityLabel = (a) => ACTIVITY_LABELS[a] || a || "–";
+let activityProfiles = {};
+
+/** Fill every activity <select> (class activity-select); data-any adds an empty first option. */
+function fillActivitySelects(activities) {
+  for (const sel of $$(".activity-select")) {
+    const keep = sel.value;
+    const any = sel.dataset.any;
+    sel.replaceChildren(
+      ...(any !== undefined ? [el("option", { value: "" }, any)] : []),
+      ...activities.map((a) => el("option", { value: a }, activityLabel(a)))
+    );
+    if (keep && activities.includes(keep)) sel.value = keep;
+    else sel.selectedIndex = 0; // "any" / "Set activity…", or the default activity
+  }
+}
+
 // ------------------------------------------------------------------ tabs
 
 let currentView = "library";
@@ -153,6 +171,11 @@ const checked = new Set(); // routes ticked in the library table
 
 async function loadFacets() {
   const [f, cfg] = await Promise.all([api("/api/facets"), api("/api/config")]);
+  activityProfiles = cfg.activity_profiles || {};
+  if (!$("#batch-activity").options.length) {
+    fillActivitySelects(cfg.activities);
+    filterForm.elements.activity.value = new URLSearchParams(location.hash.slice(1)).get("activity") || "";
+  }
   if (!cbEl.profile.options.length) {
     cbEl.profile.replaceChildren(...cfg.brouter_profiles.map((p) => el("option", { value: p }, p)));
   }
@@ -214,6 +237,7 @@ function renderTable() {
             onchange: (e) => toggleChecked(r.id, e.target.checked),
           })),
         el("td", { class: "name" }, r.name),
+        el("td", {}, r.activity ? el("span", { class: `activity ${r.activity}` }, activityLabel(r.activity)) : "–"),
         el("td", { class: "num" }, fmt.km(r.distance_km)),
         el("td", { class: "num" }, fmt.m(r.elevation_gain_m)),
         el("td", {}, r.is_loop ? "loop" : "A→B"),
@@ -363,6 +387,25 @@ async function changeTags({ add = [], remove = [] }) {
 }
 
 $("#sel-tags").addEventListener("click", () => toggleTagPanel($("#tag-panel").hidden));
+
+$("#sel-activity").addEventListener("change", async (e) => {
+  const activity = e.target.value;
+  const ids = [...checked];
+  e.target.value = "";
+  if (!activity || !ids.length) return;
+  try {
+    const res = await api("/api/routes/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, activity }),
+    });
+    await loadRoutes();
+    $("#surface-job").textContent = `· ${res.updated} route${res.updated === 1 ? "" : "s"} set to ${activityLabel(activity).toLowerCase()}`;
+    if (selectedId && checked.has(selectedId)) openDetail(selectedId);
+  } catch (err) {
+    alert(`Could not change the activity: ${err.message}`);
+  }
+});
 $("#tag-add-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const tags = splitTags($("#tag-add").value);
@@ -458,6 +501,7 @@ async function openDetail(id) {
   const f = detailForm.elements;
   f.name.value = r.name;
   f.quality_rating.value = r.quality_rating ?? "";
+  f.activity.value = r.activity ?? "";
   f.paved_pct.value = r.paved_pct ?? "";
   detailRoute = r;
   renderSurface(r);
@@ -593,6 +637,7 @@ detailForm.addEventListener("submit", async (e) => {
   const body = {
     name: f.name.value.trim(),
     quality_rating: f.quality_rating.value ? Number(f.quality_rating.value) : null,
+    activity: f.activity.value || undefined,
     tags: splitTags(f.tags.value),
     notes: f.notes.value,
     source_name: f.source_name.value,
@@ -647,7 +692,7 @@ function addFiles(fileList) {
   for (const file of fileList) {
     if (!file.name.toLowerCase().endsWith(".gpx")) continue;
     if (pending.some((p) => p.file.name === file.name && p.file.size === file.size)) continue;
-    pending.push({ file, source_name: "", source_url: "" });
+    pending.push({ file, source_name: "", source_url: "", activity: "" });
   }
   renderPending();
 }
@@ -669,6 +714,13 @@ function renderPending() {
           type: "url", value: p.source_url, placeholder: "(batch value)",
           oninput: (e) => (p.source_url = e.target.value),
         })),
+        el("td", {}, (() => {
+          const sel = el("select", { onchange: (e) => (p.activity = e.target.value) },
+            el("option", { value: "" }, "(batch value)"),
+            ...[...$("#batch-activity").options].map((o) => el("option", { value: o.value }, o.textContent)));
+          sel.value = p.activity;
+          return sel;
+        })()),
         el("td", {}, el("button", {
           class: "icon", title: "Remove from list",
           onclick: () => { pending.splice(i, 1); renderPending(); },
@@ -693,7 +745,8 @@ $("#import-btn").addEventListener("click", async () => {
   pending.forEach((p) => fd.append("files", p.file, p.file.name));
   fd.append("source_name", $("#batch-source-name").value);
   fd.append("source_url", $("#batch-source-url").value);
-  fd.append("overrides", JSON.stringify(pending.map((p) => ({ source_name: p.source_name, source_url: p.source_url }))));
+  fd.append("activity", $("#batch-activity").value);
+  fd.append("overrides", JSON.stringify(pending.map((p) => ({ source_name: p.source_name, source_url: p.source_url, activity: p.activity }))));
 
   $("#import-btn").disabled = true;
   $("#import-status").textContent = `importing ${pending.length} file(s)…`;
@@ -1091,6 +1144,10 @@ async function setRoutes(a, b) {
   cb.nameTouched = false;
   cbEl.saved.textContent = "";
   syncSelects();
+  // Connector profile that fits the activity (gravel -> gravel, road -> fastbike, hiking -> hiking-mountain).
+  const acts = new Set([cb.a, cb.b].filter(Boolean).map((id) => cb.byId.get(id)?.activity));
+  const profile = acts.size === 1 ? activityProfiles[[...acts][0]] : null;
+  if (profile && [...cbEl.profile.options].some((o) => o.value === profile)) cbEl.profile.value = profile;
   updateHash();
   updateDirectionLabels();
   drawCombineRoutes();

@@ -180,7 +180,7 @@ def load(countries: list[str] | None = None) -> Places:
 def _importance(places: Places, i: int) -> float:
     if places.kinds[i] == 0:
         return math.log10(places.population[i] + 1) + 0.15 * min(places.notability[i], 20)
-    # Landmarks: gravel riders care about forests and heaths; well-known ones rank high.
+    # Landmarks: forests and heaths are what riders and hikers look for; well-known ones rank high.
     return 2.5 + 0.3 * min(places.notability[i], 20)
 
 

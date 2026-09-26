@@ -33,7 +33,16 @@ async def lifespan(_app: FastAPI):
         db.init_db()
     config.GPX_DIR.mkdir(parents=True, exist_ok=True)
     backfill_track_hashes()
+    backfill_activity()
     yield
+
+
+def backfill_activity() -> None:
+    """Routes from before activities existed were all gravel routes."""
+    with db.SessionLocal() as session:
+        for route in session.scalars(select(Route).where(Route.activity.is_(None))).all():
+            route.activity = config.ACTIVITIES[0]
+        session.commit()
 
 
 def backfill_track_hashes() -> None:
@@ -49,7 +58,7 @@ def backfill_track_hashes() -> None:
         session.commit()
 
 
-app = FastAPI(title="Gravel Route Manager", version=__version__, lifespan=lifespan)
+app = FastAPI(title="rerouter", version=__version__, lifespan=lifespan)
 # Map and proximity responses are mostly coordinates, which compress very well.
 app.add_middleware(GZipMiddleware, minimum_size=2000)
 SessionDep = Annotated[Session, Depends(db.get_session)]
@@ -77,6 +86,7 @@ class RouteSummary(BaseModel):
     end_lon: float
     is_loop: bool
     quality_rating: int | None
+    activity: str | None
     paved_pct: float | None
     paved_source: str | None
     tags: list[str]
@@ -102,6 +112,7 @@ class RouteUpdate(BaseModel):
     """Editable metadata. Only fields that are sent are changed."""
 
     name: str | None = Field(default=None, min_length=1, max_length=300)
+    activity: str | None = None
     quality_rating: int | None = Field(default=None, ge=1, le=5)
     paved_pct: float | None = Field(default=None, ge=0, le=100)
     tags: list[str] | None = None
@@ -109,10 +120,22 @@ class RouteUpdate(BaseModel):
     source_name: str | None = None
     source_url: str | None = None
 
+    @field_validator("activity")
+    @classmethod
+    def _check_activity(cls, v):
+        return check_activity(v) if v is not None else v
+
     @field_validator("tags")
     @classmethod
     def _normalise_tags(cls, v):
         return normalise_tags(v) if v is not None else v
+
+
+def check_activity(value: str) -> str:
+    value = value.strip().lower()
+    if value not in config.ACTIVITIES:
+        raise ValueError(f"activity must be one of {', '.join(config.ACTIVITIES)}")
+    return value
 
 
 def normalise_tags(tags: list[str]) -> list[str]:
@@ -128,7 +151,7 @@ def normalise_tags(tags: list[str]) -> list[str]:
 
 SORTABLE = {
     "name", "distance_km", "elevation_gain_m", "paved_pct", "quality_rating",
-    "source_name", "imported_at", "is_loop",
+    "source_name", "imported_at", "is_loop", "activity",
 }
 
 
@@ -148,6 +171,7 @@ def filter_routes(
     sort: str = "name",
     order: str = "asc",
     ids: list[int] | None = None,
+    activity: str | None = None,
 ) -> list[Route]:
     """Shared filter logic for the library table, the map and proximity."""
     stmt = select(Route)
@@ -171,6 +195,8 @@ def filter_routes(
         stmt = stmt.where(Route.source_name == source)
     if loop is not None:
         stmt = stmt.where(Route.is_loop == loop)
+    if activity:
+        stmt = stmt.where(Route.activity == activity)
     if ids:
         stmt = stmt.where(Route.id.in_(ids))
 
@@ -210,12 +236,13 @@ def route_filters(
     sort: str = "name",
     order: str = "asc",
     ids: Annotated[list[int] | None, Query()] = None,
+    activity: str | None = None,
 ) -> dict:
     """Query parameters shared by every endpoint that works on a filtered set of routes."""
     return dict(
         q=q, min_distance=min_distance, max_distance=max_distance, min_gain=min_gain,
         max_gain=max_gain, min_paved=min_paved, max_paved=max_paved, min_quality=min_quality,
-        tags=tags, source=source, loop=loop, sort=sort, order=order, ids=ids,
+        tags=tags, source=source, loop=loop, sort=sort, order=order, ids=ids, activity=activity,
     )
 
 
@@ -241,6 +268,7 @@ def map_routes(
             "distance_km": r.distance_km,
             "elevation_gain_m": r.elevation_gain_m,
             "is_loop": r.is_loop,
+            "activity": r.activity,
             "quality_rating": r.quality_rating,
             "tags": r.tags,
             "source_name": r.source_name,
@@ -317,6 +345,28 @@ def change_tags(body: TagChange, session: SessionDep):
         tags += [t for t in add if t not in tags]
         if tags != (route.tags or []):
             route.tags = tags
+            updated += 1
+    session.commit()
+    return {"updated": updated}
+
+
+class ActivityChange(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    activity: str
+
+    @field_validator("activity")
+    @classmethod
+    def _check(cls, v):
+        return check_activity(v)
+
+
+@app.post("/api/routes/activity")
+def set_activity(body: ActivityChange, session: SessionDep):
+    """Set the activity of several routes."""
+    updated = 0
+    for route in session.scalars(select(Route).where(Route.id.in_(body.ids))).all():
+        if route.activity != body.activity:
+            route.activity = body.activity
             updated += 1
     session.commit()
     return {"updated": updated}
@@ -420,6 +470,8 @@ def client_config():
         "proximity_distance_m": config.PROXIMITY_DISTANCE_M,
         "proximity_max_distance_m": config.PROXIMITY_MAX_DISTANCE_M,
         "brouter_profiles": config.BROUTER_PROFILES,
+        "activities": config.ACTIVITIES,
+        "activity_profiles": config.ACTIVITY_PROFILES,
     }
 
 
@@ -446,7 +498,8 @@ async def import_files(
     files: Annotated[list[UploadFile], File()],
     source_name: Annotated[str | None, Form()] = None,
     source_url: Annotated[str | None, Form()] = None,
-    # JSON list aligned with `files`: [{"source_name": ..., "source_url": ...}, ...]
+    activity: Annotated[str | None, Form()] = None,
+    # JSON list aligned with `files`: [{"source_name": ..., "source_url": ..., "activity": ...}, ...]
     overrides: Annotated[str | None, Form()] = None,
 ):
     try:
@@ -454,6 +507,14 @@ async def import_files(
     except json.JSONDecodeError:
         raise HTTPException(400, "overrides must be a JSON list")
     results = []
+    try:
+        batch_activity = check_activity(activity) if activity else None
+        file_activities = [
+            check_activity(ov["activity"]) if isinstance(ov, dict) and ov.get("activity") else None
+            for ov in per_file
+        ]
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     for i, upload in enumerate(files):
         ov = per_file[i] if i < len(per_file) and isinstance(per_file[i], dict) else {}
         data = await upload.read()
@@ -463,6 +524,7 @@ async def import_files(
             upload.filename or f"upload-{i + 1}.gpx",
             source_name=(ov.get("source_name") or source_name or "").strip() or None,
             source_url=(ov.get("source_url") or source_url or "").strip() or None,
+            activity=(file_activities[i] if i < len(file_activities) else None) or batch_activity,
         )
         results.append(res.__dict__)
     new_ids = [r["id"] for res in results for r in res["routes"]]
@@ -590,7 +652,9 @@ def _run_combine(session: Session, req: CombineRequest):
         ids = [req.a_id, req.b_id]
     routes = {i: _get_route(session, i) for i in ids}
     tracks = {i: load_track(r) for i, r in routes.items()}
-    profile = req.profile or config.BROUTER_PROFILES[0]
+    activities = {r.activity for r in routes.values()}
+    default = config.ACTIVITY_PROFILES.get(activities.pop()) if len(activities) == 1 else None
+    profile = req.profile or default or config.BROUTER_PROFILES[0]
     if profile not in config.BROUTER_PROFILES:
         raise HTTPException(422, f"Unknown profile '{profile}'")
     params = {"prefer_unpaved_paths": "1"} if req.prefer_unpaved and profile == "gravel" else None
@@ -721,6 +785,7 @@ def combine_save(req: SaveCombinedRequest, session: SessionDep):
         derived_from=[r.id for r in routes],
         tags=tags,
         notes=notes,
+        activity=routes[0].activity,
     )
     if res.status != "imported":
         raise HTTPException(500, f"Could not save the combined route: {res.message}")

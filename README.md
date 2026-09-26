@@ -1,22 +1,23 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/logo-wordmark-dark.svg">
-  <img alt="regraveler" src="docs/logo-wordmark-light.svg" width="360">
+  <img alt="rerouter" src="docs/logo-wordmark-light.svg" width="360">
 </picture>
 
-# regraveler — Gravel Route Manager
+# rerouter — route manager
 
-A self-hosted web app to manage a personal library of gravel cycling routes (GPX files):
-import them, compute stats, tag and rate them, show them on a map, and combine two routes into
-a new one with automatically routed gravel connectors (via a self-hosted BRouter).
+A self-hosted web app to manage a personal library of routes (GPX files) for gravel cycling,
+road cycling and hiking: import them, compute stats, tag and rate them, show them on a map, and
+combine two routes into a new one with automatically routed connectors (via a self-hosted
+BRouter). Formerly *regraveler*.
 
-**Version:** 0.5.2 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.6.0 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
 
 - **Import** GPX files by drag and drop (many at once) or with a CLI script for a whole folder.
-  - Source name and URL per batch, with per-file override. If no URL is given, the link inside
-    the GPX file (if any) is used.
+  - Source name, URL and **activity** (gravel, road or hiking; default gravel) per batch, with
+    per-file override. If no URL is given, the link inside the GPX file (if any) is used.
   - Computed on import: distance, elevation gain/loss (smoothed, see below), min/max elevation,
     start/end point, bounding box, loop detection (start and end within 200 m) and a
     simplified geometry for maps.
@@ -30,8 +31,12 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     from OpenStreetMap (see below).
   - **Name:** new routes are named after the places they visit (see *Route names*); the name
     from the file is kept at the top of the notes (`Original name: …`).
-- **Library:** sortable table with filters on distance, elevation gain, paved %, quality,
-  tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
+- **Library:** sortable table with filters on activity, distance, elevation gain, paved %,
+  quality, tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
+- **Activity:** every route is a gravel, road or hiking route (routes from before 0.6.0 start as
+  gravel). Change it in the route panel, or for a selection with *Set activity…*. The activity
+  also picks the combiner's routing profile (gravel → `gravel`, road → `fastbike`,
+  hiking → `hiking-mountain`).
 - **Select several routes** with the checkboxes in the library (the header box selects all
   shown routes), then:
   - **Download GPX:** one route downloads its original file; several download as `routes.zip`
@@ -82,8 +87,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   3. Change them with *Click all four* (click A1, A2, B1, B2 on the map in turn; Esc cancels),
      *Place* next to a single point, or drag a point along its route. Clicks snap onto the
      route. *Suggest* puts the suggested points back.
-  4. The gaps are filled with connectors routed by BRouter (profile *gravel* by default,
-     optionally *prefer unpaved paths*; other profiles or plain straight lines are possible).
+  4. The gaps are filled with connectors routed by BRouter (the profile follows the routes'
+     activity: *gravel*, *fastbike* for road, *hiking-mountain* for hiking; for gravel optionally
+     *prefer unpaved paths*; other profiles or plain straight lines are possible).
      Points less than 25 m apart are joined directly.
   5. Preview with total distance, elevation gain, the km on each route and connector lengths.
   6. Save as a new route (a new GPX file in `gpx/derived/`, source *combined*, with the parent
@@ -168,6 +174,7 @@ Options:
 - `--source-name NAME` — source name for all files (instead of the subfolder name)
 - `--source-url URL` — source URL for all files
 - `--no-source-from-folder` — don't use the subfolder name as source name
+- `--activity gravel|road|hiking` — activity of the imported routes (default `gravel`)
 
 A folder outside `./gpx` can also be imported; its files are copied into `gpx/uploads/`.
 
@@ -266,8 +273,9 @@ Run the tests:
 Settings (environment variables): `LOOP_THRESHOLD_M` (200), `SIMILAR_TOLERANCE_M` (50),
 `SIMILAR_MIN_OVERLAP` (0.85), `VARIANT_MIN_OVERLAP` (0.9), `PROXIMITY_DISTANCE_M` (100, default distance on the map),
 `PROXIMITY_MAX_DISTANCE_M` (5000), `BROUTER_URL` (`http://localhost:17777`; set to
-`http://brouter:17777` in docker-compose), `BROUTER_PROFILES` (`gravel,trekking,mtb,fastbike,shortest`;
-the first is the default), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25),
+`http://brouter:17777` in docker-compose), `BROUTER_PROFILES`
+(`gravel,fastbike,hiking-mountain,trekking,mtb,shortest`; offered in the combiner, the first is the
+default when the routes' activities differ), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25),
 `SURFACE_MATCH_PROFILE` (`shortest`), `SURFACE_WAYPOINT_SPACING_M` (300), `SURFACE_AUTO_ESTIMATE`
 (1; 0 to only estimate on request), `GEONAMES_COUNTRIES` (`BE,NL,LU,DE,FR`), `PLACE_NAME_LANGUAGE`
 (`nl`), `AUTO_RENAME_ON_IMPORT` (1; 0 keeps the names from the files).

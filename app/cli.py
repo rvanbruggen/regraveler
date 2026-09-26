@@ -46,6 +46,7 @@ def cmd_import(args) -> int:
             source_name=args.source_name,
             source_url=args.source_url,
             source_from_folder=not args.no_source_from_folder,
+            activity=args.activity,
             progress=progress,
         )
     print(
@@ -105,7 +106,7 @@ def cmd_estimate_surface(args) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m app.cli", description="Gravel Route Manager tools")
+    parser = argparse.ArgumentParser(prog="python -m app.cli", description="rerouter tools")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("import", help="Import all .gpx files in a folder (recursively)")
@@ -117,6 +118,8 @@ def main(argv=None) -> int:
         action="store_true",
         help="Don't use the subfolder name as source name",
     )
+    p.add_argument("--activity", choices=config.ACTIVITIES, default=config.ACTIVITIES[0],
+                   help="Activity of the imported routes (default: %(default)s)")
     p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("recompute", help="Recompute stats for all routes from their GPX files")

@@ -2,6 +2,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| **0.6.0** | 2026-09-26 | Renamed from regraveler to **rerouter** (same logo): routes for gravel cycling, road cycling and hiking. New activity field (gravel / road / hiking): filter and column in the library, set per route or for a selection, batch and per-file setting on import (CLI `--activity`), and it picks the combiner's routing profile (gravel, fastbike, hiking-mountain). Existing routes start as gravel |
 | **0.5.2** | 2026-09-26 | Library: add tags to, or remove a tag from, all selected routes (Tags… panel showing the tags on the selection) |
 | **0.5.1** | 2026-09-26 | Route names: Germany and France added to the default GeoNames countries (BE, NL, LU, DE, FR), so routes across the border get names too |
 | **0.5.0** | 2026-09-26 | Route names from the places a route visits (start town, then up to three places in riding order; GeoNames data, Dutch names): review screen to edit and apply proposals, original name kept in the notes, new imports named automatically |

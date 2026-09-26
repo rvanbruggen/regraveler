@@ -120,7 +120,7 @@ def test_bad_upload_is_reported_per_file(client):
 
 def test_frontend_is_served(client):
     page = client.get("/").text
-    assert "<title>regraveler" in page
+    assert "<title>rerouter" in page
     assert 'href="/static/favicon.svg"' in page
     for asset in ("app.js", "logo.svg", "favicon.svg"):
         assert client.get(f"/static/{asset}").status_code == 200
@@ -522,3 +522,73 @@ def test_bulk_tags(client):
 
     assert client.post("/api/routes/tags", json={"ids": [ids["A"]]}).status_code == 422
     assert client.post("/api/routes/tags", json={"ids": [], "add": ["x"]}).status_code == 422
+
+
+# ---------------------------------------------------------------- activity
+
+def test_activity_on_import_filter_edit_and_bulk(client):
+    import json as _json
+
+    res = client.post(
+        "/api/import",
+        files=[("files", (n, d, "application/gpx+xml")) for n, d in [
+            ("A.gpx", climb_gpx(3000, 5)), ("B.gpx", climb_gpx(4000, 5, start=(50.5, 5.0))),
+            ("C.gpx", climb_gpx(5000, 5, start=(50.7, 4.6)))]],
+        data={"activity": "road", "overrides": _json.dumps([{}, {"activity": "hiking"}, {}])},
+    )
+    assert res.status_code == 200
+    acts = {r["name"]: r["activity"] for r in client.get("/api/routes").json()}
+    assert acts == {"A": "road", "B": "hiking", "C": "road"}
+
+    assert [r["name"] for r in client.get("/api/routes", params={"activity": "hiking"}).json()] == ["B"]
+    assert [r["name"] for r in client.get("/api/map", params={"activity": "road"}).json()] == ["A", "C"]
+
+    ids = {r["name"]: r["id"] for r in client.get("/api/routes").json()}
+    assert client.patch(f"/api/routes/{ids['A']}", json={"activity": "Gravel"}).json()["activity"] == "gravel"
+    assert client.patch(f"/api/routes/{ids['A']}", json={"activity": "swimming"}).status_code == 422
+
+    res = client.post("/api/routes/activity", json={"ids": [ids["A"], ids["B"]], "activity": "hiking"})
+    assert res.json() == {"updated": 1}  # B already was a hike
+    assert client.post("/api/routes/activity", json={"ids": [ids["A"]], "activity": "x"}).status_code == 422
+    names = [r["name"] for r in client.get("/api/routes", params={"sort": "activity"}).json()]
+    assert names == ["A", "B", "C"]  # hiking, hiking, road
+
+    bad = client.post("/api/import", files=[("files", ("D.gpx", climb_gpx(1000, 1), "application/gpx+xml"))],
+                      data={"activity": "sailing"})
+    assert bad.status_code == 422
+
+
+def test_default_activity_and_backfill(client):
+    from app import db
+    from app.main import backfill_activity
+    from app.models import Route
+
+    upload(client, [("A.gpx", climb_gpx(3000, 5))])
+    assert client.get("/api/routes").json()[0]["activity"] == "gravel"
+    with db.SessionLocal() as s:
+        s.query(Route).one().activity = None
+        s.commit()
+    backfill_activity()
+    assert client.get("/api/routes").json()[0]["activity"] == "gravel"
+
+
+def test_combine_profile_follows_activity(client, monkeypatch):
+    from app import brouter
+
+    a, b = _two_parallel_routes(client)
+    used = []
+    monkeypatch.setattr(brouter, "route", lambda p, q, profile, params=None, **kw: used.append(profile) or
+                        [(p[0], p[1], None), (q[0], q[1], None)])
+    one = [{"a": [51.0, 4.43], "b": [51.0072, 4.43]}]
+    req = {"a_id": a, "b_id": b, "connections": one}
+
+    client.post("/api/combine/preview", json=req)
+    client.post("/api/routes/activity", json={"ids": [a, b], "activity": "hiking"})
+    client.post("/api/combine/preview", json=req)
+    client.post("/api/routes/activity", json={"ids": [a], "activity": "road"})
+    client.post("/api/combine/preview", json=req)  # mixed: first profile in the list
+    client.post("/api/combine/preview", json={**req, "profile": "fastbike"})  # explicit choice wins
+    assert used == ["gravel", "hiking-mountain", "gravel", "fastbike"]
+
+    saved = client.post("/api/combine/save", json={**req, "name": "Mixed"}).json()
+    assert client.get(f"/api/routes/{saved['id']}").json()["activity"] == "road"  # from route A

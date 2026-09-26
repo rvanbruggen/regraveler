@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <title>regraveler</title>
+  <title>rerouter</title>
   <!-- Two original routes (grey) recombined into a new line (orange) via two connection points. -->
   <g fill="none" stroke-linejoin="round" stroke-linecap="round">
     <polyline points="6,24 18,14 30,22 42,12 58,18" stroke="#a9a79f" stroke-width="2"/>

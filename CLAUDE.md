@@ -1,6 +1,6 @@
-# Gravel Route Manager - project brief
+# rerouter - project brief
 
-A self-hosted web app to manage a personal library of gravel cycling routes (GPX files): store them with structured metadata, show them on a map, and combine two routes into a new one using an automatically routed connector.
+A self-hosted web app (formerly "regraveler") to manage a personal library of routes (GPX files) for gravel cycling, road cycling and hiking: store them with structured metadata, show them on a map, and combine two routes into a new one using an automatically routed connector.
 
 ## Context
 

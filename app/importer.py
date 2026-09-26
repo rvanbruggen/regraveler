@@ -138,6 +138,7 @@ def import_gpx(
     derived_from: list[int] | None = None,
     tags: list[str] | None = None,
     notes: str | None = None,
+    activity: str | None = None,
 ) -> ImportResult:
     """Import one GPX file (one route per track). Commits on success.
 
@@ -223,6 +224,7 @@ def import_gpx(
             geometry=st.geometry,
             tags=list(tags or []),
             notes=route_notes,
+            activity=activity or config.ACTIVITIES[0],
             derived_from=list(derived_from or []),
             source_name=source_name or None,
             source_url=source_url or None,
@@ -272,6 +274,7 @@ def import_folder(
     source_name: str | None = None,
     source_url: str | None = None,
     source_from_folder: bool = True,
+    activity: str | None = None,
     progress=None,
 ) -> list[ImportResult]:
     """Import every .gpx file below `folder`.
@@ -299,6 +302,7 @@ def import_folder(
             source_name=src,
             source_url=source_url,
             library_path=relative_to_library(path),
+            activity=activity,
         )
         results.append(res)
         if progress:

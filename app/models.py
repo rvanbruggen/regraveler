@@ -49,6 +49,7 @@ class Route(Base):
     geometry: Mapped[list] = mapped_column(JSON)
 
     # User metadata. Add new fields here (nullable); db.init_db adds the column.
+    activity: Mapped[str | None] = mapped_column(String(20), index=True)  # gravel / road / hiking
     quality_rating: Mapped[int | None] = mapped_column(Integer)
     paved_pct: Mapped[float | None] = mapped_column(Float)
     paved_source: Mapped[str | None] = mapped_column(String(20))  # "manual" or "estimated"

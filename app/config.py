@@ -29,7 +29,7 @@ BROUTER_URL = os.environ.get("BROUTER_URL", "http://localhost:17777").rstrip("/"
 BROUTER_TIMEOUT_S = float(os.environ.get("BROUTER_TIMEOUT_S", 60))
 # Profiles offered in the UI (must exist in BRouter's profiles2 folder); the first is the default.
 BROUTER_PROFILES = [
-    p.strip() for p in os.environ.get("BROUTER_PROFILES", "gravel,trekking,mtb,fastbike,shortest").split(",")
+    p.strip() for p in os.environ.get("BROUTER_PROFILES", "gravel,fastbike,hiking-mountain,trekking,mtb,shortest").split(",")
     if p.strip()
 ]
 # Connection points closer than this are joined directly, without asking BRouter.
@@ -48,3 +48,8 @@ GEONAMES_COUNTRIES = [
 PLACE_NAME_LANGUAGE = os.environ.get("PLACE_NAME_LANGUAGE", "nl")
 # Give newly imported routes a generated name (the original name goes to Notes).
 AUTO_RENAME_ON_IMPORT = os.environ.get("AUTO_RENAME_ON_IMPORT", "1").lower() not in ("0", "false", "no")
+
+# Activity of a route. The first is the default for imports; each maps to the BRouter profile
+# the combiner uses by default for connectors.
+ACTIVITIES = ["gravel", "road", "hiking"]
+ACTIVITY_PROFILES = {"gravel": "gravel", "road": "fastbike", "hiking": "hiking-mountain"}

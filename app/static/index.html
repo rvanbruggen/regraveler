@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>regraveler · gravel route manager</title>
+  <title>rerouter · route manager</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <link rel="stylesheet" href="/static/style.css">
@@ -12,8 +12,8 @@
 <header>
   <h1 class="brand">
     <img src="/static/logo.svg" alt="" width="36" height="36">
-    <span class="wordmark"><span class="re">re</span>graveler</span>
-    <span class="tagline">gravel route manager <span id="version"></span></span>
+    <span class="wordmark"><span class="re">re</span>router</span>
+    <span class="tagline">route manager <span id="version"></span></span>
   </h1>
   <nav>
     <button class="tab active" data-view="library">Library</button>
@@ -44,6 +44,7 @@
           <option value="4">★ 4+</option><option value="5">★ 5</option>
         </select>
       </label>
+      <label>Activity <select name="activity" class="activity-select" data-any="any"></select></label>
       <label>Source <select name="source"><option value="">any</option></select></label>
       <label>Loop
         <select name="loop"><option value="">any</option><option value="true">loops</option><option value="false">point-to-point</option></select>
@@ -68,6 +69,7 @@
         <button type="button" id="sel-download" class="secondary">Download GPX</button>
         <button type="button" id="sel-map" class="secondary">Show on map</button>
         <button type="button" id="sel-surface" class="secondary" title="Estimate paved % from OpenStreetMap">Estimate surface</button>
+        <select id="sel-activity" class="activity-select" data-any="Set activity…" aria-label="Set the activity of the selected routes"></select>
         <button type="button" id="sel-tags" class="secondary" aria-expanded="false" aria-controls="tag-panel">Tags…</button>
         <button type="button" id="sel-rename" class="secondary" title="Name after start town and places visited">Rename…</button>
         <button type="button" id="sel-remove" class="danger">Remove</button>
@@ -93,6 +95,7 @@
           <tr>
             <th class="sel"><input type="checkbox" id="sel-all" title="Select all shown routes"></th>
             <th data-sort="name">Name</th>
+            <th data-sort="activity">Activity</th>
             <th data-sort="distance_km" class="num">Distance</th>
             <th data-sort="elevation_gain_m" class="num">Gain</th>
             <th data-sort="is_loop">Loop</th>
@@ -212,13 +215,14 @@
     <div class="batch">
       <label>Source name (whole batch) <input type="text" id="batch-source-name" list="source-list" placeholder="e.g. gravelroutedatabase.be"></label>
       <label>Source URL (whole batch) <input type="url" id="batch-source-url" placeholder="https://…"></label>
+      <label>Activity (whole batch) <select id="batch-activity" class="activity-select"></select></label>
       <datalist id="source-list"></datalist>
     </div>
     <div id="dropzone">
       <p>Drop GPX files here, or <label class="link">choose files<input type="file" id="file-input" accept=".gpx,application/gpx+xml" multiple hidden></label></p>
     </div>
     <table id="pending" hidden>
-      <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th></th></tr></thead>
+      <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th>Activity (override)</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     <p class="actions">
@@ -242,6 +246,7 @@
   <form id="d-form">
     <label>Name <input name="name" required></label>
     <div class="row">
+      <label>Activity <select name="activity" class="activity-select"></select></label>
       <label>Quality
         <select name="quality_rating">
           <option value="">–</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>

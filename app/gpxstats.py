@@ -244,7 +244,7 @@ def write_gpx(
     name: str,
     points: list[tuple[float, float, float | None]],
     description: str | None = None,
-    creator: str = "regraveler",
+    creator: str = "rerouter",
 ) -> bytes:
     """A GPX 1.1 file with one track."""
     gpx = gpxpy.gpx.GPX()
