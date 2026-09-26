@@ -66,21 +66,58 @@ function fillActivitySelects(activities) {
 
 let currentView = "library";
 
+// Views reached through the Utilities menu.
+const UTILITIES = ["combine", "restart", "duplicates"];
+// Views a link (URL hash) can open.
+const LINKABLE_VIEWS = ["library", "map", "import", ...UTILITIES];
+
 function showView(name) {
   currentView = name;
-  $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  $$("nav [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  $("#utilities .menu-button").classList.toggle("active", UTILITIES.includes(name));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
-  // The filters apply to the library and the map, not to the import and combine screens.
-  const noFilters = ["import", "combine", "duplicates", "rename"].includes(name);
+  // The filters apply to the library and the map, not to the import screen and the utilities.
+  const noFilters = ["import", "rename", ...UTILITIES].includes(name);
   $("#filters").hidden = noFilters;
   updateIdsNote();
   if (noFilters) closeDetail();
   if (name === "map") showOverview();
   if (name === "combine") showCombine();
+  if (name === "restart") showRestart();
   if (name === "duplicates") loadDuplicates();
   updateHash();
 }
-$$(".tab").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+$$("nav [data-view]").forEach((b) =>
+  b.addEventListener("click", () => {
+    toggleUtilities(false);
+    showView(b.dataset.view);
+  })
+);
+
+// Utilities dropdown
+const utilitiesButton = $("#utilities .menu-button");
+function toggleUtilities(open) {
+  $("#utilities-menu").hidden = !open;
+  utilitiesButton.setAttribute("aria-expanded", String(open));
+}
+utilitiesButton.addEventListener("click", () => {
+  const open = $("#utilities-menu").hidden;
+  toggleUtilities(open);
+  if (open) $("#utilities-menu button").focus();
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#utilities")) toggleUtilities(false); });
+$("#utilities").addEventListener("keydown", (e) => {
+  const items = $$("#utilities-menu button");
+  const i = items.indexOf(document.activeElement);
+  if (e.key === "Escape") {
+    toggleUtilities(false);
+    utilitiesButton.focus();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if ($("#utilities-menu").hidden) toggleUtilities(true);
+    items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+  }
+});
 
 /** Open a route in whichever view is active (map: select it there too). */
 function showRoute(id) {
@@ -121,6 +158,7 @@ function updateHash() {
     if (cb.b) p.set("b", cb.b);
     if (cb.mode === "open") p.set("open", "1");
   }
+  if (currentView === "restart" && rs.id) p.set("route", rs.id);
   history.replaceState(null, "", p.toString() ? `#${p}` : location.pathname);
 }
 
@@ -510,6 +548,7 @@ async function openDetail(id) {
   f.source_name.value = r.source_name ?? "";
   f.source_url.value = r.source_url ?? "";
   $("#d-download").href = `/api/routes/${r.id}/gpx`;
+  $("#d-restart").hidden = !r.is_loop;
   $("#d-file").textContent =
     `File: ${r.gpx_path}` + (r.track_name ? ` · GPX track ${r.track_index + 1}: "${r.track_name}"` : "") +
     ` · imported ${fmt.date(r.imported_at)}`;
@@ -519,7 +558,7 @@ async function openDetail(id) {
   if (r.derived_from.length) {
     const parents = await Promise.all(r.derived_from.map((pid) => api(`/api/routes/${pid}`).catch(() => null)));
     derived.append(
-      "Combined from: ",
+      r.derived_from.length > 1 ? "Combined from: " : "Derived from: ",
       ...parents.flatMap((pr, i) => [
         i ? " + " : "",
         pr ? el("a", { class: "link", onclick: () => showRoute(pr.id) }, pr.name) : `#${r.derived_from[i]} (removed)`,
@@ -1494,6 +1533,307 @@ $("#d-combine").addEventListener("click", () => {
   else openCombiner(id, cb.b !== id ? cb.b : null);
 });
 
+// ------------------------------------------------------------------ change start point (utility)
+// A loop route ridden from a different point on the loop. The server cuts the full-resolution
+// GPX track; here the start is placed on the (simplified) geometry and sent as [lat, lon].
+
+const rs = {
+  map: null, loaded: false, loading: null, initial: null,
+  routes: [], byId: new Map(),
+  id: null, route: null, cum: [], // chosen loop: detail, cumulative metres along its geometry
+  start: null, preview: null, token: 0, nameTouched: false,
+};
+const rsEl = {
+  route: $("#rs-route"), slider: $("#rs-slider"), km: $("#rs-km"), reverse: $("#rs-reverse"),
+  status: $("#rs-status"), stats: $("#rs-stats"), save: $("#rs-save"), name: $("#rs-name"), saved: $("#rs-saved"),
+};
+
+function showRestart() {
+  if (!rs.map) {
+    const m = L.map("restart-map", { renderer: L.canvas({ tolerance: 6 }) }).setView([50.9, 4.5], 9);
+    osmTiles().addTo(m);
+    rs.bgLayer = L.layerGroup().addTo(m);
+    rs.routeLayer = L.layerGroup().addTo(m);
+    rs.markerLayer = L.layerGroup().addTo(m);
+    m.on("click", (e) => { if (rs.route) placeStart(e.latlng); });
+    rs.map = m;
+    rs.initial = Number(new URLSearchParams(location.hash.slice(1)).get("route")) || null;
+  }
+  setTimeout(() => rs.map.invalidateSize(), 0);
+  if (!rs.loaded) rs.loading = loadRestartRoutes();
+  return rs.loading;
+}
+
+async function loadRestartRoutes() {
+  rs.loaded = true;
+  try {
+    rs.routes = await api("/api/map?loop=true&tolerance_m=15");
+  } catch (err) {
+    rsEl.status.textContent = `Error loading routes: ${err.message}`;
+    rs.loaded = false;
+    return;
+  }
+  rs.byId = new Map(rs.routes.map((r) => [r.id, r]));
+  const sorted = [...rs.routes].sort((x, y) => x.name.localeCompare(y.name));
+  rsEl.route.replaceChildren(
+    el("option", { value: "" }, sorted.length ? "— choose a loop —" : "no loop routes in the library"),
+    ...sorted.map((r) => el("option", { value: r.id }, `${r.name} (${fmt.km(r.distance_km)})`))
+  );
+  rs.bgLayer.clearLayers();
+  for (const r of rs.routes) {
+    L.polyline(r.geometry, { color: "#777", weight: 2, opacity: 0.35 })
+      .bindTooltip(r.name, { sticky: true })
+      .on("click", (e) => {
+        if (r.id === rs.id) return; // clicks on the chosen loop place the start (map handler)
+        L.DomEvent.stopPropagation(e);
+        setRestartRoute(r.id);
+      })
+      .addTo(rs.bgLayer);
+  }
+  const initial = rs.initial;
+  rs.initial = null;
+  if (initial && rs.byId.has(initial)) return setRestartRoute(initial);
+  if (rs.id && !rs.byId.has(rs.id)) return setRestartRoute(null); // removed meanwhile
+  rsEl.route.value = rs.id ?? "";
+  if (!rs.id && rs.routes.length) {
+    rs.map.fitBounds(L.featureGroup(rs.bgLayer.getLayers()).getBounds(), { padding: [20, 20] });
+  }
+  renderRestart();
+}
+
+async function setRestartRoute(id) {
+  rs.id = id || null;
+  rs.route = null;
+  rs.start = null;
+  rs.preview = null;
+  rs.nameTouched = false;
+  rsEl.saved.textContent = "";
+  rsEl.route.value = rs.id ?? "";
+  updateHash();
+  if (!rs.id) {
+    renderRestart();
+    rsEl.status.textContent = "Choose a loop route (or click one on the map).";
+    return;
+  }
+  let r;
+  try {
+    r = await api(`/api/routes/${id}`);
+  } catch (err) {
+    rsEl.status.textContent = `Error: ${err.message}`;
+    return;
+  }
+  if (rs.id !== id) return; // another route was chosen meanwhile
+  rs.route = r;
+  rs.cum = cumulativeMetres(r.geometry);
+  rs.map.fitBounds([[r.min_lat, r.min_lon], [r.max_lat, r.max_lon]], { padding: [30, 30] });
+  rs.map.getContainer().classList.add("placing");
+  renderRestart();
+  rsEl.status.textContent = "Click the new start on the loop (or use the slider).";
+}
+
+/** Cumulative distance in metres along a [lat, lon] polyline (local flat approximation). */
+function cumulativeMetres(line) {
+  const out = [0];
+  for (let i = 1; i < line.length; i++) {
+    const k = Math.cos((line[i][0] * Math.PI) / 180);
+    const dy = (line[i][0] - line[i - 1][0]) * 110540;
+    const dx = (line[i][1] - line[i - 1][1]) * k * 111320;
+    out.push(out[i - 1] + Math.hypot(dx, dy));
+  }
+  return out;
+}
+
+/** The point at `at` metres along the chosen loop's geometry. */
+function pointAlong(at) {
+  const line = rs.route.geometry, cum = rs.cum;
+  let i = 1;
+  while (i < cum.length - 1 && cum[i] < at) i++;
+  const seg = cum[i] - cum[i - 1];
+  const f = seg ? Math.max(0, Math.min(1, (at - cum[i - 1]) / seg)) : 0;
+  return [line[i - 1][0] + f * (line[i][0] - line[i - 1][0]), line[i - 1][1] + f * (line[i][1] - line[i - 1][1])];
+}
+
+/** Metres along the chosen loop's geometry of the point on it nearest to [lat, lon]. */
+function metresAlong(p) {
+  const line = rs.route.geometry;
+  let best = { d: Infinity, at: 0 };
+  const k = Math.cos((p[0] * Math.PI) / 180);
+  const toXY = (q) => [q[1] * k * 111320, q[0] * 110540];
+  const [px, py] = toXY(p);
+  for (let i = 0; i < line.length - 1; i++) {
+    const [ax, ay] = toXY(line[i]), [bx, by] = toXY(line[i + 1]);
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+    const d = Math.hypot(ax + t * dx - px, ay + t * dy - py);
+    if (d < best.d) best = { d, at: rs.cum[i] + t * (rs.cum[i + 1] - rs.cum[i]) };
+  }
+  return best.at;
+}
+
+function placeStart(latlng) {
+  const snap = snapToLine(rs.route.geometry, latlng);
+  if (snap.d > MAX_SNAP_M) {
+    rsEl.status.textContent = `That is ${(snap.d / 1000).toFixed(1)} km from the loop; click closer to it.`;
+    return;
+  }
+  setStart(snap.p);
+}
+
+function setStart(p) {
+  rs.start = p;
+  const total = rs.cum[rs.cum.length - 1] || 1;
+  rsEl.slider.value = Math.round((metresAlong(p) / total) * 1000);
+  runRestartPreview();
+}
+
+function renderRestart() {
+  const r = rs.route, res = rs.preview;
+  rs.routeLayer.clearLayers();
+  rs.markerLayer.clearLayers();
+  rs.bgLayer.eachLayer((l) => l.setStyle({ opacity: r ? 0.2 : 0.35 }));
+  rsEl.slider.disabled = !r;
+  rsEl.reverse.disabled = !r;
+  rsEl.stats.hidden = !res;
+  rsEl.save.hidden = !res;
+  if (!r) {
+    rsEl.km.textContent = "";
+    rs.map.getContainer().classList.remove("placing");
+    return;
+  }
+  L.polyline(r.geometry, { color: COLOR_A, weight: 4, opacity: res ? 0.35 : 0.9 })
+    .bindTooltip("Click to start here", { sticky: true })
+    .on("click", (e) => { L.DomEvent.stopPropagation(e); placeStart(e.latlng); })
+    .addTo(rs.routeLayer);
+  if (res) {
+    L.polyline(res.geometry, { color: COLOR_A, weight: 5, opacity: 0.9, interactive: false }).addTo(rs.routeLayer);
+    // The first kilometre, so the riding direction is visible.
+    const cum = cumulativeMetres(res.geometry);
+    const n = Math.max(2, cum.findIndex((d) => d > 1000) + 1 || cum.length);
+    L.polyline(res.geometry.slice(0, n), { color: "#2e7d32", weight: 7, opacity: 0.9, interactive: false })
+      .bindTooltip("First kilometre").addTo(rs.routeLayer);
+  }
+  // Where the route started so far.
+  L.circleMarker([r.start_lat, r.start_lon], { radius: 6, color: "#666", fillColor: "#fff", fillOpacity: 1, weight: 2 })
+    .bindTooltip("Original start").addTo(rs.markerLayer);
+  if (rs.start) {
+    L.marker(rs.start, {
+      draggable: true, zIndexOffset: 1000,
+      icon: L.divIcon({ className: "cb-start", html: "Start", iconSize: [42, 20], iconAnchor: [21, 26] }),
+    })
+      .bindTooltip("New start (drag along the loop)")
+      .on("dragend", (e) => placeStart(e.target.getLatLng()))
+      .addTo(rs.markerLayer);
+  }
+  const total = r.distance_km;
+  rsEl.km.textContent = res
+    ? `${fmt.km(res.start_km)} of ${fmt.km(total)} along the original`
+    : rs.start ? "" : "not placed yet";
+  if (res) {
+    const stats = [
+      ["Distance", fmt.km(res.distance_km)],
+      ["Elevation gain", fmt.m(res.elevation_gain_m)],
+      ["Elevation loss", fmt.m(res.elevation_loss_m)],
+      ["Starts at", res.start_place || fmt.km(res.start_km)],
+      ["Direction", rsEl.reverse.checked ? "Reversed" : "As the original"],
+    ];
+    rsEl.stats.replaceChildren(...stats.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+  }
+}
+
+function restartRequest(extra = {}) {
+  return { route_id: rs.id, start: rs.start, reverse: rsEl.reverse.checked, ...extra };
+}
+
+async function runRestartPreview() {
+  if (!rs.route || !rs.start) return renderRestart();
+  const token = ++rs.token;
+  rsEl.status.textContent = "Working…";
+  renderRestart();
+  let res;
+  try {
+    res = await api("/api/restart/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(restartRequest()),
+    });
+  } catch (err) {
+    if (token !== rs.token) return;
+    rs.preview = null;
+    renderRestart();
+    rsEl.status.textContent = `Error: ${err.message}`;
+    return;
+  }
+  if (token !== rs.token) return; // a newer preview is on its way
+  rs.preview = res;
+  rs.start = res.start; // snapped onto the full-resolution track
+  if (!rs.nameTouched) {
+    rsEl.name.value = `${rs.route.name} (start ${res.start_place || `km ${res.start_km.toFixed(1)}`})`;
+  }
+  rsEl.status.textContent = res.description;
+  rsEl.saved.textContent = "";
+  renderRestart();
+}
+
+rsEl.route.addEventListener("change", () => setRestartRoute(Number(rsEl.route.value) || null));
+rsEl.slider.addEventListener("input", () => {
+  // Move the marker while sliding; ask the server when the slider is released.
+  if (!rs.route) return;
+  rs.start = pointAlong((rsEl.slider.value / 1000) * rs.cum[rs.cum.length - 1]);
+  rs.preview = null;
+  renderRestart();
+});
+rsEl.slider.addEventListener("change", () => rs.route && runRestartPreview());
+rsEl.reverse.addEventListener("change", runRestartPreview);
+rsEl.name.addEventListener("input", () => (rs.nameTouched = true));
+
+$("#rs-save-btn").addEventListener("click", async () => {
+  const name = rsEl.name.value.trim();
+  if (!name) return rsEl.name.focus();
+  rsEl.saved.textContent = "saving…";
+  try {
+    const res = await api("/api/restart/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(restartRequest({ name })),
+    });
+    rsEl.saved.replaceChildren("Saved as ", el("a", { onclick: () => { showView("library"); openDetail(res.id); } }, res.name));
+    await Promise.all([refresh(), loadFacets()]);
+    // Reload the list of loops (it now includes the new route); the chosen loop stays.
+    rs.loaded = false;
+    await showRestart();
+  } catch (err) {
+    rsEl.saved.textContent = `Error: ${err.message}`;
+  }
+});
+
+$("#rs-download").addEventListener("click", async () => {
+  const name = rsEl.name.value.trim() || rs.route.name;
+  try {
+    const res = await fetch("/api/restart/gpx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(restartRequest({ name })),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const url = URL.createObjectURL(await res.blob());
+    const link = el("a", { href: url, download: `${name}.gpx` });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    rsEl.saved.textContent = `Error: ${err.message}`;
+  }
+});
+
+$("#d-restart").addEventListener("click", async () => {
+  const id = selectedId;
+  showView("restart");
+  await rs.loading;
+  if (rs.id !== id) await setRestartRoute(id);
+});
+
 // ------------------------------------------------------------------ duplicates
 
 let dupData = null;
@@ -1683,7 +2023,7 @@ restoreFilters();
 updateDirectionLabels();
 loadFacets().then(() => {
   const view = new URLSearchParams(location.hash.slice(1)).get("view");
-  showView(["map", "import", "combine", "duplicates"].includes(view) ? view : "library");
+  showView(LINKABLE_VIEWS.includes(view) ? view : "library");
   watchSurfaceJob();
   return loadRoutes();
 });

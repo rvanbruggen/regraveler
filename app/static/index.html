@@ -18,9 +18,15 @@
   <nav>
     <button class="tab active" data-view="library">Library</button>
     <button class="tab" data-view="map">Map</button>
-    <button class="tab" data-view="combine">Combine</button>
     <button class="tab" data-view="import">Import</button>
-    <button class="tab" data-view="duplicates">Duplicates</button>
+    <div class="menu" id="utilities">
+      <button type="button" class="tab menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="utilities-menu">Utilities ▾</button>
+      <div class="menu-list" id="utilities-menu" role="menu" hidden>
+        <button type="button" role="menuitem" data-view="combine">Combine routes<small>Join two routes with routed connectors</small></button>
+        <button type="button" role="menuitem" data-view="restart">Change start point<small>Start a loop somewhere else on the loop</small></button>
+        <button type="button" role="menuitem" data-view="duplicates">Duplicates<small>Find and clean up (near-)duplicate routes</small></button>
+      </div>
+    </div>
   </nav>
 </header>
 
@@ -179,6 +185,32 @@
     </div>
   </section>
 
+  <!-- Change start point (utility) -->
+  <section id="view-restart" class="view" hidden>
+    <div class="map-layout">
+      <div class="map-side">
+        <p class="muted small">Start a loop route somewhere else: choose a loop, then click the new start on
+          the map (or drag the marker, or use the slider). The original route is not changed.</p>
+        <label>Loop route <select id="rs-route"></select></label>
+        <label>New start <span id="rs-km" class="muted"></span>
+          <input type="range" id="rs-slider" min="0" max="1000" step="1" value="0" disabled>
+        </label>
+        <label class="check"><input type="checkbox" id="rs-reverse"> Ride it the other way round</label>
+        <p id="rs-status" class="muted small"></p>
+        <dl id="rs-stats" class="stats" hidden></dl>
+        <div id="rs-save" hidden>
+          <label>Name <input id="rs-name"></label>
+          <div class="actions">
+            <button type="button" id="rs-save-btn">Save as new route</button>
+            <button type="button" id="rs-download" class="secondary">Download GPX</button>
+          </div>
+          <p id="rs-saved" class="small"></p>
+        </div>
+      </div>
+      <div id="restart-map"></div>
+    </div>
+  </section>
+
   <!-- Rename (opened from the library) -->
   <section id="view-rename" class="view" hidden>
     <p class="muted">Proposed names: the start town, then up to three places the route visits, in riding
@@ -263,6 +295,7 @@
       <a id="d-download" class="button secondary" href="#">Download GPX</a>
       <button type="button" id="d-showmap" class="secondary">Show on map</button>
       <button type="button" id="d-combine" class="secondary">Combine…</button>
+      <button type="button" id="d-restart" class="secondary" title="Start this loop somewhere else" hidden>Change start…</button>
       <button type="button" id="d-delete" class="danger">Remove</button>
       <span id="d-status" class="muted"></span>
     </div>

@@ -794,6 +794,116 @@ def combine_save(req: SaveCombinedRequest, session: SessionDep):
     return {"id": res.routes[0]["id"], "name": res.routes[0]["name"], "gpx_path": path, "similar": res.similar}
 
 
+# ---------------------------------------------------------------- new start point (utility)
+
+
+class RestartRequest(BaseModel):
+    route_id: int
+    start: tuple[float, float]  # [lat, lon] near the route: the new start point
+    reverse: bool = False  # ride the loop the other way round
+
+
+class SaveRestartRequest(RestartRequest):
+    name: str = Field(min_length=1, max_length=300)
+
+
+def _run_restart(session: Session, req: RestartRequest):
+    """(route, new points, position of the new start in metres, description)."""
+    route = _get_route(session, req.route_id)
+    if not route.is_loop:
+        raise HTTPException(422, f"'{route.name}' is not a loop: only a loop can start somewhere else")
+    track = load_track(route)
+    at = combiner.locate(track, *req.start)
+    try:
+        xyz = combiner.restart_loop(track, at, reverse=req.reverse)
+    except combiner.CombineError as exc:
+        raise HTTPException(422, str(exc))
+    description = (
+        f"'{route.name}' starting {at / 1000:.1f} km along the original"
+        + (", ridden the other way round." if req.reverse else ".")
+    )
+    return route, combiner.to_latlon(xyz), at, description
+
+
+def _start_place(geometry: list[list[float]]) -> str | None:
+    """Name of the town where a loop starts, if place data is available."""
+    try:
+        return places.generate_name(geometry, True)["start"]
+    except Exception:  # no place data: the name is only a suggestion
+        return None
+
+
+@app.post("/api/restart/preview")
+def restart_preview(req: RestartRequest, session: SessionDep):
+    route, points, at, description = _run_restart(session, req)
+    stats = compute_stats(points)
+    return {
+        "description": description,
+        "start": _latlon(points[0]),
+        "start_km": round(at / 1000, 2),
+        "start_place": _start_place(stats.geometry),
+        "distance_km": stats.distance_km,
+        "elevation_gain_m": stats.elevation_gain_m,
+        "elevation_loss_m": stats.elevation_loss_m,
+        "geometry": stats.geometry,
+    }
+
+
+def _gpx_response(name: str, data: bytes) -> Response:
+    filename = f"{name}.gpx".replace('"', "")
+    return Response(
+        data,
+        media_type="application/gpx+xml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/restart/gpx")
+def restart_gpx(req: SaveRestartRequest, session: SessionDep):
+    """The loop with its new start point as a GPX download, without saving it."""
+    _, points, _, description = _run_restart(session, req)
+    return _gpx_response(req.name, write_gpx(req.name, points, description))
+
+
+@app.post("/api/restart/save")
+def restart_save(req: SaveRestartRequest, session: SessionDep):
+    """Save the loop with its new start point as a new route (new GPX file under gpx/derived/).
+    The original route and its file are left as they are."""
+    route, points, _, description = _run_restart(session, req)
+    name = req.name.strip()
+    data = write_gpx(name, points, description)
+    path = store_derived(data, name)
+    notes = description + (f"\n\n{route.notes.strip()}" if route.notes and route.notes.strip() else "")
+    res = import_gpx(
+        session, data, Path(path).name,
+        source_name=route.source_name,
+        source_url=route.source_url,
+        library_path=path,
+        derived_from=[route.id],
+        tags=list(route.tags or []),
+        notes=notes,
+        activity=route.activity,
+    )
+    if res.status != "imported":
+        (config.GPX_DIR / path).unlink(missing_ok=True)
+        if res.status == "duplicate" and res.duplicates:
+            raise HTTPException(409, f"This route is already saved as '{res.duplicates[0]['name']}'")
+        raise HTTPException(500, f"Could not save the route: {res.message}")
+    new = _get_route(session, res.routes[0]["id"])
+    # Same roads, so the same personal rating and surface.
+    new.quality_rating = route.quality_rating
+    new.paved_pct, new.paved_source = route.paved_pct, route.paved_source
+    # It lies on the same roads as the original (and as the original's other new starts):
+    # a deliberate variant, so keep them out of the duplicates list.
+    siblings = [r.id for r in session.scalars(select(Route)).all() if r.derived_from == [route.id] and r.id != new.id]
+    for other in [route.id, *siblings]:
+        session.add(IgnoredDuplicate(a_id=min(other, new.id), b_id=max(other, new.id)))
+    session.commit()
+    if config.SURFACE_AUTO_ESTIMATE and route.paved_source != "manual":
+        surface.worker.enqueue([new.id])
+    return {"id": new.id, "name": new.name, "gpx_path": path}
+
+
 # ---------------------------------------------------------------- surface (phase 4)
 
 

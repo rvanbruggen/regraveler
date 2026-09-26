@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import shapely
 
 from app import combiner as cb
 from app.gpxstats import compute_stats
@@ -335,3 +336,41 @@ def test_suggest_parts_loop_and_point_to_point():
 
 def test_straight_router():
     assert cb.straight_router((51.0, 4.4), (51.1, 4.5)) == [(51.0, 4.4, None), (51.1, 4.5, None)]
+
+
+# ---------------------------------------------------------------- new start point
+
+
+def test_restart_loop_starts_and_ends_at_the_new_point():
+    track = cb.make_track(loop_points(radius_m=2000, n=400), is_loop=True)
+    at = track.length / 4
+    pts = cb.restart_loop(track, at)
+    start = cb.point_at(track, at)
+    assert np.hypot(*(pts[0, :2] - start[:2])) < 0.01
+    assert np.hypot(*(pts[-1, :2] - start[:2])) < 0.01
+    # Once round: the same length as the original.
+    assert cb._leg_length(pts) == pytest.approx(track.length, rel=0.001)
+    # Same riding direction: the second point is further along the original.
+    assert locate_xy(track, pts[5]) > at
+
+
+def test_restart_loop_reverse_and_ends():
+    track = cb.make_track(loop_points(radius_m=2000, n=400), is_loop=True)
+    at = track.length / 3
+    fwd = cb.restart_loop(track, at)
+    rev = cb.restart_loop(track, at, reverse=True)
+    assert np.allclose(rev[::-1][:, :2], fwd[:, :2])
+    assert locate_xy(track, rev[5]) < at
+    # At the original start (or end) nothing changes.
+    for d in (0.0, track.length):
+        assert cb._leg_length(cb.restart_loop(track, d)) == pytest.approx(track.length, rel=0.001)
+
+
+def test_restart_loop_only_for_loops():
+    track = cb.make_track(line_points(length_m=3000), is_loop=False)
+    with pytest.raises(cb.CombineError):
+        cb.restart_loop(track, 1000)
+
+
+def locate_xy(track, xyz):
+    return float(track.line.project(shapely.Point(xyz[0], xyz[1])))

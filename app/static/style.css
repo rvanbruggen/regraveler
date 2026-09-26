@@ -45,6 +45,21 @@ button.icon { background: none; border: none; color: var(--muted); font-size: 18
 .tab { background: none; color: var(--text); border-color: transparent; }
 .tab.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
+/* Utilities dropdown */
+.menu { position: relative; }
+.menu-list {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 1100; min-width: 260px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.12); padding: 4px; display: flex; flex-direction: column;
+}
+.menu-list button {
+  background: none; border: 1px solid transparent; color: var(--text); text-align: left; padding: 6px 10px;
+}
+.menu-list button:hover, .menu-list button:focus-visible { background: var(--accent-soft); }
+.menu-list button.active { color: var(--accent); font-weight: 600; }
+@media (max-width: 760px) { .menu-list { left: auto; right: 0; max-width: calc(100vw - 32px); } }
+.menu-list small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+
 input, select, textarea {
   font: inherit; padding: 5px 7px; border: 1px solid var(--border); border-radius: 4px; background: #fff;
   width: 100%;
@@ -130,7 +145,7 @@ td.name { white-space: normal; min-width: 220px; font-weight: 500; }
   display: flex; flex-direction: column; gap: 8px;
 }
 .map-side p { margin: 0; }
-#overview-map, #combine-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
+#overview-map, #combine-map, #restart-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
 label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
 label.check input { width: auto; }
 #prox-list { list-style: none; padding: 0; margin: 0; }
@@ -144,7 +159,7 @@ label.check input { width: auto; }
   #rn-table td.proposal input { min-width: 260px; }
   .map-layout { flex-direction: column; height: auto; }
   .map-side { width: auto; max-height: 260px; }
-  #overview-map, #combine-map { flex: none; height: 65vh; }
+  #overview-map, #combine-map, #restart-map { flex: none; height: 65vh; }
 }
 
 /* Combine */
@@ -234,3 +249,7 @@ td.est { color: var(--muted); }
   background: none; border: none; color: var(--muted); padding: 0 4px; font-size: 13px; line-height: 1;
 }
 #tag-current .tag button:hover { color: var(--danger); }
+
+/* Change start point */
+#rs-slider { padding: 0; }
+#restart-map.placing, #restart-map.placing .leaflet-interactive { cursor: crosshair; }

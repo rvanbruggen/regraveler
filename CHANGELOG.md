@@ -2,6 +2,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| **0.7.0** | 2026-09-26 | Utilities menu in the header: Combine and Duplicates moved into it. New utility **Change start point**: start a loop route anywhere on the loop (click, drag or slider; optionally the other way round), preview with stats and start town, download the GPX or save as a new derived route (tags, activity, rating, paved % and source copied; marked as "not duplicates" of the original). "Change start…" in a loop's detail panel |
 | **0.6.0** | 2026-09-26 | Renamed from regraveler to **rerouter** (same logo): routes for gravel cycling, road cycling and hiking. New activity field (gravel / road / hiking): filter and column in the library, set per route or for a selection, batch and per-file setting on import (CLI `--activity`), and it picks the combiner's routing profile (gravel, fastbike, hiking-mountain). Existing routes start as gravel |
 | **0.5.2** | 2026-09-26 | Library: add tags to, or remove a tag from, all selected routes (Tags… panel showing the tags on the selection) |
 | **0.5.1** | 2026-09-26 | Route names: Germany and France added to the default GeoNames countries (BE, NL, LU, DE, FR), so routes across the border get names too |

@@ -381,3 +381,19 @@ def connectors_cross(parts: list[Part], closed: bool = True) -> bool:
 def straight_router(p: LatLon, q: LatLon) -> list[Point3]:
     """Fallback 'router': a straight line (no elevation)."""
     return [(p[0], p[1], None), (q[0], q[1], None)]
+
+
+# ------------------------------------------------------------------ new start point
+
+
+def restart_loop(track: Track, at: float, reverse: bool = False) -> np.ndarray:
+    """A loop route ridden once round from `at` (metres along it) back to `at`.
+
+    The original start and end (at most a couple of hundred metres apart for a loop) are
+    joined directly. reverse: ride it the other way round.
+    """
+    if not track.is_loop:
+        raise CombineError("Only a loop route can start somewhere else")
+    at = min(max(at, 0.0), track.length)
+    pts = _join([_forward(track, at, track.length), _forward(track, 0.0, at)])
+    return pts[::-1] if reverse else pts

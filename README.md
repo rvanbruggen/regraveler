@@ -10,7 +10,7 @@ road cycling and hiking: import them, compute stats, tag and rate them, show the
 combine two routes into a new one with automatically routed connectors (via a self-hosted
 BRouter). Formerly *regraveler*.
 
-**Version:** 0.6.0 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.7.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -62,12 +62,6 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   point-to-point route the last place is where it ends). Edit proposals, untick routes to leave
   alone, and rename; the current name is kept at the top of the notes (only the first time).
   Routes with the same proposal get the distance added.
-- **Duplicates tab:** all groups of near-duplicate routes in the library (e.g. the same route
-  downloaded from two sites), with overlap, source, rating and tags per route, "identical
-  track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
-  most of your own ratings, tags and notes, then the oldest). *Remove ticked*, *Show on map*, or
-  *Not duplicates* (hides the group). Below that, **variants**: routes that lie (almost)
-  entirely on a longer route, such as a short loop inside a long one.
 
 - **Map:** all routes that match the filters (the same filter bar as the library) drawn as
   coloured lines on an OpenStreetMap map. Hover for the name, click a route to open its details
@@ -79,8 +73,10 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   route, or the gap in metres); click a pair to zoom to it.
 - The filters, the active view and the proximity setting are kept in the URL, so a bookmark
   brings back the same screen.
+**Utilities** (the *Utilities* menu in the header) are the operations on routes:
+
 - **Combine** two routes into a new one by picking the part of each route you want to ride:
-  1. Pick route A and B (dropdowns, click them on the Combine map, "Combine…" in a route's
+  1. Pick route A and B (dropdowns, click them on the map, "Combine…" in a route's
      detail panel, or "combine" next to a pair in the map's proximity list).
   2. The app suggests four points where the routes come closest: you ride route A from A1 to
      A2 and route B from B1 to B2.
@@ -101,6 +97,20 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     says so; swapping B1 and B2 usually fixes it. For loop routes, *Other way round A/B* takes
     the other part of that loop (through its start). *Ride the whole result the other way*
     reverses the direction.
+- **Change start point** of a loop route: choose a loop (dropdown, click it on the map, or
+  *Change start…* in a loop's detail panel), then click where it should start (clicks snap onto
+  the route), drag the *Start* marker, or use the slider. The preview shows the stats, the town
+  where it now starts and the first kilometre in green, so the riding direction is visible;
+  *Ride it the other way round* reverses it. Download the GPX, or save it as a new route (a new
+  file in `gpx/derived/`, with the original linked as its parent and its tags, activity,
+  rating, paved % and source copied). The new route is marked as "not duplicates" of the
+  original, so the Duplicates utility doesn't suggest removing one of them.
+- **Duplicates:** all groups of near-duplicate routes in the library (e.g. the same route
+  downloaded from two sites), with overlap, source, rating and tags per route, "identical
+  track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
+  most of your own ratings, tags and notes, then the oldest). *Remove ticked*, *Show on map*, or
+  *Not duplicates* (hides the group). Below that, **variants**: routes that lie (almost)
+  entirely on a longer route, such as a short loop inside a long one.
 
 Original GPX files are never modified.
 
@@ -238,6 +248,10 @@ Run the tests:
   bounding-box prefilter, then the exact line-to-line distance is checked. For each pair the
   shared stretches are each route's parts within the chosen distance of the other.
 
+- **Change start point:** the loop is cut from the full-resolution GPX points at the point
+  nearest to the chosen start and ridden round once, back to that point; the gap between the
+  original start and end (at most ~200 m for a loop) is joined directly.
+
 - **Combiner:** the parts of A and B are cut from the full-resolution points of the original GPX
   files (not the simplified map lines), with interpolated points exactly at the chosen
   points. The stitching works on a list of parts (route + start + end point), so combining more
@@ -266,7 +280,7 @@ Run the tests:
   town to the start point; the places are the most notable one in each third of the route.
   To save space, list only the countries you ride in, e.g. `GEONAMES_COUNTRIES=BE,NL`.
 - **Duplicates:** a hash of each track's coordinates (rounded to ~1 m) finds the same track in
-  different files. The Duplicates tab compares all routes with a spatial index and groups routes
+  different files. The Duplicates utility compares all routes with a spatial index and groups routes
   where ≥ 85 % of each lies within 50 m of the other; a route with ≥ 90 % on another is listed
   as a variant. "Ridden the other way" compares positions along both routes.
 
@@ -293,7 +307,7 @@ app/
   gpxstats.py    GPX parsing and statistics (pure functions)
   similarity.py  geometric overlap: near-duplicates, routes near each other
   importer.py    import of files and folders
-  combiner.py    cutting, direction handling and stitching of combined routes
+  combiner.py    cutting, direction handling and stitching of combined routes; new start points
   brouter.py     client for the BRouter HTTP API
   surface.py     surface estimate (map matching via BRouter) and its background worker
   places.py      route names from GeoNames places (start town + places visited)

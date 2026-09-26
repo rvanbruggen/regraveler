@@ -592,3 +592,69 @@ def test_combine_profile_follows_activity(client, monkeypatch):
 
     saved = client.post("/api/combine/save", json={**req, "name": "Mixed"}).json()
     assert client.get(f"/api/routes/{saved['id']}").json()["activity"] == "road"  # from route A
+
+
+# ---------------------------------------------------------------- new start point
+
+
+def test_restart_preview_download_save(client, library):
+    from tests.helpers import offset
+
+    upload(client, [("Loop.gpx", gpx_xml([("Loop", loop_points(radius_m=2000, ele=lambda i: 10 + (i % 100) / 10))])),
+                    ("Line.gpx", climb_gpx(5000, 20, start=(50.5, 4.0)))])
+    ids = {r["name"]: r["id"] for r in client.get("/api/routes").json()}
+    loop_id = ids["Loop"]
+    client.patch(f"/api/routes/{loop_id}", json={"tags": ["forest"], "quality_rating": 4, "paved_pct": 30})
+    original = client.get(f"/api/routes/{loop_id}").json()
+
+    # Due east of the centre: a quarter of the way round (the loop starts due north, clockwise).
+    east_point = list(offset(51.0, 4.4, 0, 2000))
+    req = {"route_id": loop_id, "start": east_point}
+    prev = client.post("/api/restart/preview", json=req)
+    assert prev.status_code == 200, prev.text
+    prev = prev.json()
+    assert prev["start"] == pytest.approx(east_point, abs=1e-4)
+    assert prev["start_km"] == pytest.approx(original["distance_km"] / 4, rel=0.02)
+    assert prev["distance_km"] == pytest.approx(original["distance_km"], rel=0.01)
+    assert prev["geometry"][0] == pytest.approx(prev["geometry"][-1], abs=1e-5)
+
+    gpx = client.post("/api/restart/gpx", json={**req, "name": "Loop east"})
+    assert gpx.status_code == 200
+    assert b"<trkpt" in gpx.content and 'filename="Loop east.gpx"' in gpx.headers["content-disposition"]
+
+    saved = client.post("/api/restart/save", json={**req, "name": "Loop east"})
+    assert saved.status_code == 200, saved.text
+    new = client.get(f"/api/routes/{saved.json()['id']}").json()
+    assert new["name"] == "Loop east"
+    assert new["is_loop"]
+    assert new["derived_from"] == [loop_id]
+    assert new["tags"] == ["forest"] and new["quality_rating"] == 4
+    assert new["paved_pct"] == 30 and new["paved_source"] == "manual"
+    assert new["start_lat"] == pytest.approx(east_point[0], abs=1e-4)
+    assert new["gpx_path"] == "derived/loop-east.gpx"
+    assert (library / new["gpx_path"]).is_file()
+    # The original route and its file are unchanged.
+    assert client.get(f"/api/routes/{loop_id}").json()["start_lat"] == original["start_lat"]
+
+    # The same start again is the same track: refused, and no stray file is left behind.
+    again = client.post("/api/restart/save", json={**req, "name": "Loop east again"})
+    assert again.status_code == 409
+    assert not (library / "derived/loop-east-again.gpx").exists()
+
+    # Reversed is a different route.
+    rev = client.post("/api/restart/save", json={**req, "reverse": True, "name": "Loop east reversed"})
+    assert rev.status_code == 200, rev.text
+
+    # The new starts are deliberate variants, not duplicates of the original or each other.
+    assert client.get("/api/duplicates").json()["groups"] == []
+    client.post("/api/duplicates/reset")
+    [group] = client.get("/api/duplicates").json()["groups"]
+    assert {r["id"] for r in group["routes"]} == {loop_id, new["id"], rev.json()["id"]}
+
+
+def test_restart_errors(client):
+    upload(client, [("Line.gpx", climb_gpx(5000, 20))])
+    line_id = client.get("/api/routes").json()[0]["id"]
+    res = client.post("/api/restart/preview", json={"route_id": line_id, "start": [51.0, 4.42]})
+    assert res.status_code == 422 and "not a loop" in res.json()["detail"]
+    assert client.post("/api/restart/preview", json={"route_id": 999, "start": [51.0, 4.42]}).status_code == 404
