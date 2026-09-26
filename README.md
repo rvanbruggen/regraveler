@@ -4,7 +4,7 @@ A self-hosted web app to manage a personal library of gravel cycling routes (GPX
 import them, compute stats, tag and rate them, and (in later phases) show them on a map and
 combine routes with an automatically routed connector.
 
-**Version:** 0.2.0 · **Status: phase 2 (import, library, map).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.2.1 · **Status: phase 2 (import, library, map).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -43,7 +43,7 @@ Original GPX files are never modified.
 docker compose up -d --build
 ```
 
-Open http://localhost:8000 (or `http://<server>:8000`).
+Open http://localhost:8082 (or `http://<server>:8082`).
 
 Volumes (bind mounts next to `docker-compose.yml`):
 
