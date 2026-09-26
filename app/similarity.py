@@ -4,10 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from shapely import STRtree
 from shapely.geometry import LineString
+from shapely.ops import nearest_points
 
 from . import config
-from .gpxstats import _TO_METRIC
+from .gpxstats import _FROM_METRIC, _TO_METRIC
 
 # ~1 km in degrees latitude; used to grow bounding boxes before comparing.
 _DEG_PER_M = 1 / 111_000
@@ -77,3 +79,99 @@ def find_similar(
             results.append(Similarity(c.id, round(a_in_b, 3), round(b_in_a, 3)))
     results.sort(key=lambda s: min(s.a_in_b, s.b_in_a), reverse=True)
     return results
+
+
+# ------------------------------------------------------------------ proximity (map view)
+
+# Shared stretches are for display only; simplify them to keep responses small.
+SEGMENT_SIMPLIFY_M = 20.0
+
+
+def to_latlon_lines(geom, digits: int = 6) -> list[list[list[float]]]:
+    """Metric (Multi)LineString / GeometryCollection -> list of [[lat, lon], ...] lines."""
+    lines = []
+    for part in getattr(geom, "geoms", [geom]):
+        if part.is_empty:
+            continue
+        if part.geom_type == "LineString":
+            x, y = np.asarray(part.xy)
+            lon, lat = _FROM_METRIC.transform(x, y)
+            lines.append([[round(float(a), digits), round(float(o), digits)] for a, o in zip(lat, lon)])
+        elif part.geom_type in ("MultiLineString", "GeometryCollection"):
+            lines.extend(to_latlon_lines(part, digits))
+    return lines
+
+
+def _latlon(point) -> list[float]:
+    lon, lat = _FROM_METRIC.transform(point.x, point.y)
+    return [round(float(lat), 6), round(float(lon), 6)]
+
+
+@dataclass
+class ProximityPair:
+    a_id: int
+    b_id: int
+    min_distance_m: float
+    a_shared_km: float  # length of route a within the distance of route b
+    b_shared_km: float
+    a_shared_pct: float
+    b_shared_pct: float
+    closest: list[list[float]]  # [[lat, lon] on a, [lat, lon] on b]
+    a_segments: list  # parts of a within the distance of b, as lat/lon lines
+    b_segments: list
+
+
+def proximity_pairs(routes, distance_m: float) -> list[ProximityPair]:
+    """All pairs of routes that come within `distance_m` of each other.
+
+    `routes`: objects with `id` and `geometry` ([[lat, lon], ...]).
+    Uses an STRtree: bounding boxes (grown by the distance) are the prefilter, then the
+    exact line-to-line distance is checked. For each pair the shared stretches are
+    computed (each route's parts within `distance_m` of the other).
+    """
+    routes = [r for r in routes if r.geometry and len(r.geometry) >= 2]
+    if len(routes) < 2:
+        return []
+    lines = [to_metric_line(r.geometry) for r in routes]
+    tree = STRtree(lines)
+    left, right = tree.query(lines, predicate="dwithin", distance=distance_m)
+
+    buffers: dict[int, object] = {}
+
+    def buffer(i):
+        if i not in buffers:
+            buffers[i] = lines[i].buffer(distance_m, quad_segs=4)
+        return buffers[i]
+
+    pairs = []
+    for i, j in zip(left.tolist(), right.tolist()):
+        if i >= j:
+            continue  # each pair once, and skip self-matches
+        a, b = lines[i], lines[j]
+        a_part = a.intersection(buffer(j))
+        b_part = b.intersection(buffer(i))
+        pa, pb = nearest_points(a, b)
+        pairs.append(
+            ProximityPair(
+                a_id=routes[i].id,
+                b_id=routes[j].id,
+                min_distance_m=round(a.distance(b), 1),
+                a_shared_km=round(a_part.length / 1000, 2),
+                b_shared_km=round(b_part.length / 1000, 2),
+                a_shared_pct=round(100 * a_part.length / a.length, 1) if a.length else 0.0,
+                b_shared_pct=round(100 * b_part.length / b.length, 1) if b.length else 0.0,
+                closest=[_latlon(pa), _latlon(pb)],
+                a_segments=to_latlon_lines(a_part.simplify(SEGMENT_SIMPLIFY_M), 5),
+                b_segments=to_latlon_lines(b_part.simplify(SEGMENT_SIMPLIFY_M), 5),
+            )
+        )
+    pairs.sort(key=lambda p: (-max(p.a_shared_km, p.b_shared_km), p.min_distance_m))
+    return pairs
+
+
+def simplify_latlon(geometry: list[list[float]], tolerance_m: float) -> list[list[float]]:
+    """Further simplify a stored [[lat, lon], ...] geometry for overview maps."""
+    if tolerance_m <= 0 or len(geometry) <= 2:
+        return geometry
+    simple = to_metric_line(geometry).simplify(tolerance_m, preserve_topology=False)
+    return to_latlon_lines(simple)[0] if not simple.is_empty else geometry

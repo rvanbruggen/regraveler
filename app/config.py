@@ -18,3 +18,6 @@ LOOP_THRESHOLD_M = float(os.environ.get("LOOP_THRESHOLD_M", 200))
 # SIMILAR_MIN_OVERLAP of each route lies within SIMILAR_TOLERANCE_M of the other.
 SIMILAR_TOLERANCE_M = float(os.environ.get("SIMILAR_TOLERANCE_M", 50))
 SIMILAR_MIN_OVERLAP = float(os.environ.get("SIMILAR_MIN_OVERLAP", 0.8))
+# Map view: default and maximum distance (metres) for "routes near each other".
+PROXIMITY_DISTANCE_M = float(os.environ.get("PROXIMITY_DISTANCE_M", 100))
+PROXIMITY_MAX_DISTANCE_M = float(os.environ.get("PROXIMITY_MAX_DISTANCE_M", 5000))

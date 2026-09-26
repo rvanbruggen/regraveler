@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 from . import __version__, config, db
 from .importer import import_gpx
 from .models import Route
-from .similarity import find_similar
+from .similarity import find_similar, proximity_pairs, simplify_latlon
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -31,6 +32,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Gravel Route Manager", version=__version__, lifespan=lifespan)
+# Map and proximity responses are mostly coordinates, which compress very well.
+app.add_middleware(GZipMiddleware, minimum_size=2000)
 SessionDep = Annotated[Session, Depends(db.get_session)]
 
 
@@ -125,7 +128,7 @@ def filter_routes(
     sort: str = "name",
     order: str = "asc",
 ) -> list[Route]:
-    """Shared filter logic (library table now, map view in phase 2)."""
+    """Shared filter logic for the library table, the map and proximity."""
     stmt = select(Route)
     if q:
         stmt = stmt.where(Route.name.ilike(f"%{q}%") | Route.notes.ilike(f"%{q}%"))
@@ -169,9 +172,7 @@ def _get_route(session: Session, route_id: int) -> Route:
     return route
 
 
-@app.get("/api/routes", response_model=list[RouteSummary])
-def list_routes(
-    session: SessionDep,
+def route_filters(
     q: str | None = None,
     min_distance: float | None = None,
     max_distance: float | None = None,
@@ -185,11 +186,61 @@ def list_routes(
     loop: bool | None = None,
     sort: str = "name",
     order: str = "asc",
-):
-    return filter_routes(
-        session, q, min_distance, max_distance, min_gain, max_gain, min_paved,
-        max_paved, min_quality, tags, source, loop, sort, order,
+) -> dict:
+    """Query parameters shared by every endpoint that works on a filtered set of routes."""
+    return dict(
+        q=q, min_distance=min_distance, max_distance=max_distance, min_gain=min_gain,
+        max_gain=max_gain, min_paved=min_paved, max_paved=max_paved, min_quality=min_quality,
+        tags=tags, source=source, loop=loop, sort=sort, order=order,
     )
+
+
+FiltersDep = Annotated[dict, Depends(route_filters)]
+
+
+@app.get("/api/routes", response_model=list[RouteSummary])
+def list_routes(session: SessionDep, filters: FiltersDep):
+    return filter_routes(session, **filters)
+
+
+@app.get("/api/map")
+def map_routes(
+    session: SessionDep,
+    filters: FiltersDep,
+    tolerance_m: Annotated[float, Query(ge=0, le=100)] = 10,
+):
+    """Filtered routes with a (further simplified) geometry, for the overview map."""
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "distance_km": r.distance_km,
+            "elevation_gain_m": r.elevation_gain_m,
+            "is_loop": r.is_loop,
+            "quality_rating": r.quality_rating,
+            "tags": r.tags,
+            "source_name": r.source_name,
+            "geometry": simplify_latlon(r.geometry, tolerance_m),
+        }
+        for r in filter_routes(session, **filters)
+    ]
+
+
+@app.get("/api/proximity")
+def proximity(
+    session: SessionDep,
+    filters: FiltersDep,
+    distance_m: Annotated[float | None, Query(ge=0)] = None,
+):
+    """Pairs of (filtered) routes that overlap or come within distance_m of each other."""
+    d = config.PROXIMITY_DISTANCE_M if distance_m is None else distance_m
+    if d > config.PROXIMITY_MAX_DISTANCE_M:
+        raise HTTPException(422, f"distance_m can be at most {config.PROXIMITY_MAX_DISTANCE_M:g}")
+    routes = filter_routes(session, **filters)
+    return {
+        "distance_m": d,
+        "pairs": [p.__dict__ for p in proximity_pairs(routes, d)],
+    }
 
 
 @app.get("/api/routes/{route_id}", response_model=RouteDetail)
@@ -252,7 +303,7 @@ def version():
 
 @app.get("/api/facets")
 def facets(session: SessionDep):
-    """Values for the filter controls."""
+    """Values for the filter controls, plus client settings."""
     routes = session.scalars(select(Route)).all()
     tag_counts: dict[str, int] = {}
     for r in routes:
@@ -260,6 +311,8 @@ def facets(session: SessionDep):
             tag_counts[t] = tag_counts.get(t, 0) + 1
     return {
         "count": len(routes),
+        "proximity_distance_m": config.PROXIMITY_DISTANCE_M,
+        "proximity_max_distance_m": config.PROXIMITY_MAX_DISTANCE_M,
         "sources": sorted({r.source_name for r in routes if r.source_name}),
         "tags": sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0])),
     }

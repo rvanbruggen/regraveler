@@ -50,6 +50,7 @@ label > input, label > select, label > textarea { color: var(--text); font-size:
 
 /* Filters */
 .filters {
+  margin-bottom: 12px;
   display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end;
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;
 }
@@ -113,3 +114,26 @@ td.name { white-space: normal; min-width: 220px; font-weight: 500; }
 #detail h3 { font-size: 14px; margin: 18px 0 6px; }
 #d-similar { padding-left: 18px; margin: 0; }
 #d-similar a { color: var(--accent); cursor: pointer; }
+
+/* Map */
+.map-layout { display: flex; gap: 12px; height: calc(100vh - 230px); min-height: 420px; }
+.map-side {
+  width: 300px; flex-shrink: 0; overflow-y: auto; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.map-side p { margin: 0; }
+#overview-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
+label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
+label.check input { width: auto; }
+#prox-list { list-style: none; padding: 0; margin: 0; }
+#prox-list li { padding: 6px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
+#prox-list li:hover, #prox-list li.active { background: var(--accent-soft); }
+#prox-list .pair-names { font-weight: 500; }
+#prox-list .pair-info { font-size: 12px; color: var(--muted); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+@media (max-width: 760px) {
+  .map-layout { flex-direction: column; height: auto; }
+  .map-side { width: auto; max-height: 260px; }
+  #overview-map { height: 65vh; }
+}

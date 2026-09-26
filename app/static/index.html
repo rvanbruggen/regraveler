@@ -12,13 +12,13 @@
   <h1>Gravel Route Manager <span id="version" class="muted small"></span></h1>
   <nav>
     <button class="tab active" data-view="library">Library</button>
+    <button class="tab" data-view="map">Map</button>
     <button class="tab" data-view="import">Import</button>
   </nav>
 </header>
 
 <main>
-  <!-- Library -->
-  <section id="view-library" class="view">
+  <!-- Filters, shared by the library and the map -->
     <form id="filters" class="filters" autocomplete="off">
       <label class="wide">Search <input type="search" name="q" placeholder="name or notes"></label>
       <label>Distance (km)
@@ -46,6 +46,9 @@
       <button type="reset" class="secondary">Clear</button>
     </form>
 
+  <!-- Library -->
+  <section id="view-library" class="view">
+
     <p id="count" class="muted"></p>
     <div class="table-wrap">
       <table id="routes">
@@ -64,6 +67,23 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- Map -->
+  <section id="view-map" class="view" hidden>
+    <div class="map-layout">
+      <div class="map-side">
+        <p id="map-count" class="muted"></p>
+        <label class="check"><input type="checkbox" id="prox-on"> Highlight routes near each other</label>
+        <label>Within (metres) <input type="number" id="prox-distance" min="0" step="10"></label>
+        <p id="prox-status" class="muted small"></p>
+        <div id="prox-focus" hidden>
+          <p><strong id="prox-focus-name"></strong><br><a class="link small" id="prox-clear">show all routes</a></p>
+        </div>
+        <ul id="prox-list"></ul>
+      </div>
+      <div id="overview-map"></div>
     </div>
   </section>
 
@@ -114,6 +134,7 @@
     <div class="actions">
       <button type="submit">Save</button>
       <a id="d-download" class="button secondary" href="#">Download GPX</a>
+      <button type="button" id="d-showmap" class="secondary">Show on map</button>
       <button type="button" id="d-delete" class="danger">Remove</button>
       <span id="d-status" class="muted"></span>
     </div>

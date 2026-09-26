@@ -4,10 +4,10 @@ A self-hosted web app to manage a personal library of gravel cycling routes (GPX
 import them, compute stats, tag and rate them, and (in later phases) show them on a map and
 combine routes with an automatically routed connector.
 
-**Version:** 0.1.0 · **Status: phase 1 (import + library).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.2.0 · **Status: phase 2 (import, library, map).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
-## What it does (phase 1)
+## What it does
 
 - **Import** GPX files by drag and drop (many at once) or with a CLI script for a whole folder.
   - Source name and URL per batch, with per-file override. If no URL is given, the link inside
@@ -23,6 +23,17 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
 - **Route details:** map, stats, edit metadata (name, quality 1–5, paved %, tags, notes,
   source), list of similar/overlapping routes, download of the original GPX, remove from library.
+
+- **Map:** all routes that match the filters (the same filter bar as the library) drawn as
+  coloured lines on an OpenStreetMap map. Hover for the name, click a route to open its details
+  (the side list then shows only the routes near it). "Show on map" in the route panel jumps there.
+- **Routes near each other:** tick *Highlight routes near each other* and set a distance
+  (default 100 m). Routes that overlap or come within that distance of another route stay
+  coloured, the rest fade out. Shared stretches are drawn in yellow, and for near misses a
+  dashed line marks the closest points. The side list shows every pair (shared km, % of each
+  route, or the gap in metres); click a pair to zoom to it.
+- The filters, the active view and the proximity setting are kept in the URL, so a bookmark
+  brings back the same screen.
 
 Original GPX files are never modified.
 
@@ -99,8 +110,13 @@ Run the tests:
 - **Similarity:** routes are projected to a metric CRS (EPSG:3035, Europe) and compared with a
   bounding-box prefilter, then the share of each route's length lying within 50 m of the other.
 
+- **Routes near each other (map):** a spatial index (STRtree) on the projected routes does the
+  bounding-box prefilter, then the exact line-to-line distance is checked. For each pair the
+  shared stretches are each route's parts within the chosen distance of the other.
+
 Settings (environment variables): `LOOP_THRESHOLD_M` (200), `SIMILAR_TOLERANCE_M` (50),
-`SIMILAR_MIN_OVERLAP` (0.8).
+`SIMILAR_MIN_OVERLAP` (0.8), `PROXIMITY_DISTANCE_M` (100, default distance on the map),
+`PROXIMITY_MAX_DISTANCE_M` (5000).
 
 ## Adding metadata fields
 
@@ -113,7 +129,7 @@ automatically on the next start. Then expose it in `RouteSummary`/`RouteUpdate` 
 ```
 app/
   gpxstats.py    GPX parsing and statistics (pure functions)
-  similarity.py  geometric overlap / near-duplicate detection
+  similarity.py  geometric overlap: near-duplicates, routes near each other
   importer.py    import of files and folders
   models.py      SQLAlchemy model
   db.py          database setup and automatic column migration

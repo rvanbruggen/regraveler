@@ -127,3 +127,40 @@ def test_version_endpoint(client):
     from app import __version__
 
     assert client.get("/api/version").json() == {"version": __version__}
+
+
+def test_map_and_proximity_use_the_shared_filters(client):
+    from tests.helpers import offset
+
+    def east(north_m, length_m):
+        start = offset(51.0, 4.4, north_m, 0)
+        return gpx_xml([("t", line_points(start=start, length_m=length_m, step_m=50, heading_deg=90,
+                                          ele=lambda d: 10.0))])
+
+    upload(client, [("A.gpx", east(0, 10_000)), ("B.gpx", east(60, 10_000)), ("Short.gpx", east(120, 3_000))])
+
+    routes = client.get("/api/map").json()
+    assert {r["name"] for r in routes} == {"A", "B", "Short"}
+    assert all(len(r["geometry"]) >= 2 for r in routes)
+    assert [r["name"] for r in client.get("/api/map", params={"min_distance": 5}).json()] == ["A", "B"]
+
+    res = client.get("/api/proximity", params={"distance_m": 100}).json()
+    assert res["distance_m"] == 100
+    names = {r["id"]: r["name"] for r in routes}
+    assert sorted(tuple(sorted((names[p["a_id"]], names[p["b_id"]]))) for p in res["pairs"]) == [
+        ("A", "B"), ("B", "Short"),  # Short is 120 m from A: outside 100 m
+    ]
+    # Filtered: Short is excluded, so only A-B remains.
+    res = client.get("/api/proximity", params={"distance_m": 100, "min_distance": 5}).json()
+    assert len(res["pairs"]) == 1
+    # Default distance comes from the configuration.
+    assert client.get("/api/proximity").json()["distance_m"] == 100
+    assert client.get("/api/proximity", params={"distance_m": 999_999}).status_code == 422
+    assert client.get("/api/proximity", params={"distance_m": -1}).status_code == 422
+
+
+def test_large_responses_are_gzipped(client):
+    upload(client, [(f"L{i}.gpx", gpx_xml([("L", loop_points(center=(51.0 + i / 10, 4.4), radius_m=8000, n=800))]))
+                    for i in range(3)])
+    res = client.get("/api/map", params={"tolerance_m": 0}, headers={"Accept-Encoding": "gzip"})
+    assert res.headers.get("content-encoding") == "gzip"
