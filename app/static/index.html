@@ -13,6 +13,7 @@
   <nav>
     <button class="tab active" data-view="library">Library</button>
     <button class="tab" data-view="map">Map</button>
+    <button class="tab" data-view="combine">Combine</button>
     <button class="tab" data-view="import">Import</button>
   </nav>
 </header>
@@ -87,6 +88,45 @@
     </div>
   </section>
 
+  <!-- Combine -->
+  <section id="view-combine" class="view" hidden>
+    <div class="map-layout">
+      <div class="map-side" id="cb-side">
+        <p class="muted small">Pick two routes (or click them on the map), then drag the connection points.</p>
+        <label><span><span class="swatch" style="background:#2f6fd6"></span>Route A</span> <select id="cb-a"></select></label>
+        <label><span><span class="swatch" style="background:#d62f4b"></span>Route B</span> <select id="cb-b"></select></label>
+        <div class="radio-row">
+          <label class="check"><input type="radio" name="cb-mode" value="1" checked> One connection (A → B)</label>
+          <label class="check"><input type="radio" name="cb-mode" value="2"> Two connections (loop)</label>
+        </div>
+        <button type="button" id="cb-suggest" class="secondary">Suggest connection points</button>
+        <fieldset class="options">
+          <legend>Direction</legend>
+          <label class="check" id="cb-rev-a-label"><input type="checkbox" id="cb-rev-a"> <span></span></label>
+          <label class="check" id="cb-rev-b-label"><input type="checkbox" id="cb-rev-b"> <span></span></label>
+          <label class="check"><input type="checkbox" id="cb-rev"> Ride the whole result the other way</label>
+        </fieldset>
+        <fieldset class="options">
+          <legend>Connector routing</legend>
+          <label>Profile <select id="cb-profile"></select></label>
+          <label class="check" id="cb-unpaved-label"><input type="checkbox" id="cb-unpaved"> Prefer unpaved paths</label>
+          <label class="check"><input type="checkbox" id="cb-straight"> Straight lines (no routing)</label>
+        </fieldset>
+        <p id="cb-status" class="muted small"></p>
+        <dl id="cb-stats" class="stats" hidden></dl>
+        <div id="cb-save" hidden>
+          <label>Name <input id="cb-name"></label>
+          <div class="actions">
+            <button type="button" id="cb-save-btn">Save as new route</button>
+            <button type="button" id="cb-download" class="secondary">Download GPX</button>
+          </div>
+          <p id="cb-saved" class="small"></p>
+        </div>
+      </div>
+      <div id="combine-map"></div>
+    </div>
+  </section>
+
   <!-- Import -->
   <section id="view-import" class="view" hidden>
     <div class="batch">
@@ -135,10 +175,12 @@
       <button type="submit">Save</button>
       <a id="d-download" class="button secondary" href="#">Download GPX</a>
       <button type="button" id="d-showmap" class="secondary">Show on map</button>
+      <button type="button" id="d-combine" class="secondary">Combine…</button>
       <button type="button" id="d-delete" class="danger">Remove</button>
       <span id="d-status" class="muted"></span>
     </div>
   </form>
+  <p id="d-derived" class="small" hidden></p>
   <p id="d-file" class="muted small"></p>
   <h3>Similar / overlapping routes</h3>
   <ul id="d-similar" class="muted"><li>…</li></ul>

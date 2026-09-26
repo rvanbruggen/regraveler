@@ -1,10 +1,10 @@
 # regraveler — Gravel Route Manager
 
 A self-hosted web app to manage a personal library of gravel cycling routes (GPX files):
-import them, compute stats, tag and rate them, and (in later phases) show them on a map and
-combine routes with an automatically routed connector.
+import them, compute stats, tag and rate them, show them on a map, and combine two routes into
+a new one with automatically routed gravel connectors (via a self-hosted BRouter).
 
-**Version:** 0.2.1 · **Status: phase 2 (import, library, map).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.3.0 · **Status: phase 3 (import, library, map, combiner).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -34,6 +34,23 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   route, or the gap in metres); click a pair to zoom to it.
 - The filters, the active view and the proximity setting are kept in the URL, so a bookmark
   brings back the same screen.
+- **Combine** two routes into a new one:
+  1. Pick route A and B (dropdowns, click them on the Combine map, "Combine…" in a route's
+     detail panel, or "combine" next to a pair in the map's proximity list).
+  2. The app suggests where they come closest and places the connection points (A1, B1).
+  3. Drag a connection point along its route to move it; it snaps back onto the route.
+  4. The gap is filled with a connector routed by BRouter (profile *gravel* by default,
+     optionally *prefer unpaved paths*; other profiles or plain straight lines are possible).
+     Points less than 25 m apart are joined directly.
+  5. Preview with total distance, elevation gain and connector lengths.
+  6. Save as a new route (a new GPX file in `gpx/derived/`, source *combined*, with the parent
+     routes recorded and linked in its detail panel), or just download the GPX.
+  - **One connection:** A from its start to A1 → connector → B from B1 to its end. *Ride A/B
+    backwards* uses the other half of a route instead.
+  - **Two connections (loop):** A from A2 to A1 → connector → B from B1 to B2 → connector back
+    to A2. For loop routes, *Other way round A/B* takes the other part of that loop. The loop
+    starts at route A's start point when that lies on it. *Ride the whole result the other way*
+    reverses the direction.
 
 Original GPX files are never modified.
 
@@ -45,12 +62,50 @@ docker compose up -d --build
 
 Open http://localhost:8082 (or `http://<server>:8082`).
 
+The first start downloads BRouter's routing data for Belgium and its surroundings
+(~640 MB, see [BRouter routing data](#brouter-routing-data)) and builds BRouter from source, so
+it takes a few minutes. Later starts are quick.
+
 Volumes (bind mounts next to `docker-compose.yml`):
 
 | Host folder | In container | Contents |
 |---|---|---|
 | `./data` | `/data` | `routes.db` (SQLite) |
-| `./gpx` | `/gpx` | The GPX library. Uploaded files are stored in `gpx/uploads/<source>/`. |
+| `./gpx` | `/gpx` | The GPX library. Uploaded files are stored in `gpx/uploads/<source>/`, combined routes in `gpx/derived/`. |
+| `./brouter/segments4` | `/segments4` (brouter) | BRouter routing data tiles (`.rd5`) |
+
+Services: `app` (this app), `brouter` (routing engine, built from the official
+[abrensch/brouter](https://github.com/abrensch/brouter) v1.7.10 source; only reachable by the
+app, not published on the host) and `brouter-segments` (one-off job that downloads missing
+routing data before BRouter starts).
+
+### BRouter routing data
+
+BRouter needs routing data tiles from [brouter.de/brouter/segments4](https://brouter.de/brouter/segments4/):
+5×5 degree files named after their south-west corner. The default set covers Belgium and the
+neighbouring areas:
+
+| Tile | Covers | Size (approx.) |
+|---|---|---|
+| `E0_N50` | 0–5° E, 50–55° N: Flanders, Brussels, west of the Netherlands | 80 MB |
+| `E5_N50` | 5–10° E, 50–55° N: Limburg, east of the Netherlands, western Germany | 180 MB |
+| `E0_N45` | 0–5° E, 45–50° N: south of Wallonia, northern France | 130 MB |
+| `E5_N45` | 5–10° E, 45–50° N: Luxembourg, the Ardennes south of 50° N | 250 MB |
+
+To use other tiles, set `BROUTER_TILES` (space separated) in a `.env` file next to
+`docker-compose.yml`, e.g. `BROUTER_TILES=E0_N50 E5_N50`, and run `docker compose up -d`.
+If a connector falls outside the downloaded tiles, the combiner says which tile is missing.
+
+The tiles are rebuilt weekly from OpenStreetMap. To refresh them (only changed tiles are
+downloaded), then restart BRouter:
+
+```bash
+docker compose run --rm brouter-segments update
+```
+
+```bash
+docker compose restart brouter
+```
 
 ### Import an existing folder of GPX files
 
@@ -92,6 +147,16 @@ python3.12 -m venv .venv
 The app then runs at http://localhost:8000 with the database in `./data` and the library in
 `./gpx`. Override with the `DATA_DIR` and `GPX_DIR` environment variables.
 
+The combiner needs a BRouter server at `BROUTER_URL` (default `http://localhost:17777`). Without
+Docker: download a release zip from [BRouter's releases](https://github.com/abrensch/brouter/releases)
+(needs Java 17+) and one or more tiles, then run from the unpacked folder:
+
+```bash
+java -Xmx128M -cp brouter-1.7.10-all.jar btools.server.RouteServer segments4 profiles2 customprofiles 17777 1
+```
+
+Without BRouter, the combiner still works with *Straight lines (no routing)*.
+
 Run the tests:
 
 ```bash
@@ -114,9 +179,19 @@ Run the tests:
   bounding-box prefilter, then the exact line-to-line distance is checked. For each pair the
   shared stretches are each route's parts within the chosen distance of the other.
 
+- **Combiner:** the parts of A and B are cut from the full-resolution points of the original GPX
+  files (not the simplified map lines), with interpolated points exactly at the connection
+  points. Suggestions come from a distance matrix of points sampled every 50 m along both
+  routes; the second connection of a loop is the closest pair that is at least 2 km (or 15 % of
+  the shorter route) away from the first along both routes. The stats of the result are
+  computed the same way as for imported routes. Connector elevations come from BRouter (SRTM),
+  so there can be small elevation jumps where they join the original tracks.
+
 Settings (environment variables): `LOOP_THRESHOLD_M` (200), `SIMILAR_TOLERANCE_M` (50),
 `SIMILAR_MIN_OVERLAP` (0.8), `PROXIMITY_DISTANCE_M` (100, default distance on the map),
-`PROXIMITY_MAX_DISTANCE_M` (5000).
+`PROXIMITY_MAX_DISTANCE_M` (5000), `BROUTER_URL` (`http://localhost:17777`; set to
+`http://brouter:17777` in docker-compose), `BROUTER_PROFILES` (`gravel,trekking,mtb,fastbike,shortest`;
+the first is the default), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25).
 
 ## Adding metadata fields
 
@@ -131,11 +206,15 @@ app/
   gpxstats.py    GPX parsing and statistics (pure functions)
   similarity.py  geometric overlap: near-duplicates, routes near each other
   importer.py    import of files and folders
+  combiner.py    cutting, direction handling and stitching of combined routes
+  brouter.py     client for the BRouter HTTP API
   models.py      SQLAlchemy model
   db.py          database setup and automatic column migration
   main.py        FastAPI app (JSON API + static frontend)
   cli.py         command line import / recompute
   static/        single-page frontend (vanilla JS + Leaflet)
+brouter/
+  download-segments.sh  downloads BRouter routing data tiles (used by docker-compose)
 tests/           pytest tests
 ```
 

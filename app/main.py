@@ -3,20 +3,22 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import __version__, config, db
-from .importer import import_gpx
+from . import __version__, brouter, combiner, config, db
+from .gpxstats import compute_stats, parse_gpx, write_gpx
+from .importer import file_hash, import_gpx, store_derived
 from .models import Route
 from .similarity import find_similar, proximity_pairs, simplify_latlon
 
@@ -301,6 +303,16 @@ def version():
     return {"version": __version__}
 
 
+@app.get("/api/config")
+def client_config():
+    """Settings the frontend needs."""
+    return {
+        "proximity_distance_m": config.PROXIMITY_DISTANCE_M,
+        "proximity_max_distance_m": config.PROXIMITY_MAX_DISTANCE_M,
+        "brouter_profiles": config.BROUTER_PROFILES,
+    }
+
+
 @app.get("/api/facets")
 def facets(session: SessionDep):
     """Values for the filter controls, plus client settings."""
@@ -344,6 +356,185 @@ async def import_files(
         )
         results.append(res.__dict__)
     return {"results": results}
+
+
+
+# ---------------------------------------------------------------- combiner (phase 3)
+
+
+@lru_cache(maxsize=64)
+def _cached_track(path: str, track_index: int, mtime_ns: int, is_loop: bool) -> combiner.Track:
+    tracks = parse_gpx(Path(path).read_bytes()).tracks
+    return combiner.make_track(tracks[track_index].points, is_loop=is_loop)
+
+
+def load_track(route: Route) -> combiner.Track:
+    """Full-resolution track of a route, read from its (never modified) GPX file."""
+    path = (config.GPX_DIR / route.gpx_path).resolve()
+    if not path.is_file():
+        raise HTTPException(404, f"GPX file of '{route.name}' not found on disk")
+    return _cached_track(str(path), route.track_index, path.stat().st_mtime_ns, route.is_loop)
+
+
+def _latlon(p) -> list[float]:
+    return [round(p[0], 6), round(p[1], 6)]
+
+
+@app.get("/api/combine/suggest")
+def combine_suggest(
+    session: SessionDep,
+    a_id: int,
+    b_id: int,
+    count: Annotated[int, Query(ge=1, le=2)] = 1,
+):
+    """Suggested connection point pairs: where routes A and B come closest."""
+    if a_id == b_id:
+        raise HTTPException(422, "Choose two different routes")
+    a, b = load_track(_get_route(session, a_id)), load_track(_get_route(session, b_id))
+    out = []
+    for c in combiner.suggest_connections(a, b, count):
+        pa, pb = combiner.point_at(a, c.a_at), combiner.point_at(b, c.b_at)
+        out.append(
+            {
+                "a": _latlon(combiner._latlon_of(pa)),
+                "b": _latlon(combiner._latlon_of(pb)),
+                "distance_m": round(float(((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2) ** 0.5)),
+            }
+        )
+    return {"connections": out}
+
+
+class ConnectionIn(BaseModel):
+    a: tuple[float, float]  # [lat, lon] near route A
+    b: tuple[float, float]  # [lat, lon] near route B
+
+
+class CombineRequest(BaseModel):
+    a_id: int
+    b_id: int
+    connections: list[ConnectionIn] = Field(min_length=1, max_length=2)
+    reverse_a: bool = False
+    reverse_b: bool = False
+    reverse: bool = False
+    profile: str | None = None
+    prefer_unpaved: bool = False
+    straight: bool = False  # join with straight lines instead of routing
+
+
+class SaveCombinedRequest(CombineRequest):
+    name: str = Field(min_length=1, max_length=300)
+    notes: str | None = None
+
+
+def _run_combine(session: Session, req: CombineRequest):
+    if req.a_id == req.b_id:
+        raise HTTPException(422, "Choose two different routes")
+    route_a, route_b = _get_route(session, req.a_id), _get_route(session, req.b_id)
+    a, b = load_track(route_a), load_track(route_b)
+    profile = req.profile or config.BROUTER_PROFILES[0]
+    if profile not in config.BROUTER_PROFILES:
+        raise HTTPException(422, f"Unknown profile '{profile}'")
+    params = {"prefer_unpaved_paths": "1"} if req.prefer_unpaved and profile == "gravel" else None
+
+    def router(p, q):
+        return brouter.route(p, q, profile, params)
+
+    connections = [
+        combiner.Connection(combiner.locate(a, *c.a), combiner.locate(b, *c.b)) for c in req.connections
+    ]
+    try:
+        result = combiner.combine(
+            a, b, connections,
+            router=combiner.straight_router if req.straight else router,
+            reverse_a=req.reverse_a,
+            reverse_b=req.reverse_b,
+            reverse=req.reverse,
+            direct_join_m=config.DIRECT_JOIN_M,
+        )
+    except combiner.CombineError as exc:
+        raise HTTPException(422, str(exc))
+    except brouter.BRouterUnavailable as exc:
+        raise HTTPException(503, str(exc))
+    except brouter.BRouterError as exc:
+        raise HTTPException(502, str(exc))
+    how = "straight lines" if req.straight else f"BRouter ({profile}{', prefer unpaved' if params else ''})"
+    description = f"Combined from '{route_a.name}' and '{route_b.name}' via {how}."
+    return route_a, route_b, result, description
+
+
+@app.post("/api/combine/preview")
+def combine_preview(req: CombineRequest, session: SessionDep):
+    route_a, route_b, result, description = _run_combine(session, req)
+    stats = compute_stats(result.points)
+    return {
+        "description": description,
+        "distance_km": stats.distance_km,
+        "elevation_gain_m": stats.elevation_gain_m,
+        "elevation_loss_m": stats.elevation_loss_m,
+        "is_loop": stats.is_loop,
+        "start": [stats.start_lat, stats.start_lon],
+        "end": [stats.end_lat, stats.end_lon],
+        "connectors": [
+            {"distance_km": round(combiner._leg_length(leg.xyz) / 1000, 2), "routed": leg.routed}
+            for leg in result.connectors
+        ],
+        "connections": [
+            {
+                "a": _latlon(pa),
+                "b": _latlon(pb),
+                "a_at_km": round(c.a_at / 1000, 2),
+                "b_at_km": round(c.b_at / 1000, 2),
+            }
+            for c, (pa, pb) in zip(result.connections, result.connection_points)
+        ],
+        "legs": [
+            {
+                "kind": leg.kind,
+                "routed": leg.routed,
+                "geometry": simplify_latlon([_latlon(p) for p in combiner.to_latlon(leg.xyz)], 5),
+            }
+            for leg in result.legs
+            if len(leg.xyz) >= 2
+        ],
+    }
+
+
+@app.post("/api/combine/gpx")
+def combine_gpx(req: SaveCombinedRequest, session: SessionDep):
+    """The combined route as a GPX download, without saving it."""
+    _, _, result, description = _run_combine(session, req)
+    data = write_gpx(req.name, result.points, description)
+    filename = f"{req.name}.gpx".replace('"', "")
+    return Response(
+        data,
+        media_type="application/gpx+xml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/combine/save")
+def combine_save(req: SaveCombinedRequest, session: SessionDep):
+    """Save the combination as a new route (new GPX file under gpx/derived/)."""
+    route_a, route_b, result, description = _run_combine(session, req)
+    name = req.name.strip()
+    data = write_gpx(name, result.points, description)
+    existing = session.scalars(select(Route).where(Route.file_hash == file_hash(data))).first()
+    if existing:
+        raise HTTPException(409, f"This combination is already saved as '{existing.name}'")
+    path = store_derived(data, name)
+    notes = description + (f"\n\n{req.notes.strip()}" if req.notes and req.notes.strip() else "")
+    tags = normalise_tags((route_a.tags or []) + (route_b.tags or []))
+    res = import_gpx(
+        session, data, Path(path).name,
+        source_name="combined",
+        library_path=path,
+        derived_from=[route_a.id, route_b.id],
+        tags=tags,
+        notes=notes,
+    )
+    if res.status != "imported":
+        raise HTTPException(500, f"Could not save the combined route: {res.message}")
+    return {"id": res.routes[0]["id"], "name": res.routes[0]["name"], "gpx_path": path, "similar": res.similar}
 
 
 # ---------------------------------------------------------------- frontend

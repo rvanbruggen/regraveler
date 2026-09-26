@@ -6,3 +6,5 @@ __pycache__/
 # Runtime data: database and the GPX library (personal data, not part of the code)
 data/
 gpx/
+# BRouter routing data tiles (downloaded)
+brouter/segments4/

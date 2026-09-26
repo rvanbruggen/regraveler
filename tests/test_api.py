@@ -164,3 +164,101 @@ def test_large_responses_are_gzipped(client):
                     for i in range(3)])
     res = client.get("/api/map", params={"tolerance_m": 0}, headers={"Accept-Encoding": "gzip"})
     assert res.headers.get("content-encoding") == "gzip"
+
+
+# ---------------------------------------------------------------- combiner
+
+def _two_parallel_routes(client):
+    from tests.helpers import offset
+
+    def east(north_m, name):
+        start = offset(51.0, 4.4, north_m, 0)
+        return (f"{name}.gpx", gpx_xml([(name, line_points(start=start, length_m=6000, step_m=50, heading_deg=90,
+                                                           ele=lambda d: 10 + d / 600))]))
+
+    upload(client, [east(0, "Route A"), east(800, "Route B")])
+    ids = {r["name"]: r["id"] for r in client.get("/api/routes").json()}
+    client.patch(f"/api/routes/{ids['Route A']}", json={"tags": ["forest"]})
+    client.patch(f"/api/routes/{ids['Route B']}", json={"tags": ["sand"]})
+    return ids["Route A"], ids["Route B"]
+
+
+def test_combine_suggest_preview_save(client, library, monkeypatch):
+    from app import brouter
+
+    a, b = _two_parallel_routes(client)
+    calls = []
+
+    def fake_route(p, q, profile, params=None, **kw):
+        calls.append((profile, params))
+        return [(p[0], p[1], 10.0), (q[0], q[1], 12.0)]
+
+    monkeypatch.setattr(brouter, "route", fake_route)
+
+    sug = client.get("/api/combine/suggest", params={"a_id": a, "b_id": b, "count": 2}).json()["connections"]
+    assert len(sug) == 2
+    assert all(c["distance_m"] == pytest.approx(800, abs=15) for c in sug)
+
+    req = {"a_id": a, "b_id": b, "connections": sug, "prefer_unpaved": True}
+    prev = client.post("/api/combine/preview", json=req).json()
+    assert prev["is_loop"]
+    assert len(prev["connectors"]) == 2 and all(c["routed"] for c in prev["connectors"])
+    assert calls == [("gravel", {"prefer_unpaved_paths": "1"})] * 2
+    assert [leg["kind"] for leg in prev["legs"]] == ["a", "connector", "b", "connector"]
+    assert prev["distance_km"] > 1.6  # at least the two connectors
+
+    gpx = client.post("/api/combine/gpx", json={**req, "name": "A plus B"})
+    assert gpx.status_code == 200
+    assert b"<trkpt" in gpx.content and 'filename="A plus B.gpx"' in gpx.headers["content-disposition"]
+
+    saved = client.post("/api/combine/save", json={**req, "name": "A plus B", "notes": "try in spring"})
+    assert saved.status_code == 200, saved.text
+    new = client.get(f"/api/routes/{saved.json()['id']}").json()
+    assert new["name"] == "A plus B"
+    assert new["derived_from"] == [a, b]
+    assert new["source_name"] == "combined"
+    assert new["tags"] == ["forest", "sand"]
+    assert "Combined from 'Route A' and 'Route B'" in new["notes"] and "try in spring" in new["notes"]
+    assert new["gpx_path"] == "derived/a-plus-b.gpx"
+    assert (library / new["gpx_path"]).is_file()
+    assert new["distance_km"] == pytest.approx(prev["distance_km"], rel=0.01)
+
+    # Saving the identical combination again is refused.
+    again = client.post("/api/combine/save", json={**req, "name": "A plus B"})
+    assert again.status_code == 409
+
+
+def test_combine_errors(client, monkeypatch):
+    from app import brouter
+
+    a, b = _two_parallel_routes(client)
+    one = [{"a": [51.0, 4.43], "b": [51.0072, 4.43]}]
+
+    assert client.get("/api/combine/suggest", params={"a_id": a, "b_id": a}).status_code == 422
+    assert client.post("/api/combine/preview", json={"a_id": a, "b_id": b, "connections": []}).status_code == 422
+    assert client.post("/api/combine/preview", json={"a_id": a, "b_id": b, "connections": one, "profile": "car"}).status_code == 422
+    assert client.post("/api/combine/preview", json={"a_id": a, "b_id": 999, "connections": one}).status_code == 404
+
+    def unavailable(*args, **kw):
+        raise brouter.BRouterUnavailable("BRouter is not reachable at http://brouter:17777")
+
+    monkeypatch.setattr(brouter, "route", unavailable)
+    res = client.post("/api/combine/preview", json={"a_id": a, "b_id": b, "connections": one})
+    assert res.status_code == 503 and "not reachable" in res.json()["detail"]
+
+    # Straight lines work without BRouter.
+    res = client.post("/api/combine/preview", json={"a_id": a, "b_id": b, "connections": one, "straight": True})
+    assert res.status_code == 200
+    assert res.json()["connectors"][0]["distance_km"] == pytest.approx(0.8, abs=0.02)
+
+    def failing(*args, **kw):
+        raise brouter.BRouterError("BRouter has no routing data for this area (missing tile E5_N50.rd5).")
+
+    monkeypatch.setattr(brouter, "route", failing)
+    res = client.post("/api/combine/preview", json={"a_id": a, "b_id": b, "connections": one})
+    assert res.status_code == 502 and "E5_N50" in res.json()["detail"]
+
+
+def test_client_config(client):
+    cfg = client.get("/api/config").json()
+    assert cfg["brouter_profiles"][0] == "gravel"

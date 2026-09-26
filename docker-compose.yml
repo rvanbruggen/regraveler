@@ -5,6 +5,37 @@ services:
       - "8082:8000"
     volumes:
       - ./data:/data   # SQLite database
-      - ./gpx:/gpx     # GPX library (originals are never modified; uploads go to gpx/uploads/)
+      - ./gpx:/gpx     # GPX library (originals are never modified; uploads go to gpx/uploads/, combinations to gpx/derived/)
+    environment:
+      BROUTER_URL: http://brouter:17777
+    depends_on:
+      - brouter
     restart: unless-stopped
-  # Phase 3 adds a `brouter` service here.
+
+  # Routing engine for the combiner, built from the official source
+  # (https://github.com/abrensch/brouter, pinned release). Not exposed on the host.
+  brouter:
+    build: https://github.com/abrensch/brouter.git#v1.7.10
+    volumes:
+      - ./brouter/segments4:/segments4:ro
+    # Optional tuning (BRouter's defaults shown):
+    # environment:
+    #   JAVA_OPTS: "-Xmx128M -Xms128M -Xmn8M -DmaxRunningTime=300 -DuseRFCMimeType=false"
+    #   MAXTHREADS: "1"
+    depends_on:
+      brouter-segments:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # One-off job: downloads missing routing data tiles before BRouter starts.
+  brouter-segments:
+    image: curlimages/curl:8.22.0
+    user: "0:0"   # must be able to write to the bind-mounted folder
+    entrypoint: ["sh", "/download-segments.sh"]
+    environment:
+      # 5x5 degree tiles (south-west corner). Default: Belgium and surroundings (~640 MB).
+      BROUTER_TILES: ${BROUTER_TILES:-E0_N45 E0_N50 E5_N45 E5_N50}
+    volumes:
+      - ./brouter/segments4:/segments4
+      - ./brouter/download-segments.sh:/download-segments.sh:ro
+    restart: "no"

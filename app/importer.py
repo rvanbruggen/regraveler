@@ -92,6 +92,19 @@ def store_upload(data: bytes, filename: str, source_name: str | None) -> str:
     return target.relative_to(config.GPX_DIR).as_posix()
 
 
+def store_derived(data: bytes, name: str) -> str:
+    """Write a newly created route (e.g. a combination) under GPX_DIR/derived/."""
+    folder = config.GPX_DIR / "derived"
+    folder.mkdir(parents=True, exist_ok=True)
+    base = slugify(name)[:150]
+    target, n = folder / f"{base}.gpx", 2
+    while target.exists():
+        target = folder / f"{base}-{n}.gpx"
+        n += 1
+    target.write_bytes(data)
+    return target.relative_to(config.GPX_DIR).as_posix()
+
+
 def relative_to_library(path: Path) -> str | None:
     """Path relative to GPX_DIR if the file lives inside the library, else None."""
     try:
@@ -109,6 +122,9 @@ def import_gpx(
     source_url: str | None = None,
     library_path: str | None = None,
     check_similar: bool = True,
+    derived_from: list[int] | None = None,
+    tags: list[str] | None = None,
+    notes: str | None = None,
 ) -> ImportResult:
     """Import one GPX file (one route per track). Commits on success.
 
@@ -175,8 +191,9 @@ def import_gpx(
             max_lon=st.max_lon,
             is_loop=st.is_loop,
             geometry=st.geometry,
-            tags=[],
-            derived_from=[],
+            tags=list(tags or []),
+            notes=notes,
+            derived_from=list(derived_from or []),
             source_name=source_name or None,
             source_url=source_url or None,
         )

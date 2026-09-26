@@ -238,3 +238,25 @@ def compute_stats(points: list[tuple[float, float, float | None]]) -> RouteStats
         is_loop=bool(start_end <= config.LOOP_THRESHOLD_M),
         geometry=simplify_geometry(lats, lons),
     )
+
+
+def write_gpx(
+    name: str,
+    points: list[tuple[float, float, float | None]],
+    description: str | None = None,
+    creator: str = "regraveler",
+) -> bytes:
+    """A GPX 1.1 file with one track."""
+    gpx = gpxpy.gpx.GPX()
+    gpx.creator = creator
+    gpx.name = name
+    gpx.description = description
+    trk = gpxpy.gpx.GPXTrack(name=name, description=description)
+    seg = gpxpy.gpx.GPXTrackSegment()
+    for lat, lon, ele in points:
+        seg.points.append(
+            gpxpy.gpx.GPXTrackPoint(round(lat, 7), round(lon, 7), elevation=None if ele is None else round(ele, 1))
+        )
+    trk.segments.append(seg)
+    gpx.tracks.append(trk)
+    return gpx.to_xml(version="1.1").encode("utf-8")
