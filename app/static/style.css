@@ -178,3 +178,25 @@ th.sel input, td.sel input { width: auto; cursor: pointer; }
   margin: 0 0 12px; padding: 8px 12px; border-radius: 6px;
   background: var(--accent-soft); border: 1px solid var(--accent);
 }
+
+/* Surface */
+:root { --s-paved: #5f5e5a; --s-cobbles: #9a6324; --s-unpaved: #d4a017; --s-unknown: #c8c6bf; }
+.surface { margin: 0 0 12px; }
+.surface-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--s-unknown); }
+.surface-bar span { display: block; height: 100%; }
+.surface-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 2px; font-size: 12px; }
+.surface-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.surface .actions { margin-top: 6px; }
+#d-paved-src { font-size: 11px; }
+td.est { color: var(--muted); }
+#d-surface-toggle { margin: 6px 0 0; }
+
+/* Duplicates */
+.dup-group { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 0 0 12px; }
+.dup-group table { margin: 4px 0 8px; }
+.dup-group td { white-space: normal; }
+.dup-group .keep { color: var(--ok); font-size: 12px; }
+.dup-group .actions { margin-top: 4px; }
+.variants { padding-left: 18px; }
+.variants li { margin: 4px 0; }
+.variants a { color: var(--accent); cursor: pointer; }

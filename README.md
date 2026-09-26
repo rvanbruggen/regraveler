@@ -9,7 +9,7 @@ A self-hosted web app to manage a personal library of gravel cycling routes (GPX
 import them, compute stats, tag and rate them, show them on a map, and combine two routes into
 a new one with automatically routed gravel connectors (via a self-hosted BRouter).
 
-**Version:** 0.3.2 · **Status: phase 3 (import, library, map, combiner).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.4.0 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -22,8 +22,12 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     simplified geometry for maps.
   - A GPX file with several tracks (e.g. `Start Bertem.gpx`, which holds 5 routes) becomes one
     route per track.
-  - **Duplicates:** an identical file (same SHA-256) is skipped. Routes with very similar
-    geometry (≥ 80 % of each route within 50 m of the other) are imported but flagged.
+  - **Duplicates:** an identical file (same SHA-256) is skipped, and so is the same track in a
+    different file (same coordinates, but e.g. another name, encoding or creator). Routes with
+    very similar geometry (≥ 85 % of each route within 50 m of the other) are imported but
+    flagged.
+  - **Surface:** after an upload, the paved % of the new routes is estimated in the background
+    from OpenStreetMap (see below).
 - **Library:** sortable table with filters on distance, elevation gain, paved %, quality,
   tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
 - **Select several routes** with the checkboxes in the library (the header box selects all
@@ -32,9 +36,23 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     with the original files (a multi-track file is included once).
   - **Show on map:** the map (and library) show only the selected routes until you click
     *show all routes* or *Clear*.
+  - **Estimate surface:** (re)estimates the paved % from OpenStreetMap; progress is shown next
+    to the route count.
   - **Remove:** removes them from the library after one confirmation (GPX files stay on disk).
 - **Route details:** map, stats, edit metadata (name, quality 1–5, paved %, tags, notes,
   source), list of similar/overlapping routes, download of the original GPX, remove from library.
+- **Surface from OpenStreetMap:** each route's surface is estimated as *paved*, *cobbles*
+  (sett/cobblestones, counted as paved), *unpaved* and *unknown*. The route panel shows the
+  breakdown as a bar, colours the map by surface, and has *Estimate again*. The paved % in the
+  library comes from the estimate (shown as ≈38%) unless you type your own value, which then
+  always wins; the panel offers *use the estimate* to switch back, and clearing the field does
+  the same. Needs BRouter (see Docker); routes outside the downloaded tiles can't be estimated.
+- **Duplicates tab:** all groups of near-duplicate routes in the library (e.g. the same route
+  downloaded from two sites), with overlap, source, rating and tags per route, "identical
+  track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
+  most of your own ratings, tags and notes, then the oldest). *Remove ticked*, *Show on map*, or
+  *Not duplicates* (hides the group). Below that, **variants**: routes that lie (almost)
+  entirely on a longer route, such as a short loop inside a long one.
 
 - **Map:** all routes that match the filters (the same filter bar as the library) drawn as
   coloured lines on an OpenStreetMap map. Hover for the name, click a route to open its details
@@ -149,6 +167,14 @@ After changing the stats algorithm, recompute all routes from their GPX files:
 docker compose run --rm app python -m app.cli recompute
 ```
 
+Estimate the surface of all routes that don't have an estimate yet (e.g. after upgrading to
+0.4.0; add `--all` to redo every route, `--overwrite-manual` to also replace paved % values you
+typed yourself):
+
+```bash
+docker compose run --rm app python -m app.cli estimate-surface
+```
+
 ## Run locally (development)
 
 Python 3.12:
@@ -205,11 +231,26 @@ Run the tests:
   computed the same way as for imported routes. Connector elevations come from BRouter (SRTM),
   so there can be small elevation jumps where they join the original tracks.
 
+- **Surface estimate:** the GPX track is "map matched" with BRouter: a route is requested
+  through waypoints every 300 m along the track with the `shortest` profile, so BRouter follows
+  the track itself (the matched length is typically within 1 % of the route length), and with
+  `processUnusedTags=1` BRouter reports every OpenStreetMap tag of each way it used. Each
+  stretch is classified by its `surface` tag; without one, the road type decides (a residential
+  street or cycleway is paved, a `grade1` track paved, other tracks and paths unpaved; the panel
+  says how many km were guessed this way). paved % = (paved + cobbles) / (paved + cobbles +
+  unpaved), and is left empty when more than half of the route is unknown.
+- **Duplicates:** a hash of each track's coordinates (rounded to ~1 m) finds the same track in
+  different files. The Duplicates tab compares all routes with a spatial index and groups routes
+  where ≥ 85 % of each lies within 50 m of the other; a route with ≥ 90 % on another is listed
+  as a variant. "Ridden the other way" compares positions along both routes.
+
 Settings (environment variables): `LOOP_THRESHOLD_M` (200), `SIMILAR_TOLERANCE_M` (50),
-`SIMILAR_MIN_OVERLAP` (0.8), `PROXIMITY_DISTANCE_M` (100, default distance on the map),
+`SIMILAR_MIN_OVERLAP` (0.85), `VARIANT_MIN_OVERLAP` (0.9), `PROXIMITY_DISTANCE_M` (100, default distance on the map),
 `PROXIMITY_MAX_DISTANCE_M` (5000), `BROUTER_URL` (`http://localhost:17777`; set to
 `http://brouter:17777` in docker-compose), `BROUTER_PROFILES` (`gravel,trekking,mtb,fastbike,shortest`;
-the first is the default), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25).
+the first is the default), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25),
+`SURFACE_MATCH_PROFILE` (`shortest`), `SURFACE_WAYPOINT_SPACING_M` (300), `SURFACE_AUTO_ESTIMATE`
+(1; 0 to only estimate on request).
 
 ## Adding metadata fields
 
@@ -226,6 +267,7 @@ app/
   importer.py    import of files and folders
   combiner.py    cutting, direction handling and stitching of combined routes
   brouter.py     client for the BRouter HTTP API
+  surface.py     surface estimate (map matching via BRouter) and its background worker
   models.py      SQLAlchemy model
   db.py          database setup and automatic column migration
   main.py        FastAPI app (JSON API + static frontend)

@@ -2,6 +2,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| **0.4.0** | 2026-09-26 | Phase 4: paved % estimated from OpenStreetMap via BRouter (paved / cobbles / unpaved breakdown, surface-coloured map, background estimates after upload and save, bulk "Estimate surface", CLI `estimate-surface`; your own value always wins); duplicates: same track in a different file is skipped on import, new Duplicates tab with groups, keep suggestion, "not duplicates" and variants. Combiner: pick the part of each route to ride (A1 → A2, B1 → B2) |
 | **0.3.2** | 2026-09-26 | New "stitch" logo: icon and wordmark in the header, browser-tab favicon, README header; combiner connectors drawn in the logo orange |
 | **0.3.1** | 2026-09-26 | Library: select several routes (checkboxes, select all shown) to download their GPX files (zip for several), show only them on the map, or remove them in one go |
 | **0.3.0** | 2026-09-26 | Phase 3: combiner. Pick two routes, get suggested connection points, drag them along the routes, gravel connectors routed by a self-hosted BRouter (v1.7.10, profile choice, prefer unpaved, straight-line fallback), one connection (A → B) or two (loop), direction options, preview with stats, save as a new derived route or download GPX. Docker: `brouter` and `brouter-segments` services with automatic tile download. Fix: hidden filter bar on Import, phone layout of the header and maps |

@@ -53,11 +53,13 @@ function showView(name) {
   $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import and combine screens.
-  $("#filters").hidden = name === "import" || name === "combine";
+  const noFilters = name === "import" || name === "combine" || name === "duplicates";
+  $("#filters").hidden = noFilters;
   updateIdsNote();
-  if (name === "import" || name === "combine") closeDetail();
+  if (noFilters) closeDetail();
   if (name === "map") showOverview();
   if (name === "combine") showCombine();
+  if (name === "duplicates") loadDuplicates();
   updateHash();
 }
 $$(".tab").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
@@ -215,7 +217,9 @@ function renderTable() {
         el("td", { class: "num" }, fmt.km(r.distance_km)),
         el("td", { class: "num" }, fmt.m(r.elevation_gain_m)),
         el("td", {}, r.is_loop ? "loop" : "A→B"),
-        el("td", { class: "num" }, fmt.pct(r.paved_pct)),
+        r.paved_source === "estimated"
+          ? el("td", { class: "num est", title: "Estimated from OpenStreetMap" }, `≈${fmt.pct(r.paved_pct)}`)
+          : el("td", { class: "num" }, fmt.pct(r.paved_pct)),
         el("td", { class: "stars" }, fmt.stars(r.quality_rating)),
         el("td", {}, r.tags.map((t) => el("span", { class: "tag" }, t))),
         el("td", {}, r.source_name || "–"),
@@ -296,6 +300,48 @@ $("#sel-remove").addEventListener("click", async () => {
   await Promise.all([refresh(), loadFacets()]);
 });
 
+$("#sel-surface").addEventListener("click", async () => {
+  const ids = [...checked];
+  if (!ids.length) return;
+  try {
+    await api("/api/surface/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, force: true }),
+    });
+  } catch (err) {
+    alert(`Could not start the surface estimate: ${err.message}`);
+    return;
+  }
+  watchSurfaceJob();
+});
+
+/** Show progress of background surface estimates; refresh the table when they finish. */
+let surfaceTimer = null;
+async function watchSurfaceJob() {
+  clearTimeout(surfaceTimer);
+  let st;
+  try {
+    st = await api("/api/surface/status");
+  } catch (_) {
+    return;
+  }
+  const label = $("#surface-job");
+  if (st.running) {
+    label.textContent = `· estimating surface: ${st.done + st.failed} done, ${st.queued} to go…`;
+    surfaceTimer = setTimeout(watchSurfaceJob, 1500);
+  } else {
+    label.textContent = st.done + st.failed
+      ? `· surface estimated for ${st.done} route${st.done === 1 ? "" : "s"}` +
+        (st.failed ? `, ${st.failed} failed (${st.last_error})` : "")
+      : "";
+    if (st.done) {
+      await refresh();
+      if (selectedId && currentView === "library") openDetail(selectedId);
+    }
+  }
+}
+
 /** Notice shown while the library/map are limited to a set of selected routes. */
 function updateIdsNote() {
   const show = state.ids.length > 0 && (currentView === "library" || currentView === "map");
@@ -314,6 +360,7 @@ const detail = $("#detail");
 const detailForm = $("#d-form");
 let map = null;
 let mapLayer = null;
+let detailRoute = null; // the route shown in the detail panel
 
 function osmTiles() {
   return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -357,6 +404,8 @@ async function openDetail(id) {
   f.name.value = r.name;
   f.quality_rating.value = r.quality_rating ?? "";
   f.paved_pct.value = r.paved_pct ?? "";
+  detailRoute = r;
+  renderSurface(r);
   f.tags.value = r.tags.join(", ");
   f.notes.value = r.notes ?? "";
   f.source_name.value = r.source_name ?? "";
@@ -379,17 +428,79 @@ async function openDetail(id) {
     );
   }
 
+  drawDetailMap(r, true);
+
+  loadSimilar(r.id);
+}
+
+const SURFACE_COLORS = { paved: "#5f5e5a", cobbles: "#9a6324", unpaved: "#d4a017", unknown: "#c8c6bf" };
+const SURFACE_LABELS = { paved: "Paved", cobbles: "Cobbles", unpaved: "Unpaved", unknown: "Unknown" };
+
+function drawDetailMap(r, fit) {
   const m = ensureMap();
   m.invalidateSize();
   if (mapLayer) mapLayer.remove();
+  const segments = r.surface?.segments;
+  const bySurface = segments?.length && $("#d-surface-map").checked;
+  $("#d-surface-toggle").hidden = !segments?.length;
+  const lines = bySurface
+    ? segments.map(([cat, pts]) => L.polyline(pts, { color: SURFACE_COLORS[cat] || "#888", weight: 5 }).bindTooltip(SURFACE_LABELS[cat] || cat))
+    : [L.polyline(r.geometry, { color: "#b35c1e", weight: 4 })];
   mapLayer = L.layerGroup([
-    L.polyline(r.geometry, { color: "#b35c1e", weight: 4 }),
+    ...lines,
     L.circleMarker([r.start_lat, r.start_lon], { radius: 6, color: "#2e7d32", fillOpacity: 1 }).bindTooltip("Start"),
     r.is_loop ? null : L.circleMarker([r.end_lat, r.end_lon], { radius: 6, color: "#b3261e", fillOpacity: 1 }).bindTooltip("End"),
   ].filter(Boolean)).addTo(m);
-  m.fitBounds([[r.min_lat, r.min_lon], [r.max_lat, r.max_lon]], { padding: [10, 10] });
+  if (fit) m.fitBounds([[r.min_lat, r.min_lon], [r.max_lat, r.max_lon]], { padding: [10, 10] });
+}
+$("#d-surface-map").addEventListener("change", () => detailRoute && drawDetailMap(detailRoute, false));
 
-  loadSimilar(r.id);
+function renderSurface(r) {
+  const box = $("#d-surface");
+  const s = r.surface;
+  $("#d-paved-src").textContent =
+    r.paved_source === "estimated" ? "(estimated)" : r.paved_source === "manual" || r.paved_pct != null ? "(yours)" : "";
+  const estimateBtn = el("button", { type: "button", class: "secondary", onclick: () => estimateOne(r.id, false) },
+    s ? "Estimate again" : "Estimate surface from OpenStreetMap");
+  if (!s) {
+    box.replaceChildren(el("div", { class: "actions" }, estimateBtn, el("span", { class: "muted small", id: "d-surface-status" })));
+    return;
+  }
+  const total = ["paved", "cobbles", "unpaved", "unknown"].reduce((t, c) => t + s[`${c}_km`], 0) || 1;
+  const cats = ["paved", "cobbles", "unpaved", "unknown"].filter((c) => s[`${c}_km`] > 0);
+  const pct = (c) => Math.round((100 * s[`${c}_km`]) / total);
+  const manualDiffers = r.paved_source !== "estimated" && s.paved_pct != null && r.paved_pct !== s.paved_pct;
+  box.replaceChildren(
+    el("div", { class: "surface-bar", title: "Surface from OpenStreetMap" },
+      cats.map((c) => el("span", { style: `width:${(100 * s[`${c}_km`]) / total}%;background:${SURFACE_COLORS[c]}`, title: `${SURFACE_LABELS[c]} ${s[`${c}_km`]} km` }))),
+    el("div", { class: "surface-legend" },
+      cats.map((c) => el("span", {}, el("i", { style: `background:${SURFACE_COLORS[c]}` }), `${SURFACE_LABELS[c]} ${pct(c)}% (${s[`${c}_km`].toFixed(1)} km)`))),
+    el("div", { class: "muted small" },
+      `From OpenStreetMap, ${fmt.date(s.estimated_at)}` +
+      (s.inferred_km > 0.05 ? ` · ${s.inferred_km.toFixed(1)} km guessed from the road type` : "") +
+      (s.match_ratio && Math.abs(s.match_ratio - 1) > 0.1 ? ` · rough match (${Math.round(s.match_ratio * 100)}% of the route length)` : "") +
+      (s.top_surfaces?.length ? ` · mostly ${s.top_surfaces.slice(0, 3).map(([n]) => n).join(", ")}` : "")),
+    el("div", { class: "actions" },
+      estimateBtn,
+      manualDiffers ? el("a", { class: "link small", onclick: () => estimateOne(r.id, true) }, `use the estimate (${s.paved_pct}%) instead of yours`) : null,
+      el("span", { class: "muted small", id: "d-surface-status" }))
+  );
+}
+
+async function estimateOne(id, overwriteManual) {
+  $("#d-surface-status").textContent = "estimating…";
+  try {
+    const r = await api(`/api/routes/${id}/surface?overwrite_manual=${overwriteManual}`, { method: "POST" });
+    if (selectedId !== id) return;
+    detailRoute = r;
+    detailForm.elements.paved_pct.value = r.paved_pct ?? "";
+    renderSurface(r);
+    drawDetailMap(r, false);
+    await refresh();
+  } catch (err) {
+    const status = $("#d-surface-status");
+    if (status) status.textContent = `error: ${err.message}`;
+  }
 }
 
 async function loadSimilar(id) {
@@ -427,12 +538,14 @@ detailForm.addEventListener("submit", async (e) => {
   const body = {
     name: f.name.value.trim(),
     quality_rating: f.quality_rating.value ? Number(f.quality_rating.value) : null,
-    paved_pct: f.paved_pct.value === "" ? null : Number(f.paved_pct.value),
     tags: splitTags(f.tags.value),
     notes: f.notes.value,
     source_name: f.source_name.value,
     source_url: f.source_url.value,
   };
+  // Only send the paved % when it was changed, so saving other fields keeps it "estimated".
+  const paved = f.paved_pct.value === "" ? null : Number(f.paved_pct.value);
+  if (paved !== (detailRoute?.paved_pct ?? null)) body.paved_pct = paved;
   $("#d-status").textContent = "saving…";
   try {
     const r = await api(`/api/routes/${selectedId}`, {
@@ -442,6 +555,9 @@ detailForm.addEventListener("submit", async (e) => {
     });
     $("#d-title").textContent = r.name;
     f.tags.value = r.tags.join(", ");
+    f.paved_pct.value = r.paved_pct ?? "";
+    detailRoute = r;
+    renderSurface(r);
     $("#d-status").textContent = "saved";
     await Promise.all([refresh(), loadFacets()]);
   } catch (err) {
@@ -531,6 +647,7 @@ $("#import-btn").addEventListener("click", async () => {
     renderResults(results);
     pending = [];
     renderPending();
+    watchSurfaceJob();
     await Promise.all([refresh(), loadFacets()]);
   } catch (err) {
     $("#import-status").textContent = `error: ${err.message}`;
@@ -1265,13 +1382,127 @@ $("#d-combine").addEventListener("click", () => {
   else openCombiner(id, cb.b !== id ? cb.b : null);
 });
 
+// ------------------------------------------------------------------ duplicates
+
+let dupData = null;
+
+async function loadDuplicates() {
+  $("#dup-status").textContent = "Looking for duplicates…";
+  try {
+    dupData = await api("/api/duplicates");
+  } catch (err) {
+    $("#dup-status").textContent = `Error: ${err.message}`;
+    return;
+  }
+  renderDuplicates();
+}
+
+function dupRouteCell(r) {
+  return el("a", { class: "link", onclick: () => showRoute(r.id) }, r.name);
+}
+
+function renderDuplicates() {
+  const { groups, variants } = dupData;
+  $("#dup-status").textContent = groups.length
+    ? `${groups.length} group${groups.length === 1 ? "" : "s"} of near-duplicate routes. The suggested route to keep has the most of your own ratings, tags and notes (then the oldest).`
+    : "No near-duplicate routes found.";
+  $("#dup-groups").replaceChildren(...groups.map(renderDupGroup));
+  $("#dup-variants").replaceChildren(
+    ...(variants.length
+      ? variants.map((v) =>
+          el("li", {},
+            dupRouteCell(v.part), ` lies ${v.covered_pct}% on `, dupRouteCell(v.whole),
+            v.reversed ? " (ridden the other way)" : "", " · ",
+            el("a", { onclick: () => showOnMap([v.part.id, v.whole.id]) }, "show on map"), " · ",
+            el("a", { onclick: () => ignoreDuplicates([v.part.id, v.whole.id]) }, "hide")))
+      : [el("li", { class: "muted" }, "none")])
+  );
+}
+
+function renderDupGroup(g) {
+  const notes = [];
+  if (g.pairs.some((p) => p.same_track)) notes.push("identical track");
+  if (g.pairs.some((p) => p.reversed)) notes.push("some are ridden the other way");
+  const boxes = new Map();
+  const rows = g.routes.map((r) => {
+    const box = el("input", { type: "checkbox", checked: r.id !== g.suggested_keep, "aria-label": `Remove ${r.name}` });
+    boxes.set(r.id, box);
+    return el("tr", {},
+      el("td", { class: "sel" }, box),
+      el("td", {}, dupRouteCell(r), r.id === g.suggested_keep ? el("span", { class: "keep" }, "  keep") : ""),
+      el("td", { class: "num" }, fmt.km(r.distance_km)),
+      el("td", { class: "num" }, fmt.m(r.elevation_gain_m)),
+      el("td", {}, r.source_name || "–"),
+      el("td", { class: "stars" }, fmt.stars(r.quality_rating)),
+      el("td", {}, r.tags.map((t) => el("span", { class: "tag" }, t)), r.has_notes ? " (notes)" : ""),
+      el("td", {}, fmt.date(r.imported_at)));
+  });
+  const ids = g.routes.map((r) => r.id);
+  const overlaps = g.pairs.flatMap((p) => [p.a_in_b_pct, p.b_in_a_pct]);
+  const lo = Math.min(...overlaps), hi = Math.max(...overlaps);
+  return el("div", { class: "dup-group" },
+    el("div", { class: "muted small" },
+      (lo === hi ? `${lo}% overlap` : `${lo}–${hi}% overlap`) +
+      (notes.length ? ` · ${notes.join(" · ")}` : "")),
+    el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", { class: "sel" }, "remove"), el("th", {}, "Route"), el("th", { class: "num" }, "Distance"),
+        el("th", { class: "num" }, "Gain"), el("th", {}, "Source"), el("th", {}, "Quality"), el("th", {}, "Tags"),
+        el("th", {}, "Imported"))),
+      el("tbody", {}, rows)),
+    el("div", { class: "actions" },
+      el("button", { type: "button", class: "danger", onclick: () => removeDuplicates(g, boxes) }, "Remove ticked"),
+      el("button", { type: "button", class: "secondary", onclick: () => showOnMap(ids) }, "Show on map"),
+      el("button", { type: "button", class: "secondary", onclick: () => ignoreDuplicates(ids) }, "Not duplicates")));
+}
+
+async function removeDuplicates(g, boxes) {
+  const chosen = g.routes.filter((r) => boxes.get(r.id).checked);
+  if (!chosen.length) return;
+  if (chosen.length === g.routes.length && !confirm("This removes every route in the group. Continue?")) return;
+  if (!confirm(`Remove ${chosen.map((r) => `"${r.name}"`).join(", ")} from the library?\n\nThe GPX files on disk are not deleted.`)) return;
+  try {
+    await api("/api/routes/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: chosen.map((r) => r.id) }),
+    });
+  } catch (err) {
+    alert(`Could not remove the routes: ${err.message}`);
+    return;
+  }
+  await Promise.all([refresh(), loadFacets(), loadDuplicates()]);
+}
+
+async function ignoreDuplicates(ids) {
+  await api("/api/duplicates/ignore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  await loadDuplicates();
+}
+
+function showOnMap(ids) {
+  state.ids = ids;
+  showView("map");
+  refresh();
+}
+
+$("#dup-reset").addEventListener("click", async () => {
+  if (!confirm('Show all groups and variants again, including the ones you marked as "not duplicates"?')) return;
+  await api("/api/duplicates/reset", { method: "POST" });
+  await loadDuplicates();
+});
+
 // ------------------------------------------------------------------ start
 
 restoreFilters();
 updateDirectionLabels();
 loadFacets().then(() => {
   const view = new URLSearchParams(location.hash.slice(1)).get("view");
-  showView(["map", "import", "combine"].includes(view) ? view : "library");
+  showView(["map", "import", "combine", "duplicates"].includes(view) ? view : "library");
+  watchSurfaceJob();
   return loadRoutes();
 });
 api("/api/version").then((v) => ($("#version").textContent = `v${v.version}`)).catch(() => {});
