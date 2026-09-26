@@ -9,7 +9,7 @@ A self-hosted web app to manage a personal library of gravel cycling routes (GPX
 import them, compute stats, tag and rate them, show them on a map, and combine two routes into
 a new one with automatically routed gravel connectors (via a self-hosted BRouter).
 
-**Version:** 0.5.0 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.5.1 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -248,13 +248,14 @@ Run the tests:
   says how many km were guessed this way). paved % = (paved + cobbles) / (paved + cobbles +
   unpaved), and is left empty when more than half of the route is unknown.
 - **Route names:** place data comes from [GeoNames](https://www.geonames.org/) (CC BY 4.0):
-  the country files for `GEONAMES_COUNTRIES` (default `BE,NL,LU`, about 2.5 MB) are downloaded
+  the country files for `GEONAMES_COUNTRIES` (default `BE,NL,LU,DE,FR`: about 26 MB to download,
+  95 MB on disk) are downloaded
   on first use into `data/geonames/`. Towns and villages are ranked by population (villages
   without one only count if they're widely known); landmarks are named forests, heaths, hills,
   parks, lakes, castles and abbeys the route passes close to. Names are in `PLACE_NAME_LANGUAGE`
   (Dutch by default: Zoniënwoud rather than Forêt de Soignes). The start is the nearest real
   town to the start point; the places are the most notable one in each third of the route.
-  Add `DE` or `FR` (about 7 MB each) for routes across the border, e.g. `GEONAMES_COUNTRIES=BE,NL,LU,DE`.
+  To save space, list only the countries you ride in, e.g. `GEONAMES_COUNTRIES=BE,NL`.
 - **Duplicates:** a hash of each track's coordinates (rounded to ~1 m) finds the same track in
   different files. The Duplicates tab compares all routes with a spatial index and groups routes
   where ≥ 85 % of each lies within 50 m of the other; a route with ≥ 90 % on another is listed
@@ -266,7 +267,7 @@ Settings (environment variables): `LOOP_THRESHOLD_M` (200), `SIMILAR_TOLERANCE_M
 `http://brouter:17777` in docker-compose), `BROUTER_PROFILES` (`gravel,trekking,mtb,fastbike,shortest`;
 the first is the default), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25),
 `SURFACE_MATCH_PROFILE` (`shortest`), `SURFACE_WAYPOINT_SPACING_M` (300), `SURFACE_AUTO_ESTIMATE`
-(1; 0 to only estimate on request), `GEONAMES_COUNTRIES` (`BE,NL,LU`), `PLACE_NAME_LANGUAGE`
+(1; 0 to only estimate on request), `GEONAMES_COUNTRIES` (`BE,NL,LU,DE,FR`), `PLACE_NAME_LANGUAGE`
 (`nl`), `AUTO_RENAME_ON_IMPORT` (1; 0 keeps the names from the files).
 
 ## Adding metadata fields

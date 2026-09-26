@@ -43,7 +43,7 @@ SURFACE_AUTO_ESTIMATE = os.environ.get("SURFACE_AUTO_ESTIMATE", "1").lower() not
 
 # Route names (generated from the places a route visits; GeoNames data, see app/places.py).
 GEONAMES_COUNTRIES = [
-    c.strip().upper() for c in os.environ.get("GEONAMES_COUNTRIES", "BE,NL,LU").split(",") if c.strip()
+    c.strip().upper() for c in os.environ.get("GEONAMES_COUNTRIES", "BE,NL,LU,DE,FR").split(",") if c.strip()
 ]
 PLACE_NAME_LANGUAGE = os.environ.get("PLACE_NAME_LANGUAGE", "nl")
 # Give newly imported routes a generated name (the original name goes to Notes).
