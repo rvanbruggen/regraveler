@@ -1,7 +1,9 @@
 """FastAPI application: JSON API + static single-page frontend."""
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from datetime import datetime
@@ -129,6 +131,7 @@ def filter_routes(
     loop: bool | None = None,
     sort: str = "name",
     order: str = "asc",
+    ids: list[int] | None = None,
 ) -> list[Route]:
     """Shared filter logic for the library table, the map and proximity."""
     stmt = select(Route)
@@ -152,6 +155,8 @@ def filter_routes(
         stmt = stmt.where(Route.source_name == source)
     if loop is not None:
         stmt = stmt.where(Route.is_loop == loop)
+    if ids:
+        stmt = stmt.where(Route.id.in_(ids))
 
     col = getattr(Route, sort if sort in SORTABLE else "name")
     if sort in ("name", "source_name") or sort not in SORTABLE:
@@ -188,12 +193,13 @@ def route_filters(
     loop: bool | None = None,
     sort: str = "name",
     order: str = "asc",
+    ids: Annotated[list[int] | None, Query()] = None,
 ) -> dict:
     """Query parameters shared by every endpoint that works on a filtered set of routes."""
     return dict(
         q=q, min_distance=min_distance, max_distance=max_distance, min_gain=min_gain,
         max_gain=max_gain, min_paved=min_paved, max_paved=max_paved, min_quality=min_quality,
-        tags=tags, source=source, loop=loop, sort=sort, order=order,
+        tags=tags, source=source, loop=loop, sort=sort, order=order, ids=ids,
     )
 
 
@@ -261,6 +267,56 @@ def update_route(route_id: int, update: RouteUpdate, session: SessionDep):
         setattr(route, key, value)
     session.commit()
     return route
+
+
+class RouteIds(BaseModel):
+    ids: list[int] = Field(min_length=1)
+
+
+@app.post("/api/routes/delete")
+def delete_routes(body: RouteIds, session: SessionDep):
+    """Remove several routes from the library. GPX files on disk are left untouched."""
+    routes = session.scalars(select(Route).where(Route.id.in_(body.ids))).all()
+    for route in routes:
+        session.delete(route)
+    session.commit()
+    return {"deleted": len(routes)}
+
+
+@app.get("/api/export/gpx.zip")
+def export_zip(session: SessionDep, ids: Annotated[list[int], Query(min_length=1)]):
+    """The original GPX files of the given routes as one zip file.
+
+    Routes that come from the same multi-track file share one entry.
+    """
+    routes = session.scalars(select(Route).where(Route.id.in_(ids)).order_by(func.lower(Route.name))).all()
+    if not routes:
+        raise HTTPException(404, "No routes found")
+    buf = io.BytesIO()
+    seen_paths: set[str] = set()
+    used_names: set[str] = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for route in routes:
+            if route.gpx_path in seen_paths:
+                continue
+            path = (config.GPX_DIR / route.gpx_path).resolve()
+            if not path.is_relative_to(config.GPX_DIR) or not path.is_file():
+                continue
+            seen_paths.add(route.gpx_path)
+            name = Path(route.original_filename).name or f"route-{route.id}.gpx"
+            stem, suffix, n = Path(name).stem, Path(name).suffix or ".gpx", 2
+            while name.lower() in used_names:
+                name = f"{stem} ({n}){suffix}"
+                n += 1
+            used_names.add(name.lower())
+            zf.write(path, name)
+    if not seen_paths:
+        raise HTTPException(404, "GPX files not found on disk")
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="routes.zip"'},
+    )
 
 
 @app.delete("/api/routes/{route_id}", status_code=204)

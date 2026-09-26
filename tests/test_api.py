@@ -262,3 +262,55 @@ def test_combine_errors(client, monkeypatch):
 def test_client_config(client):
     cfg = client.get("/api/config").json()
     assert cfg["brouter_profiles"][0] == "gravel"
+
+
+# ---------------------------------------------------------------- multi-select
+
+def test_ids_filter_zip_export_and_bulk_delete(client, library):
+    import io
+    import zipfile
+
+    multi = gpx_xml([("Track one", line_points(length_m=1000)),
+                     ("Track two", line_points(start=(51.3, 4.4), length_m=2000))])
+    upload(client, [
+        ("One.gpx", climb_gpx(5000, 20)),
+        ("Two.gpx", climb_gpx(8000, 40, start=(50.7, 4.9))),
+        ("Start Multi.gpx", multi),
+    ])
+    ids = {r["name"]: r["id"] for r in client.get("/api/routes").json()}
+    assert set(ids) == {"One", "Two", "Track one", "Track two"}
+
+    # Shared "only these routes" filter, on the list and the map.
+    sel = [ids["One"], ids["Track one"]]
+    assert sorted(r["name"] for r in client.get("/api/routes", params={"ids": sel}).json()) == ["One", "Track one"]
+    assert sorted(r["name"] for r in client.get("/api/map", params={"ids": sel}).json()) == ["One", "Track one"]
+
+    # Zip of the original files; both tracks of the multi-track file share one entry.
+    res = client.get("/api/export/gpx.zip", params={"ids": [ids["One"], ids["Track one"], ids["Track two"]]})
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/zip"
+    zf = zipfile.ZipFile(io.BytesIO(res.content))
+    assert sorted(zf.namelist()) == ["One.gpx", "Start Multi.gpx"]
+    assert zf.read("Start Multi.gpx") == multi
+    assert client.get("/api/export/gpx.zip", params={"ids": [9999]}).status_code == 404
+    assert client.get("/api/export/gpx.zip").status_code == 422
+
+    # Bulk remove: routes go, files stay.
+    res = client.post("/api/routes/delete", json={"ids": [ids["One"], ids["Two"], 9999]})
+    assert res.json() == {"deleted": 2}
+    assert sorted(r["name"] for r in client.get("/api/routes").json()) == ["Track one", "Track two"]
+    assert (library / "uploads/unsorted/One.gpx").is_file()
+    assert client.post("/api/routes/delete", json={"ids": []}).status_code == 422
+    # The single-route endpoints still work next to /api/routes/delete.
+    assert client.get(f"/api/routes/{ids['Track one']}").status_code == 200
+
+
+def test_zip_export_deduplicates_file_names(client):
+    import io
+    import zipfile
+
+    upload(client, [("Same.gpx", climb_gpx(3000, 10))], source_name="S1")
+    upload(client, [("Same.gpx", climb_gpx(4000, 10, start=(50.6, 5.0)))], source_name="S2")
+    ids = [r["id"] for r in client.get("/api/routes").json()]
+    zf = zipfile.ZipFile(io.BytesIO(client.get("/api/export/gpx.zip", params={"ids": ids}).content))
+    assert sorted(zf.namelist()) == ["Same (2).gpx", "Same.gpx"]

@@ -152,3 +152,15 @@ fieldset.options legend { font-size: 12px; color: var(--muted); padding: 0 4px; 
 .cb-marker.b { border-color: #d62f4b; color: #d62f4b; }
 .cb-start { background: #2e7d32; color: #fff; border-radius: 10px; font: 600 11px/18px system-ui, sans-serif; text-align: center; width: 42px !important; height: 20px !important; }
 #cb-saved a { color: var(--accent); cursor: pointer; }
+
+/* Multi-select */
+.table-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }
+.table-head p { margin: 0; }
+#sel-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+th.sel, td.sel { width: 32px; padding-right: 0; }
+th.sel input, td.sel input { width: auto; cursor: pointer; }
+#routes tbody tr.checked { background: #fbf3ec; }
+.ids-note {
+  margin: 0 0 12px; padding: 8px 12px; border-radius: 6px;
+  background: var(--accent-soft); border: 1px solid var(--accent);
+}

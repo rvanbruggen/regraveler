@@ -54,6 +54,7 @@ function showView(name) {
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import and combine screens.
   $("#filters").hidden = name === "import" || name === "combine";
+  updateIdsNote();
   if (name === "import" || name === "combine") closeDetail();
   if (name === "map") showOverview();
   if (name === "combine") showCombine();
@@ -74,7 +75,8 @@ function showRoute(id) {
 // The filter state lives in the URL hash, so views can share it and links keep it.
 
 const filterForm = $("#filters");
-const state = { sort: "name", order: "asc" };
+// ids: "only these routes" (set by "Show on map" for a selection); shared by library and map.
+const state = { sort: "name", order: "asc", ids: [] };
 
 function filterParams() {
   const p = new URLSearchParams();
@@ -85,6 +87,7 @@ function filterParams() {
   }
   if (state.sort !== "name") p.set("sort", state.sort);
   if (state.order !== "asc") p.set("order", state.order);
+  state.ids.forEach((id) => p.append("ids", id));
   return p;
 }
 
@@ -113,6 +116,7 @@ function restoreFilters() {
   }
   state.sort = p.get("sort") || "name";
   state.order = p.get("order") || "asc";
+  state.ids = p.getAll("ids").map(Number).filter(Boolean);
 }
 
 let debounce;
@@ -120,7 +124,10 @@ filterForm.addEventListener("input", () => {
   clearTimeout(debounce);
   debounce = setTimeout(refresh, 250);
 });
-filterForm.addEventListener("reset", () => setTimeout(refresh, 0));
+filterForm.addEventListener("reset", () => {
+  state.ids = [];
+  setTimeout(refresh, 0);
+});
 filterForm.addEventListener("submit", (e) => e.preventDefault());
 
 $$("#routes th[data-sort]").forEach((th) =>
@@ -139,7 +146,8 @@ $$("#routes th[data-sort]").forEach((th) =>
 // ------------------------------------------------------------------ library
 
 let routes = [];
-let selectedId = null;
+let selectedId = null; // route open in the detail panel
+const checked = new Set(); // routes ticked in the library table
 
 async function loadFacets() {
   const [f, cfg] = await Promise.all([api("/api/facets"), api("/api/config")]);
@@ -175,6 +183,10 @@ async function loadRoutes() {
     $("#count").textContent = `Error loading routes: ${err.message}`;
     return;
   }
+  // Only routes that are shown can stay selected.
+  const shown = new Set(routes.map((r) => r.id));
+  [...checked].forEach((id) => shown.has(id) || checked.delete(id));
+  updateIdsNote();
   renderTable();
 }
 
@@ -189,7 +201,16 @@ function renderTable() {
     ...routes.map((r) =>
       el(
         "tr",
-        { class: r.id === selectedId ? "selected" : null, onclick: () => openDetail(r.id), "data-id": r.id },
+        {
+          class: [r.id === selectedId ? "selected" : "", checked.has(r.id) ? "checked" : ""].join(" ").trim() || null,
+          onclick: () => openDetail(r.id),
+          "data-id": r.id,
+        },
+        el("td", { class: "sel", onclick: (e) => e.stopPropagation() },
+          el("input", {
+            type: "checkbox", checked: checked.has(r.id), "aria-label": `Select ${r.name}`,
+            onchange: (e) => toggleChecked(r.id, e.target.checked),
+          })),
         el("td", { class: "name" }, r.name),
         el("td", { class: "num" }, fmt.km(r.distance_km)),
         el("td", { class: "num" }, fmt.m(r.elevation_gain_m)),
@@ -202,7 +223,90 @@ function renderTable() {
       )
     )
   );
+  renderSelection();
 }
+
+// ------------------------------------------------------------------ multi-select
+
+function toggleChecked(id, on) {
+  if (on) checked.add(id);
+  else checked.delete(id);
+  $(`#routes tbody tr[data-id="${id}"]`)?.classList.toggle("checked", on);
+  renderSelection();
+}
+
+function renderSelection() {
+  const n = checked.size;
+  $("#sel-bar").hidden = n === 0;
+  $("#sel-count").textContent = `${n} selected`;
+  const all = $("#sel-all");
+  all.checked = n > 0 && n === routes.length;
+  all.indeterminate = n > 0 && n < routes.length;
+}
+
+$("#sel-all").addEventListener("change", (e) => {
+  checked.clear();
+  if (e.target.checked) routes.forEach((r) => checked.add(r.id));
+  renderTable();
+});
+
+$("#sel-clear").addEventListener("click", () => {
+  checked.clear();
+  renderTable();
+});
+
+$("#sel-download").addEventListener("click", () => {
+  const ids = [...checked];
+  if (!ids.length) return;
+  // One route: its original file; several: a zip of the original files.
+  const url = ids.length === 1
+    ? `/api/routes/${ids[0]}/gpx`
+    : `/api/export/gpx.zip?${ids.map((id) => `ids=${id}`).join("&")}`;
+  const link = el("a", { href: url, download: "" });
+  document.body.append(link);
+  link.click();
+  link.remove();
+});
+
+$("#sel-map").addEventListener("click", () => {
+  if (!checked.size) return;
+  state.ids = [...checked];
+  showView("map");
+  refresh();
+});
+
+$("#sel-remove").addEventListener("click", async () => {
+  const chosen = routes.filter((r) => checked.has(r.id));
+  if (!chosen.length) return;
+  const names = chosen.slice(0, 8).map((r) => `• ${r.name}`).join("\n") + (chosen.length > 8 ? `\n… and ${chosen.length - 8} more` : "");
+  if (!confirm(`Remove ${chosen.length} route${chosen.length === 1 ? "" : "s"} from the library?\n\n${names}\n\nThe GPX files on disk are not deleted.`)) return;
+  try {
+    await api("/api/routes/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: chosen.map((r) => r.id) }),
+    });
+  } catch (err) {
+    alert(`Could not remove the routes: ${err.message}`);
+    return;
+  }
+  if (chosen.some((r) => r.id === selectedId)) closeDetail();
+  checked.clear();
+  state.ids = state.ids.filter((id) => !chosen.some((r) => r.id === id));
+  await Promise.all([refresh(), loadFacets()]);
+});
+
+/** Notice shown while the library/map are limited to a set of selected routes. */
+function updateIdsNote() {
+  const show = state.ids.length > 0 && (currentView === "library" || currentView === "map");
+  $("#ids-note").hidden = !show;
+  $("#ids-note-text").textContent = `Showing only the ${state.ids.length} selected route${state.ids.length === 1 ? "" : "s"}.`;
+}
+
+$("#ids-note-clear").addEventListener("click", () => {
+  state.ids = [];
+  refresh();
+});
 
 // ------------------------------------------------------------------ detail panel
 

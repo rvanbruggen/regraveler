@@ -47,14 +47,28 @@
       <button type="reset" class="secondary">Clear</button>
     </form>
 
+  <p id="ids-note" class="ids-note" hidden>
+    <span id="ids-note-text"></span> <a class="link" id="ids-note-clear">show all routes</a>
+  </p>
+
   <!-- Library -->
   <section id="view-library" class="view">
 
-    <p id="count" class="muted"></p>
+    <div class="table-head">
+      <p id="count" class="muted"></p>
+      <div id="sel-bar" hidden>
+        <strong id="sel-count"></strong>
+        <button type="button" id="sel-download" class="secondary">Download GPX</button>
+        <button type="button" id="sel-map" class="secondary">Show on map</button>
+        <button type="button" id="sel-remove" class="danger">Remove</button>
+        <a class="link small" id="sel-clear">clear selection</a>
+      </div>
+    </div>
     <div class="table-wrap">
       <table id="routes">
         <thead>
           <tr>
+            <th class="sel"><input type="checkbox" id="sel-all" title="Select all shown routes"></th>
             <th data-sort="name">Name</th>
             <th data-sort="distance_km" class="num">Distance</th>
             <th data-sort="elevation_gain_m" class="num">Gain</th>
