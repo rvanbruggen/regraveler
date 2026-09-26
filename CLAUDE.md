@@ -79,3 +79,4 @@ Design requirement: support one OR two connection pairs. A single pair gives a p
 - Never modify original GPX files; derived routes are new files.
 - Ask before adding significant new dependencies or changing the stack.
 - Keep the UI simple and functional; clarity over polish.
+- Releases go through the `/bump` skill (major / minor / dot). The version source of truth is `__version__` in `app/__init__.py`; see "Version Tracking" in the README for every place it appears. Each release is committed, tagged `v<version>` and pushed.

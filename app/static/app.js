@@ -387,3 +387,4 @@ function renderResults(results) {
 
 restoreFilters();
 loadFacets().then(loadRoutes);
+api("/api/version").then((v) => ($("#version").textContent = `v${v.version}`)).catch(() => {});

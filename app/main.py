@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import config, db
+from . import __version__, config, db
 from .importer import import_gpx
 from .models import Route
 from .similarity import find_similar
@@ -30,7 +30,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Gravel Route Manager", lifespan=lifespan)
+app = FastAPI(title="Gravel Route Manager", version=__version__, lifespan=lifespan)
 SessionDep = Annotated[Session, Depends(db.get_session)]
 
 
@@ -243,6 +243,11 @@ def similar_routes(route_id: int, session: SessionDep):
         }
         for s in find_similar(route.geometry, route.bbox, others)
     ]
+
+
+@app.get("/api/version")
+def version():
+    return {"version": __version__}
 
 
 @app.get("/api/facets")

@@ -121,3 +121,9 @@ def test_bad_upload_is_reported_per_file(client):
 def test_frontend_is_served(client):
     assert "Gravel Route Manager" in client.get("/").text
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_version_endpoint(client):
+    from app import __version__
+
+    assert client.get("/api/version").json() == {"version": __version__}

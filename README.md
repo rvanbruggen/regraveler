@@ -4,7 +4,8 @@ A self-hosted web app to manage a personal library of gravel cycling routes (GPX
 import them, compute stats, tag and rate them, and (in later phases) show them on a map and
 combine routes with an automatically routed connector.
 
-**Status: phase 1 (import + library).** See [CLAUDE.md](CLAUDE.md) for the full plan.
+**Version:** 0.1.0 · **Status: phase 1 (import + library).** See [CLAUDE.md](CLAUDE.md) for
+the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does (phase 1)
 
@@ -121,3 +122,12 @@ app/
   static/        single-page frontend (vanilla JS + Leaflet)
 tests/           pytest tests
 ```
+
+## Version Tracking
+
+Versions follow `a.b.c` (major / minor / dot) and every release is tagged `v<a.b.c>`.
+The version appears in these places, which must stay in sync:
+
+- `app/__init__.py` — `__version__` (source of truth; served at `/api/version`, shown in the UI header)
+- `README.md` — the **Version:** line at the top
+- `CHANGELOG.md` — one row per release
