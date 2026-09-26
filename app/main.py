@@ -481,8 +481,14 @@ def combine_suggest(
     if a_id == b_id:
         raise HTTPException(422, "Choose two different routes")
     a, b = load_track(_get_route(session, a_id)), load_track(_get_route(session, b_id))
+    try:
+        connections = combiner.suggest_connections(a, b, count)
+        # The same suggestion as four points: loop (count=2) or point to point (count=1).
+        parts = combiner.suggest_parts(a, b, closed=count == 2)
+    except combiner.CombineError as exc:
+        raise HTTPException(422, str(exc))
     out = []
-    for c in combiner.suggest_connections(a, b, count):
+    for c in connections:
         pa, pb = combiner.point_at(a, c.a_at), combiner.point_at(b, c.b_at)
         out.append(
             {
@@ -491,7 +497,19 @@ def combine_suggest(
                 "distance_m": round(float(((pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2) ** 0.5)),
             }
         )
-    return {"connections": out}
+    route_ids = [a_id, b_id]
+    return {"connections": out, "parts": [_part_out(p, route_ids[i]) for i, p in enumerate(parts)]}
+
+
+def _part_out(p: combiner.Part, route_id: int) -> dict:
+    return {
+        "route_id": route_id,
+        "start": _latlon(combiner._latlon_of(combiner.point_at(p.track, p.start_at))),
+        "end": _latlon(combiner._latlon_of(combiner.point_at(p.track, p.end_at))),
+        "start_km": round(p.start_at / 1000, 2),
+        "end_km": round(p.end_at / 1000, 2),
+        "other_way": p.other_way,
+    }
 
 
 class ConnectionIn(BaseModel):
@@ -499,10 +517,24 @@ class ConnectionIn(BaseModel):
     b: tuple[float, float]  # [lat, lon] near route B
 
 
+class PartIn(BaseModel):
+    route_id: int
+    start: tuple[float, float]  # [lat, lon] near the route: where to join it
+    end: tuple[float, float]  # [lat, lon] near the route: where to leave it
+    other_way: bool = False  # loop routes: the other way round, through the route's start/end
+
+
+MAX_PARTS = 6
+
+
 class CombineRequest(BaseModel):
-    a_id: int
-    b_id: int
-    connections: list[ConnectionIn] = Field(min_length=1, max_length=2)
+    # Parts: each route ridden from its start to its end point (A1 -> A2 -> B1 -> B2 ...).
+    parts: list[PartIn] | None = Field(None, min_length=2, max_length=MAX_PARTS)
+    closed: bool = True  # parts: add a connector from the last part back to the first
+    # Connections (the older form): routes A and B with one or two connection pairs.
+    a_id: int | None = None
+    b_id: int | None = None
+    connections: list[ConnectionIn] | None = Field(None, min_length=1, max_length=2)
     reverse_a: bool = False
     reverse_b: bool = False
     reverse: bool = False
@@ -516,11 +548,25 @@ class SaveCombinedRequest(CombineRequest):
     notes: str | None = None
 
 
+def _names(routes: list[Route]) -> str:
+    names = [f"'{r.name}'" for r in routes]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
 def _run_combine(session: Session, req: CombineRequest):
-    if req.a_id == req.b_id:
+    """(routes used, result, description) for either request form."""
+    if req.parts:
+        ids = [p.route_id for p in req.parts]
+        if len(set(ids)) < 2:
+            raise HTTPException(422, "Choose at least two different routes")
+    elif req.a_id is None or req.b_id is None or not req.connections:
+        raise HTTPException(422, "Give either parts, or a_id, b_id and connections")
+    elif req.a_id == req.b_id:
         raise HTTPException(422, "Choose two different routes")
-    route_a, route_b = _get_route(session, req.a_id), _get_route(session, req.b_id)
-    a, b = load_track(route_a), load_track(route_b)
+    else:
+        ids = [req.a_id, req.b_id]
+    routes = {i: _get_route(session, i) for i in ids}
+    tracks = {i: load_track(r) for i, r in routes.items()}
     profile = req.profile or config.BROUTER_PROFILES[0]
     if profile not in config.BROUTER_PROFILES:
         raise HTTPException(422, f"Unknown profile '{profile}'")
@@ -529,18 +575,34 @@ def _run_combine(session: Session, req: CombineRequest):
     def router(p, q):
         return brouter.route(p, q, profile, params)
 
-    connections = [
-        combiner.Connection(combiner.locate(a, *c.a), combiner.locate(b, *c.b)) for c in req.connections
-    ]
+    use_router = combiner.straight_router if req.straight else router
     try:
-        result = combiner.combine(
-            a, b, connections,
-            router=combiner.straight_router if req.straight else router,
-            reverse_a=req.reverse_a,
-            reverse_b=req.reverse_b,
-            reverse=req.reverse,
-            direct_join_m=config.DIRECT_JOIN_M,
-        )
+        if req.parts:
+            parts = [
+                combiner.Part(
+                    tracks[p.route_id],
+                    combiner.locate(tracks[p.route_id], *p.start),
+                    combiner.locate(tracks[p.route_id], *p.end),
+                    p.other_way,
+                )
+                for p in req.parts
+            ]
+            result = combiner.combine_parts(
+                parts, use_router, closed=req.closed, reverse=req.reverse, direct_join_m=config.DIRECT_JOIN_M
+            )
+        else:
+            a, b = tracks[req.a_id], tracks[req.b_id]
+            connections = [
+                combiner.Connection(combiner.locate(a, *c.a), combiner.locate(b, *c.b)) for c in req.connections
+            ]
+            result = combiner.combine(
+                a, b, connections,
+                router=use_router,
+                reverse_a=req.reverse_a,
+                reverse_b=req.reverse_b,
+                reverse=req.reverse,
+                direct_join_m=config.DIRECT_JOIN_M,
+            )
     except combiner.CombineError as exc:
         raise HTTPException(422, str(exc))
     except brouter.BRouterUnavailable as exc:
@@ -548,16 +610,31 @@ def _run_combine(session: Session, req: CombineRequest):
     except brouter.BRouterError as exc:
         raise HTTPException(502, str(exc))
     how = "straight lines" if req.straight else f"BRouter ({profile}{', prefer unpaved' if params else ''})"
-    description = f"Combined from '{route_a.name}' and '{route_b.name}' via {how}."
-    return route_a, route_b, result, description
+    used = list({i: routes[i] for i in ids}.values())  # in order, without repeats
+    description = f"Combined from {_names(used)} via {how}."
+    return used, result, description
 
 
 @app.post("/api/combine/preview")
 def combine_preview(req: CombineRequest, session: SessionDep):
-    route_a, route_b, result, description = _run_combine(session, req)
+    _, result, description = _run_combine(session, req)
     stats = compute_stats(result.points)
     return {
         "description": description,
+        "crossing": bool(result.parts) and combiner.connectors_cross(result.parts, req.closed),
+        "parts": [
+            {
+                "route_id": p.route_id,
+                "start": _latlon(start),
+                "end": _latlon(end),
+                "start_km": round(part.start_at / 1000, 2),
+                "end_km": round(part.end_at / 1000, 2),
+                "distance_km": round(combiner._leg_length(leg.xyz) / 1000, 2),
+            }
+            for p, part, (start, end), leg in zip(
+                req.parts or [], result.parts, result.part_points, [l for l in result.legs if l.kind != "connector"]
+            )
+        ],
         "distance_km": stats.distance_km,
         "elevation_gain_m": stats.elevation_gain_m,
         "elevation_loss_m": stats.elevation_loss_m,
@@ -592,7 +669,7 @@ def combine_preview(req: CombineRequest, session: SessionDep):
 @app.post("/api/combine/gpx")
 def combine_gpx(req: SaveCombinedRequest, session: SessionDep):
     """The combined route as a GPX download, without saving it."""
-    _, _, result, description = _run_combine(session, req)
+    _, result, description = _run_combine(session, req)
     data = write_gpx(req.name, result.points, description)
     filename = f"{req.name}.gpx".replace('"', "")
     return Response(
@@ -605,7 +682,7 @@ def combine_gpx(req: SaveCombinedRequest, session: SessionDep):
 @app.post("/api/combine/save")
 def combine_save(req: SaveCombinedRequest, session: SessionDep):
     """Save the combination as a new route (new GPX file under gpx/derived/)."""
-    route_a, route_b, result, description = _run_combine(session, req)
+    routes, result, description = _run_combine(session, req)
     name = req.name.strip()
     data = write_gpx(name, result.points, description)
     existing = session.scalars(select(Route).where(Route.file_hash == file_hash(data))).first()
@@ -613,12 +690,12 @@ def combine_save(req: SaveCombinedRequest, session: SessionDep):
         raise HTTPException(409, f"This combination is already saved as '{existing.name}'")
     path = store_derived(data, name)
     notes = description + (f"\n\n{req.notes.strip()}" if req.notes and req.notes.strip() else "")
-    tags = normalise_tags((route_a.tags or []) + (route_b.tags or []))
+    tags = normalise_tags([t for r in routes for t in (r.tags or [])])
     res = import_gpx(
         session, data, Path(path).name,
         source_name="combined",
         library_path=path,
-        derived_from=[route_a.id, route_b.id],
+        derived_from=[r.id for r in routes],
         tags=tags,
         notes=notes,
     )

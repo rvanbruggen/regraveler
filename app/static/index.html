@@ -111,14 +111,26 @@
   <section id="view-combine" class="view" hidden>
     <div class="map-layout">
       <div class="map-side" id="cb-side">
-        <p class="muted small">Pick two routes (or click them on the map), then drag the connection points.</p>
+        <p class="muted small">Pick two routes (or click them on the map). You ride route A from A1 to A2 and
+          route B from B1 to B2; connectors fill the gaps.</p>
         <label><span><span class="swatch" style="background:#2f6fd6"></span>Route A</span> <select id="cb-a"></select></label>
         <label><span><span class="swatch" style="background:#d62f4b"></span>Route B</span> <select id="cb-b"></select></label>
         <div class="radio-row">
-          <label class="check"><input type="radio" name="cb-mode" value="1" checked> One connection (A → B)</label>
-          <label class="check"><input type="radio" name="cb-mode" value="2"> Two connections (loop)</label>
+          <label class="check"><input type="radio" name="cb-mode" value="loop" checked> Loop: A1 → A2 → B1 → B2 → back to A1</label>
+          <label class="check"><input type="radio" name="cb-mode" value="open"> Point to point: A1 → A2 → B1 → B2</label>
         </div>
-        <button type="button" id="cb-suggest" class="secondary">Suggest connection points</button>
+        <fieldset class="options">
+          <legend>Points</legend>
+          <div id="cb-points" class="cb-points"></div>
+          <div class="actions">
+            <button type="button" id="cb-click-all" class="secondary">Click all four</button>
+            <button type="button" id="cb-suggest" class="secondary">Suggest</button>
+          </div>
+          <div class="actions">
+            <button type="button" id="cb-swap-a" class="secondary" title="Ride route A the other way">Swap A1 ↔ A2</button>
+            <button type="button" id="cb-swap-b" class="secondary" title="Ride route B the other way">Swap B1 ↔ B2</button>
+          </div>
+        </fieldset>
         <fieldset class="options">
           <legend>Direction</legend>
           <label class="check" id="cb-rev-a-label"><input type="checkbox" id="cb-rev-a"> <span></span></label>

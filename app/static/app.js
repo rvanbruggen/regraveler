@@ -99,7 +99,7 @@ function updateHash() {
   if (currentView === "combine") {
     if (cb.a) p.set("a", cb.a);
     if (cb.b) p.set("b", cb.b);
-    if (cb.mode === 2) p.set("n", "2");
+    if (cb.mode === "open") p.set("open", "1");
   }
   history.replaceState(null, "", p.toString() ? `#${p}` : location.pathname);
 }
@@ -823,17 +823,24 @@ const cb = {
   byId: new Map(),
   a: null,
   b: null,
-  mode: 1, // number of connections
-  connections: [], // [{a: [lat, lon], b: [lat, lon]}]
+  mode: "loop", // "loop" (back to A1) or "open" (point to point)
+  points: { a1: null, a2: null, b1: null, b2: null }, // [lat, lon] each
+  pointsTouched: false, // placed or moved by the user (not just suggested)
+  placing: [], // point keys still to click, in order
   preview: null,
   token: 0,
   nameTouched: false,
 };
 
+const POINT_KEYS = ["a1", "a2", "b1", "b2"];
+const POINT_HINTS = { a1: "join route A", a2: "leave route A", b1: "join route B", b2: "leave route B" };
+const MAX_SNAP_M = 1500; // clicks further from the route than this are refused
+
 const cbEl = {
   a: $("#cb-a"), b: $("#cb-b"), revA: $("#cb-rev-a"), revB: $("#cb-rev-b"), rev: $("#cb-rev"),
   profile: $("#cb-profile"), unpaved: $("#cb-unpaved"), straight: $("#cb-straight"),
   status: $("#cb-status"), stats: $("#cb-stats"), save: $("#cb-save"), name: $("#cb-name"), saved: $("#cb-saved"),
+  points: $("#cb-points"),
 };
 
 function showCombine() {
@@ -844,9 +851,10 @@ function showCombine() {
     cb.routeLayer = L.layerGroup().addTo(m);
     cb.resultLayer = L.layerGroup().addTo(m);
     cb.markerLayer = L.layerGroup().addTo(m);
+    m.on("click", (e) => { if (cb.placing.length) placeAt(e.latlng); });
     cb.map = m;
     const p = new URLSearchParams(location.hash.slice(1));
-    if (p.get("n") === "2") setMode(2);
+    if (p.get("open") === "1") setMode("open");
     cb.initial = { a: Number(p.get("a")) || null, b: Number(p.get("b")) || null };
   }
   setTimeout(() => cb.map.invalidateSize(), 0);
@@ -872,7 +880,11 @@ async function loadCombineRoutes() {
   for (const r of cb.routes) {
     L.polyline(r.geometry, { color: "#777", weight: 2, opacity: 0.35 })
       .bindTooltip(r.name, { sticky: true })
-      .on("click", (e) => { L.DomEvent.stopPropagation(e); pickRoute(r.id); })
+      .on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        if (cb.placing.length) placeAt(e.latlng);
+        else pickRoute(r.id);
+      })
       .addTo(cb.bgLayer);
   }
   if (cb.initial) {
@@ -884,6 +896,7 @@ async function loadCombineRoutes() {
     cb.map.fitBounds(L.featureGroup(cb.bgLayer.getLayers()).getBounds(), { padding: [20, 20] });
   }
   syncSelects();
+  renderPoints();
 }
 
 function syncSelects() {
@@ -899,7 +912,9 @@ function pickRoute(id) {
 async function setRoutes(a, b) {
   cb.a = a || null;
   cb.b = b && b !== a ? b : null;
-  cb.connections = [];
+  cb.points = { a1: null, a2: null, b1: null, b2: null };
+  cb.pointsTouched = false;
+  stopPlacing();
   cb.preview = null;
   cb.nameTouched = false;
   cbEl.saved.textContent = "";
@@ -910,7 +925,7 @@ async function setRoutes(a, b) {
   drawCombineResult();
   const lines = [cb.a, cb.b].filter(Boolean).map((id) => L.polyline(cb.byId.get(id).geometry));
   if (lines.length) cb.map.fitBounds(L.featureGroup(lines).getBounds(), { padding: [30, 30] });
-  if (cb.a && cb.b) await suggestConnections();
+  if (cb.a && cb.b) await suggestPoints();
   else cbEl.status.textContent = cb.a ? "Now choose route B (or click it on the map)." : "Choose route A (or click it on the map).";
 }
 
@@ -923,9 +938,9 @@ function drawCombineRoutes() {
   }
 }
 
-function setMode(n) {
-  cb.mode = n;
-  $$('input[name="cb-mode"]').forEach((r) => (r.checked = Number(r.value) === n));
+function setMode(mode) {
+  cb.mode = mode;
+  $$('input[name="cb-mode"]').forEach((r) => (r.checked = r.value === mode));
   updateDirectionLabels();
 }
 
@@ -937,24 +952,112 @@ function updateDirectionLabels() {
     if (!enabled) input.checked = false;
     label.classList.toggle("muted", !enabled);
   };
-  if (cb.mode === 1) {
-    set(cbEl.revA, $("#cb-rev-a-label"), "Ride A backwards (arrive from its end)", true);
-    set(cbEl.revB, $("#cb-rev-b-label"), "Ride B backwards (towards its start)", true);
-  } else {
-    set(cbEl.revA, $("#cb-rev-a-label"), a && !a.is_loop ? "Other way round A (A is not a loop)" : "Other way round A", !!a?.is_loop);
-    set(cbEl.revB, $("#cb-rev-b-label"), b && !b.is_loop ? "Other way round B (B is not a loop)" : "Other way round B", !!b?.is_loop);
-  }
+  set(cbEl.revA, $("#cb-rev-a-label"), a && !a.is_loop ? "Other way round A (A is not a loop)" : "Other way round A (through its start)", !!a?.is_loop);
+  set(cbEl.revB, $("#cb-rev-b-label"), b && !b.is_loop ? "Other way round B (B is not a loop)" : "Other way round B (through its start)", !!b?.is_loop);
   const gravel = cbEl.profile.value === "gravel" && !cbEl.straight.checked;
   $("#cb-unpaved-label").hidden = !gravel;
   cbEl.profile.disabled = cbEl.straight.checked;
 }
 
-async function suggestConnections() {
+// ---- the four points
+
+const routeOfPoint = (key) => (key[0] === "a" ? cb.a : cb.b);
+const pointLabel = (key) => key.toUpperCase();
+
+function renderPoints() {
+  const parts = cb.preview?.parts || [];
+  cbEl.points.replaceChildren(...POINT_KEYS.map((key) => {
+    const part = parts[key[0] === "a" ? 0 : 1];
+    let where;
+    if (cb.placing[0] === key) where = "click it on the map…";
+    else if (part && cb.points[key]) where = `${fmt.km(key[1] === "1" ? part.start_km : part.end_km)} along route ${key[0].toUpperCase()}`;
+    else where = cb.points[key] ? "placed" : "not placed";
+    return el("div", { class: `cb-point${cb.placing[0] === key ? " placing" : ""}` },
+      el("span", { class: `cb-marker ${key[0]}` }, pointLabel(key)),
+      el("span", { class: "where", title: POINT_HINTS[key] }, where),
+      el("button", {
+        type: "button", class: "secondary", disabled: !routeOfPoint(key),
+        onclick: () => startPlacing([key]),
+      }, "Place"));
+  }));
+  $("#cb-click-all").disabled = !(cb.a && cb.b);
+  $("#cb-suggest").disabled = !(cb.a && cb.b);
+  $("#cb-swap-a").disabled = !(cb.points.a1 && cb.points.a2);
+  $("#cb-swap-b").disabled = !(cb.points.b1 && cb.points.b2);
+}
+
+function startPlacing(keys) {
+  cb.placing = keys.filter((k) => routeOfPoint(k));
+  if (!cb.placing.length) return;
+  cb.map.getContainer().classList.add("placing");
+  promptPlacing();
+}
+
+function stopPlacing() {
+  cb.placing = [];
+  cb.map?.getContainer().classList.remove("placing");
+  renderPoints();
+}
+
+function promptPlacing() {
+  const key = cb.placing[0];
+  const route = key[0].toUpperCase();
+  cbEl.status.textContent = `Click ${pointLabel(key)} on route ${route} (${route === "A" ? "blue" : "red"}): where you ${POINT_HINTS[key]}. Esc cancels.`;
+  renderPoints();
+}
+
+/** Nearest point on a [lat, lon] polyline, with its distance in metres. */
+function snapToLine(line, ll) {
+  const k = Math.cos((ll.lat * Math.PI) / 180);
+  const toXY = (p) => [p[1] * k * 111320, p[0] * 110540];
+  const [px, py] = toXY([ll.lat, ll.lng]);
+  let best = { d: Infinity, p: null };
+  for (let i = 0; i < line.length - 1; i++) {
+    const [ax, ay] = toXY(line[i]), [bx, by] = toXY(line[i + 1]);
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+    const d = Math.hypot(ax + t * dx - px, ay + t * dy - py);
+    if (d < best.d) {
+      best = { d, p: [line[i][0] + t * (line[i + 1][0] - line[i][0]), line[i][1] + t * (line[i + 1][1] - line[i][1])] };
+    }
+  }
+  return best;
+}
+
+function placeAt(latlng) {
+  const key = cb.placing[0];
+  const route = cb.byId.get(routeOfPoint(key));
+  const snap = snapToLine(route.geometry, latlng);
+  if (snap.d > MAX_SNAP_M) {
+    cbEl.status.textContent = `That is ${(snap.d / 1000).toFixed(1)} km from route ${key[0].toUpperCase()}; click closer to it (or press Esc).`;
+    return;
+  }
+  cb.points[key] = snap.p;
+  cb.pointsTouched = true;
+  cb.placing.shift();
+  drawCombineResult();
+  if (cb.placing.length) return promptPlacing();
+  stopPlacing();
+  runPreview();
+}
+
+function swapPoints(side) {
+  const [p, q] = [`${side}1`, `${side}2`];
+  [cb.points[p], cb.points[q]] = [cb.points[q], cb.points[p]];
+  cb.pointsTouched = true;
+  runPreview();
+}
+
+async function suggestPoints() {
   if (!cb.a || !cb.b) return;
+  stopPlacing();
   cbEl.status.textContent = "Looking for the closest points…";
   try {
-    const res = await api(`/api/combine/suggest?a_id=${cb.a}&b_id=${cb.b}&count=${cb.mode}`);
-    cb.connections = res.connections.map((c) => ({ a: c.a, b: c.b }));
+    const res = await api(`/api/combine/suggest?a_id=${cb.a}&b_id=${cb.b}&count=${cb.mode === "loop" ? 2 : 1}`);
+    const [pa, pb] = res.parts;
+    cb.points = { a1: pa.start, a2: pa.end, b1: pb.start, b2: pb.end };
+    cb.pointsTouched = false;
   } catch (err) {
     cbEl.status.textContent = `Error: ${err.message}`;
     return;
@@ -963,12 +1066,13 @@ async function suggestConnections() {
 }
 
 function combineRequest(extra = {}) {
+  const p = cb.points;
   return {
-    a_id: cb.a,
-    b_id: cb.b,
-    connections: cb.connections,
-    reverse_a: cbEl.revA.checked,
-    reverse_b: cbEl.revB.checked,
+    parts: [
+      { route_id: cb.a, start: p.a1, end: p.a2, other_way: cbEl.revA.checked },
+      { route_id: cb.b, start: p.b1, end: p.b2, other_way: cbEl.revB.checked },
+    ],
+    closed: cb.mode === "loop",
     reverse: cbEl.rev.checked,
     profile: cbEl.profile.value,
     prefer_unpaved: cbEl.unpaved.checked,
@@ -978,9 +1082,18 @@ function combineRequest(extra = {}) {
 }
 
 async function runPreview() {
-  if (!cb.a || !cb.b || !cb.connections.length) return;
+  renderPoints();
+  if (!cb.a || !cb.b) return;
+  if (!POINT_KEYS.every((k) => cb.points[k])) {
+    cb.preview = null;
+    drawCombineRoutes();
+    drawCombineResult();
+    const missing = POINT_KEYS.filter((k) => !cb.points[k]).map(pointLabel).join(", ");
+    cbEl.status.textContent = `Place ${missing} to see the combination.`;
+    return;
+  }
   const token = ++cb.token;
-  cbEl.status.textContent = cbEl.straight.checked ? "Joining…" : "Routing the connector(s)…";
+  cbEl.status.textContent = cbEl.straight.checked ? "Joining…" : "Routing the connectors…";
   let res;
   try {
     res = await api("/api/combine/preview", {
@@ -993,16 +1106,25 @@ async function runPreview() {
     cb.preview = null;
     drawCombineRoutes();
     drawCombineResult();
+    renderPoints();
     cbEl.status.textContent = `Error: ${err.message}`;
     return;
   }
   if (token !== cb.token) return; // a newer preview is on its way
   cb.preview = res;
-  cb.connections = res.connections.map((c) => ({ a: c.a, b: c.b })); // snapped onto the routes
+  // Snapped onto the routes.
+  const [pa, pb] = res.parts;
+  cb.points = { a1: pa.start, a2: pa.end, b1: pb.start, b2: pb.end };
   if (!cb.nameTouched) cbEl.name.value = `${cb.byId.get(cb.a).name} + ${cb.byId.get(cb.b).name}`;
-  cbEl.status.textContent = res.description;
+  cbEl.status.replaceChildren(
+    res.description,
+    ...(res.crossing
+      ? [el("br"), el("span", { class: "cb-warn" }, "The connectors cross each other: try swapping B1 ↔ B2 (or A1 ↔ A2).")]
+      : [])
+  );
   drawCombineRoutes();
   drawCombineResult();
+  renderPoints();
 }
 
 function markerIcon(label, cls) {
@@ -1032,35 +1154,48 @@ function drawCombineResult() {
       ["Distance", fmt.km(res.distance_km)],
       ["Elevation gain", fmt.m(res.elevation_gain_m)],
       ["Type", res.is_loop ? "Loop" : "Point to point"],
+      ["On route A / B", res.parts.map((p) => fmt.km(p.distance_km)).join(" / ")],
       ["Connectors", connectors],
     ];
     cbEl.stats.replaceChildren(...stats.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
   }
-  // Draggable connection points (also shown before the first preview has succeeded).
-  cb.connections.forEach((c, i) => {
-    for (const side of ["a", "b"]) {
-      L.marker(c[side], { draggable: true, icon: markerIcon(`${side.toUpperCase()}${i + 1}`, side), zIndexOffset: 1000 })
-        .bindTooltip(`Drag along route ${side.toUpperCase()}`)
-        .on("dragend", (e) => {
-          const ll = e.target.getLatLng();
-          cb.connections[i][side] = [ll.lat, ll.lng];
-          runPreview();
-        })
-        .addTo(cb.markerLayer);
-    }
-  });
+  // Draggable points (also shown before the first preview has succeeded).
+  for (const key of POINT_KEYS) {
+    if (!cb.points[key]) continue;
+    const side = key[0];
+    L.marker(cb.points[key], { draggable: true, icon: markerIcon(pointLabel(key), side), zIndexOffset: 1000 })
+      .bindTooltip(`${pointLabel(key)}: ${POINT_HINTS[key]} (drag along route ${side.toUpperCase()})`)
+      .on("dragend", (e) => {
+        const ll = e.target.getLatLng();
+        cb.points[key] = [ll.lat, ll.lng];
+        cb.pointsTouched = true;
+        runPreview();
+      })
+      .addTo(cb.markerLayer);
+  }
 }
 
 cbEl.a.addEventListener("change", () => setRoutes(Number(cbEl.a.value) || null, cb.b));
 cbEl.b.addEventListener("change", () => setRoutes(cb.a, Number(cbEl.b.value) || null));
 $$('input[name="cb-mode"]').forEach((r) =>
   r.addEventListener("change", () => {
-    setMode(Number(r.value));
+    setMode(r.value);
     updateHash();
-    suggestConnections();
+    // Suggested points depend on the mode; points the user placed are kept.
+    if (cb.pointsTouched) runPreview();
+    else suggestPoints();
   })
 );
-$("#cb-suggest").addEventListener("click", suggestConnections);
+$("#cb-suggest").addEventListener("click", suggestPoints);
+$("#cb-click-all").addEventListener("click", () => startPlacing(POINT_KEYS));
+$("#cb-swap-a").addEventListener("click", () => swapPoints("a"));
+$("#cb-swap-b").addEventListener("click", () => swapPoints("b"));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && cb.placing.length) {
+    stopPlacing();
+    runPreview();
+  }
+});
 [cbEl.revA, cbEl.revB, cbEl.rev, cbEl.unpaved].forEach((c) => c.addEventListener("change", runPreview));
 [cbEl.profile, cbEl.straight].forEach((c) =>
   c.addEventListener("change", () => {

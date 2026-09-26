@@ -11,6 +11,12 @@ Point-to-point (one connection):
 Loop (two connections):
     A from a2 to a1  ->  connector a1-b1  ->  B from b1 to b2  ->  connector b2-a2
     reverse_a / reverse_b: take the other way round a loop route (through its start/end)
+
+Parts (combine_parts): the general form both of the above are built on. A list of parts, each
+ridden from its start point to its end point along its route, joined by connectors:
+    A1 -> A2  ->  connector  ->  B1 -> B2  [-> connector -> C1 -> C2 ...]  [-> connector back to A1]
+Riding direction follows the order of the two points; other_way takes the other way round a
+loop route.
 """
 from __future__ import annotations
 
@@ -196,8 +202,36 @@ def suggest_connections(a: Track, b: Track, count: int = 1, step_m: float = 50.0
 
 
 @dataclass
+class Part:
+    """The stretch of a route ridden from start_at to end_at (metres along the route)."""
+
+    track: Track
+    start_at: float
+    end_at: float
+    other_way: bool = False  # the other way round a loop route (through its start/end)
+
+
+def part_key(i: int) -> str:
+    """Leg kind of the i-th part: "a", "b", "c", ..."""
+    return chr(ord("a") + i)
+
+
+def suggest_parts(a: Track, b: Track, closed: bool = True, step_m: float = 50.0) -> list[Part]:
+    """Four starting points (A1, A2, B1, B2) for combining A and B.
+
+    closed: A1 -> A2 -> B1 -> B2 -> back to A1, using the two closest, well separated pairs.
+    open:   A from its start to where it comes closest to B, then B from there to its end.
+    """
+    if closed:
+        c1, c2 = suggest_connections(a, b, 2, step_m)
+        return [Part(a, c2.a_at, c1.a_at), Part(b, c1.b_at, c2.b_at)]
+    [c] = suggest_connections(a, b, 1, step_m)
+    return [Part(a, 0.0, c.a_at), Part(b, c.b_at, b.length)]
+
+
+@dataclass
 class Leg:
-    kind: str  # "a", "b" or "connector"
+    kind: str  # "a", "b", ... (part of that route) or "connector"
     xyz: np.ndarray
     routed: bool = True  # connectors: False when joined directly
 
@@ -206,8 +240,10 @@ class Leg:
 class Combined:
     points: list[Point3]  # final route, in riding order
     legs: list[Leg]
-    connections: list[Connection]  # snapped positions
-    connection_points: list[tuple[LatLon, LatLon]]  # (on A, on B) per connection
+    connections: list[Connection] = field(default_factory=list)  # snapped positions (combine)
+    connection_points: list[tuple[LatLon, LatLon]] = field(default_factory=list)  # (on A, on B)
+    parts: list[Part] = field(default_factory=list)  # clamped parts (combine_parts)
+    part_points: list[tuple[LatLon, LatLon]] = field(default_factory=list)  # (start, end) per part
 
     @property
     def connectors(self) -> list[Leg]:
@@ -250,19 +286,17 @@ def combine(
 
     if len(cons) == 1:
         c = cons[0]
-        leg_a = Leg("a", section(a, a.length if reverse_a else 0.0, c.a_at))
-        conn = _connector(pa[0], pb[0], router, direct_join_m)
-        leg_b = Leg("b", section(b, c.b_at, 0.0 if reverse_b else b.length))
-        legs = [leg_a, conn, leg_b]
+        parts = [
+            Part(a, a.length if reverse_a else 0.0, c.a_at),
+            Part(b, c.b_at, 0.0 if reverse_b else b.length),
+        ]
+        legs = _stitch(parts, router, closed=False, direct_join_m=direct_join_m)
     else:
         c1, c2 = cons
         if abs(c1.a_at - c2.a_at) < 1 or abs(c1.b_at - c2.b_at) < 1:
             raise CombineError("The two connection points on a route must be different")
-        leg_a = Leg("a", section(a, c2.a_at, c1.a_at, other_way=reverse_a))
-        conn1 = _connector(pa[0], pb[0], router, direct_join_m)
-        leg_b = Leg("b", section(b, c1.b_at, c2.b_at, other_way=reverse_b))
-        conn2 = _connector(pb[1], pa[1], router, direct_join_m)
-        legs = [leg_a, conn1, leg_b, conn2]
+        parts = [Part(a, c2.a_at, c1.a_at, reverse_a), Part(b, c1.b_at, c2.b_at, reverse_b)]
+        legs = _stitch(parts, router, closed=True, direct_join_m=direct_join_m)
 
     pts = _join([leg.xyz for leg in legs])
 
@@ -283,6 +317,65 @@ def combine(
         connections=cons,
         connection_points=[(_latlon_of(p), _latlon_of(q)) for p, q in zip(pa, pb)],
     )
+
+
+def _stitch(parts: list[Part], router: Router, closed: bool, direct_join_m: float) -> list[Leg]:
+    """Legs in riding order: part, connector, part, ... (and a connector back if closed)."""
+    ends = [(point_at(p.track, p.start_at), point_at(p.track, p.end_at)) for p in parts]
+    legs: list[Leg] = []
+    for i, p in enumerate(parts):
+        if i:
+            legs.append(_connector(ends[i - 1][1], ends[i][0], router, direct_join_m))
+        legs.append(Leg(part_key(i), section(p.track, p.start_at, p.end_at, other_way=p.other_way)))
+    if closed:
+        legs.append(_connector(ends[-1][1], ends[0][0], router, direct_join_m))
+    return legs
+
+
+def combine_parts(
+    parts: list[Part],
+    router: Router,
+    closed: bool = True,
+    reverse: bool = False,
+    direct_join_m: float = 25.0,
+) -> Combined:
+    """Ride each part from its start to its end point, joined by connectors.
+
+    closed: add a connector from the last part's end back to the first part's start; the
+    result then starts (and ends) at the first part's start point.
+    """
+    if len(parts) < 2:
+        raise CombineError("Choose at least two routes")
+    parts = [
+        Part(p.track, min(max(p.start_at, 0.0), p.track.length), min(max(p.end_at, 0.0), p.track.length), p.other_way)
+        for p in parts
+    ]
+    for i, p in enumerate(parts):
+        if abs(p.end_at - p.start_at) < 1:
+            raise CombineError(f"The two points on route {part_key(i).upper()} must be different")
+    legs = _stitch(parts, router, closed, direct_join_m)
+    pts = _join([leg.xyz for leg in legs])
+    if reverse:
+        pts = pts[::-1]
+    return Combined(
+        points=to_latlon(pts),
+        legs=legs,
+        parts=parts,
+        part_points=[
+            (_latlon_of(point_at(p.track, p.start_at)), _latlon_of(point_at(p.track, p.end_at))) for p in parts
+        ],
+    )
+
+
+def connectors_cross(parts: list[Part], closed: bool = True) -> bool:
+    """Whether the straight lines of the connectors cross each other: usually a sign that one
+    route should be ridden the other way (swap its two points)."""
+    ends = [(point_at(p.track, p.start_at)[:2], point_at(p.track, p.end_at)[:2]) for p in parts]
+    gaps = [(ends[i][1], ends[i + 1][0]) for i in range(len(ends) - 1)]
+    if closed:
+        gaps.append((ends[-1][1], ends[0][0]))
+    lines = [LineString([p, q]) for p, q in gaps if np.hypot(*(q - p)) > 0]
+    return any(lines[i].crosses(lines[j]) for i in range(len(lines)) for j in range(i + 1, len(lines)))
 
 
 def straight_router(p: LatLon, q: LatLon) -> list[Point3]:

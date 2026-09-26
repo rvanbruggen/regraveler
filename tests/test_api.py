@@ -262,6 +262,46 @@ def test_combine_errors(client, monkeypatch):
     assert res.status_code == 502 and "E5_N50" in res.json()["detail"]
 
 
+def test_combine_parts(client, library, monkeypatch):
+    from app import brouter
+
+    a, b = _two_parallel_routes(client)
+    monkeypatch.setattr(brouter, "route", lambda p, q, *args, **kw: [(p[0], p[1], 10.0), (q[0], q[1], 12.0)])
+
+    sug = client.get("/api/combine/suggest", params={"a_id": a, "b_id": b, "count": 2}).json()["parts"]
+    assert [p["route_id"] for p in sug] == [a, b]
+
+    parts = [{"route_id": p["route_id"], "start": p["start"], "end": p["end"]} for p in sug]
+    prev = client.post("/api/combine/preview", json={"parts": parts}).json()
+    assert prev["is_loop"] and not prev["crossing"]
+    assert [leg["kind"] for leg in prev["legs"]] == ["a", "connector", "b", "connector"]
+    assert prev["start"] == pytest.approx(sug[0]["start"], abs=1e-4)  # starts at A1
+    assert [p["route_id"] for p in prev["parts"]] == [a, b]
+    assert prev["parts"][0]["distance_km"] == pytest.approx(abs(sug[0]["end_km"] - sug[0]["start_km"]), abs=0.01)
+
+    # B the same way as A: the connectors cross.
+    same_way = [parts[0], {**parts[1], "start": parts[1]["end"], "end": parts[1]["start"]}]
+    assert client.post("/api/combine/preview", json={"parts": same_way}).json()["crossing"]
+
+    # Point to point.
+    prev = client.post("/api/combine/preview", json={"parts": parts, "closed": False}).json()
+    assert not prev["is_loop"] and len(prev["connectors"]) == 1
+
+    saved = client.post("/api/combine/save", json={"parts": parts, "name": "A loop B"})
+    assert saved.status_code == 200, saved.text
+    new = client.get(f"/api/routes/{saved.json()['id']}").json()
+    assert new["derived_from"] == [a, b]
+    assert new["tags"] == ["forest", "sand"]
+
+    # Errors: one route only, same points, too few parts.
+    assert client.post("/api/combine/preview", json={"parts": [parts[0], {**parts[0]}]}).status_code == 422
+    same = [parts[0], {**parts[1], "end": parts[1]["start"]}]
+    res = client.post("/api/combine/preview", json={"parts": same})
+    assert res.status_code == 422 and "route B" in res.json()["detail"]
+    assert client.post("/api/combine/preview", json={"parts": parts[:1]}).status_code == 422
+    assert client.post("/api/combine/preview", json={}).status_code == 422
+
+
 def test_client_config(client):
     cfg = client.get("/api/config").json()
     assert cfg["brouter_profiles"][0] == "gravel"

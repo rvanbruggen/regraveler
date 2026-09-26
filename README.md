@@ -46,22 +46,26 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   route, or the gap in metres); click a pair to zoom to it.
 - The filters, the active view and the proximity setting are kept in the URL, so a bookmark
   brings back the same screen.
-- **Combine** two routes into a new one:
+- **Combine** two routes into a new one by picking the part of each route you want to ride:
   1. Pick route A and B (dropdowns, click them on the Combine map, "Combine…" in a route's
      detail panel, or "combine" next to a pair in the map's proximity list).
-  2. The app suggests where they come closest and places the connection points (A1, B1).
-  3. Drag a connection point along its route to move it; it snaps back onto the route.
-  4. The gap is filled with a connector routed by BRouter (profile *gravel* by default,
+  2. The app suggests four points where the routes come closest: you ride route A from A1 to
+     A2 and route B from B1 to B2.
+  3. Change them with *Click all four* (click A1, A2, B1, B2 on the map in turn; Esc cancels),
+     *Place* next to a single point, or drag a point along its route. Clicks snap onto the
+     route. *Suggest* puts the suggested points back.
+  4. The gaps are filled with connectors routed by BRouter (profile *gravel* by default,
      optionally *prefer unpaved paths*; other profiles or plain straight lines are possible).
      Points less than 25 m apart are joined directly.
-  5. Preview with total distance, elevation gain and connector lengths.
+  5. Preview with total distance, elevation gain, the km on each route and connector lengths.
   6. Save as a new route (a new GPX file in `gpx/derived/`, source *combined*, with the parent
      routes recorded and linked in its detail panel), or just download the GPX.
-  - **One connection:** A from its start to A1 → connector → B from B1 to its end. *Ride A/B
-    backwards* uses the other half of a route instead.
-  - **Two connections (loop):** A from A2 to A1 → connector → B from B1 to B2 → connector back
-    to A2. For loop routes, *Other way round A/B* takes the other part of that loop. The loop
-    starts at route A's start point when that lies on it. *Ride the whole result the other way*
+  - **Loop:** A1 → A2 → connector → B1 → B2 → connector back to A1. The loop starts at A1.
+  - **Point to point:** A1 → A2 → connector → B1 → B2.
+  - The riding direction on a route follows the order of its two points: *Swap A1 ↔ A2* (or
+    B1 ↔ B2) rides it the other way. When the connectors of a loop cross each other, the app
+    says so; swapping B1 and B2 usually fixes it. For loop routes, *Other way round A/B* takes
+    the other part of that loop (through its start). *Ride the whole result the other way*
     reverses the direction.
 
 Original GPX files are never modified.
@@ -192,8 +196,10 @@ Run the tests:
   shared stretches are each route's parts within the chosen distance of the other.
 
 - **Combiner:** the parts of A and B are cut from the full-resolution points of the original GPX
-  files (not the simplified map lines), with interpolated points exactly at the connection
-  points. Suggestions come from a distance matrix of points sampled every 50 m along both
+  files (not the simplified map lines), with interpolated points exactly at the chosen
+  points. The stitching works on a list of parts (route + start + end point), so combining more
+  than two routes is a matter of UI; the API (`POST /api/combine/preview` with `parts`) already
+  accepts up to six. Suggestions come from a distance matrix of points sampled every 50 m along both
   routes; the second connection of a loop is the closest pair that is at least 2 km (or 15 % of
   the shorter route) away from the first along both routes. The stats of the result are
   computed the same way as for imported routes. Connector elevations come from BRouter (SRTM),

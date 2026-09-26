@@ -157,6 +157,15 @@ fieldset.options legend { font-size: 12px; color: var(--muted); padding: 0 4px; 
 .cb-marker.b { border-color: #d62f4b; color: #d62f4b; }
 .cb-start { background: #2e7d32; color: #fff; border-radius: 10px; font: 600 11px/18px system-ui, sans-serif; text-align: center; width: 42px !important; height: 20px !important; }
 #cb-saved a { color: var(--accent); cursor: pointer; }
+.cb-points { display: flex; flex-direction: column; gap: 4px; }
+.cb-point { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.cb-point .where { flex: 1; color: var(--muted); }
+.cb-point.placing { font-weight: 600; }
+.cb-point.placing .where { color: inherit; }
+.cb-point .cb-marker { position: static; display: inline-block; cursor: default; }
+.cb-point button { padding: 1px 8px; font-size: 12px; }
+#combine-map.placing, #combine-map.placing .leaflet-interactive { cursor: crosshair; }
+.cb-warn { color: #b35c1e; font-weight: 600; }
 
 /* Multi-select */
 .table-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }

@@ -205,6 +205,91 @@ def test_loop_needs_distinct_connection_points():
         cb.combine(a, b, [], fake_router)
 
 
+# ------------------------------------------------------------------ parts (A1 -> A2 -> B1 -> B2)
+
+def test_parts_closed_loop_rides_each_part_between_its_points():
+    a, b = two_parallel_lines()
+    # A from 1000 to 5000 (eastwards), over to B at 5000, B back west to 1000, back to A1.
+    parts = [cb.Part(a, 1000, 5000), cb.Part(b, 5000, 1000)]
+    res = cb.combine_parts(parts, fake_router)
+    assert [leg.kind for leg in res.legs] == ["a", "connector", "b", "connector"]
+    assert len(calls) == 2
+    assert cb._leg_length(res.legs[0].xyz) == pytest.approx(4000, abs=1)
+    assert cb._leg_length(res.legs[2].xyz) == pytest.approx(4000, abs=1)
+    # Starts and ends at A1.
+    a1 = cb._latlon_of(cb.point_at(a, 1000))
+    assert res.points[0][:2] == pytest.approx(a1, abs=1e-6)
+    assert res.points[-1][:2] == pytest.approx(a1, abs=1e-6)
+    assert length_m(res.points) == pytest.approx(4000 + 800 + 4000 + 800, rel=0.01)
+    assert res.part_points[1][0] == pytest.approx(cb._latlon_of(cb.point_at(b, 5000)), abs=1e-7)
+    assert not cb.connectors_cross(parts)
+
+
+def test_parts_direction_follows_the_order_of_the_points():
+    a, b = two_parallel_lines()
+    res = cb.combine_parts([cb.Part(a, 5000, 1000), cb.Part(b, 1000, 5000)], fake_router)
+    a_leg = res.legs[0].xyz
+    assert a_leg[0][0] > a_leg[-1][0]  # A ridden westwards
+    b_leg = res.legs[2].xyz
+    assert b_leg[0][0] < b_leg[-1][0]  # B ridden eastwards
+
+
+def test_parts_same_as_old_loop_mode():
+    a, b = two_parallel_lines()
+    old = cb.combine(a, b, [cb.Connection(5000, 5000), cb.Connection(1000, 1000)], fake_router,
+                     start_at_a_start=False)
+    new = cb.combine_parts([cb.Part(a, 1000, 5000), cb.Part(b, 5000, 1000)], fake_router)
+    assert new.points == old.points
+
+
+def test_parts_open_has_no_connector_back():
+    a, b = two_parallel_lines()
+    res = cb.combine_parts([cb.Part(a, 0, 3000), cb.Part(b, 3000, b.length)], fake_router, closed=False)
+    assert [leg.kind for leg in res.legs] == ["a", "connector", "b"]
+    assert res.points[0][:2] == pytest.approx(cb._latlon_of(a.xyz[0]), abs=1e-6)
+    assert res.points[-1][:2] == pytest.approx(cb._latlon_of(b.xyz[-1]), abs=1e-6)
+    rev = cb.combine_parts([cb.Part(a, 0, 3000), cb.Part(b, 3000, b.length)], fake_router, closed=False,
+                           reverse=True)
+    assert rev.points == res.points[::-1]
+
+
+def test_parts_other_way_round_a_loop_route():
+    a = cb.make_track(loop_points(radius_m=1500, n=400), is_loop=True)
+    b = cb.make_track(loop_points(center=offset(*START, 0, 4000), radius_m=1500, n=400), is_loop=True)
+    L = a.length
+    short = cb.combine_parts([cb.Part(a, 0.30 * L, 0.20 * L), cb.Part(b, 0.80 * L, 0.70 * L)], fake_router)
+    long_a = cb.combine_parts([cb.Part(a, 0.30 * L, 0.20 * L, other_way=True), cb.Part(b, 0.80 * L, 0.70 * L)],
+                              fake_router)
+    assert cb._leg_length(short.legs[0].xyz) == pytest.approx(0.1 * L, rel=0.02)
+    assert cb._leg_length(long_a.legs[0].xyz) == pytest.approx(0.9 * L, rel=0.02)
+
+
+def test_parts_three_routes():
+    a, b = two_parallel_lines()
+    c = cb.make_track(east(north_m=1600, length_m=6000))
+    res = cb.combine_parts([cb.Part(a, 0, 3000), cb.Part(b, 3000, 5000), cb.Part(c, 5000, 6000)], fake_router,
+                           closed=False)
+    assert [leg.kind for leg in res.legs] == ["a", "connector", "b", "connector", "c"]
+    assert len(res.connectors) == 2
+
+
+def test_parts_need_distinct_points_and_two_routes():
+    a, b = two_parallel_lines()
+    with pytest.raises(cb.CombineError, match="route B"):
+        cb.combine_parts([cb.Part(a, 0, 3000), cb.Part(b, 2000, 2000)], fake_router)
+    with pytest.raises(cb.CombineError):
+        cb.combine_parts([cb.Part(a, 0, 3000)], fake_router)
+
+
+def test_connectors_cross_when_one_route_is_the_wrong_way():
+    a, b = two_parallel_lines()
+    # B ridden in the same direction as A: the connectors A2->B1 and B2->A1 form an X.
+    assert cb.connectors_cross([cb.Part(a, 1000, 5000), cb.Part(b, 1000, 5000)])
+    assert not cb.connectors_cross([cb.Part(a, 1000, 5000), cb.Part(b, 5000, 1000)])
+    # Point to point: a single connector can't cross itself.
+    assert not cb.connectors_cross([cb.Part(a, 1000, 5000), cb.Part(b, 1000, 5000)], closed=False)
+
+
 # ------------------------------------------------------------------ suggestions
 
 def test_suggest_single_connection_finds_closest_points():
@@ -233,6 +318,19 @@ def test_suggest_second_connection_on_short_routes():
     b = cb.make_track(east(north_m=100, length_m=600))
     c1, c2 = cb.suggest_connections(a, b, 2, step_m=10)
     assert abs(c1.a_at - c2.a_at) > 0.25 * a.length
+
+
+def test_suggest_parts_loop_and_point_to_point():
+    a, b = two_parallel_lines()
+    pa, pb = cb.suggest_parts(a, b, closed=True)
+    # A1 -> A2 and B1 -> B2 run in opposite directions, so the connectors don't cross.
+    assert abs(pa.end_at - pa.start_at) > 1500
+    assert (pa.end_at - pa.start_at) * (pb.end_at - pb.start_at) < 0
+    assert dist(xy(a, pa.end_at), xy(b, pb.start_at)) == pytest.approx(800, abs=10)
+    assert dist(xy(b, pb.end_at), xy(a, pa.start_at)) == pytest.approx(800, abs=10)
+    assert not cb.connectors_cross([pa, pb])
+    oa, ob = cb.suggest_parts(a, b, closed=False)
+    assert oa.start_at == 0 and ob.end_at == b.length
 
 
 def test_straight_router():
