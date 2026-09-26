@@ -140,6 +140,8 @@ label.check input { width: auto; }
 #prox-list .pair-info { font-size: 12px; color: var(--muted); }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 @media (max-width: 760px) {
+  #rn-table { table-layout: auto; }
+  #rn-table td.proposal input { min-width: 260px; }
   .map-layout { flex-direction: column; height: auto; }
   .map-side { width: auto; max-height: 260px; }
   #overview-map, #combine-map { flex: none; height: 65vh; }
@@ -200,3 +202,14 @@ td.est { color: var(--muted); }
 .variants { padding-left: 18px; }
 .variants li { margin: 4px 0; }
 .variants a { color: var(--accent); cursor: pointer; }
+
+/* Rename */
+#rn-table td { white-space: normal; vertical-align: middle; }
+#rn-table { table-layout: fixed; }
+#rn-table th:nth-child(2) { width: 34%; }
+#rn-table th:nth-child(4) { width: 80px; }
+#rn-table th.sel { width: 32px; }
+#rn-table td.proposal input { width: 100%; }
+#rn-table td.proposal input { font-weight: 500; }
+#rn-table tr.unchanged td { color: var(--muted); }
+#view-rename .actions { margin: 0 0 12px; }

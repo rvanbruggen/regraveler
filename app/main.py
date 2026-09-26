@@ -18,9 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import __version__, brouter, combiner, config, db, surface
+from . import __version__, brouter, combiner, config, db, places, surface
 from .gpxstats import compute_stats, parse_gpx, write_gpx
-from .importer import file_hash, import_gpx, store_derived, track_hash
+from .importer import file_hash, import_gpx, store_derived, track_hash, unique_slug
 from .models import IgnoredDuplicate, Route
 from .similarity import duplicate_pairs, find_similar, group_pairs, proximity_pairs, simplify_latlon
 
@@ -829,6 +829,62 @@ def reset_ignored_duplicates(session: SessionDep):
         n += 1
     session.commit()
     return {"reset": n}
+
+
+# ---------------------------------------------------------------- route names
+
+
+@app.get("/api/rename/proposals")
+def rename_proposals(session: SessionDep, ids: Annotated[list[int] | None, Query()] = None):
+    """Generated names (start town + places visited) for the given routes, or all routes."""
+    stmt = select(Route).order_by(func.lower(Route.name))
+    if ids:
+        stmt = stmt.where(Route.id.in_(ids))
+    routes = session.scalars(stmt).all()
+    try:
+        place_data = places.load()
+    except places.PlacesUnavailable as exc:
+        raise HTTPException(503, str(exc))
+    chosen = set(n.lower() for n in session.scalars(select(Route.name)).all())
+    out = []
+    for r in routes:
+        g = places.generate_name(r.geometry, r.is_loop, place_data)
+        proposal = g["name"]
+        if proposal and proposal.lower() != r.name.lower():
+            proposal = places.disambiguate(proposal, r.distance_km, chosen - {r.name.lower()})
+            chosen.add(proposal.lower())
+        out.append({
+            "id": r.id, "name": r.name, "proposal": proposal, "distance_km": r.distance_km,
+            "source_name": r.source_name, "is_derived": bool(r.derived_from),
+            "original_name_in_notes": (r.notes or "").startswith(places.ORIGINAL_PREFIX),
+        })
+    return out
+
+
+class RenameItem(BaseModel):
+    id: int
+    name: str = Field(min_length=1, max_length=300)
+
+
+class RenameRequest(BaseModel):
+    items: list[RenameItem] = Field(min_length=1)
+
+
+@app.post("/api/rename/apply")
+def rename_apply(req: RenameRequest, session: SessionDep):
+    """Rename routes; the original name is kept at the top of the notes."""
+    renamed = 0
+    for item in req.items:
+        route = session.get(Route, item.id)
+        new = item.name.strip()
+        if route is None or not new or new == route.name:
+            continue
+        route.notes = places.notes_with_original(route.notes, route.name)
+        route.name = new
+        route.slug = unique_slug(session, new)
+        renamed += 1
+    session.commit()
+    return {"renamed": renamed}
 
 
 # ---------------------------------------------------------------- frontend

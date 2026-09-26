@@ -9,7 +9,7 @@ A self-hosted web app to manage a personal library of gravel cycling routes (GPX
 import them, compute stats, tag and rate them, show them on a map, and combine two routes into
 a new one with automatically routed gravel connectors (via a self-hosted BRouter).
 
-**Version:** 0.4.0 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.5.0 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -28,6 +28,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     flagged.
   - **Surface:** after an upload, the paved % of the new routes is estimated in the background
     from OpenStreetMap (see below).
+  - **Name:** new routes are named after the places they visit (see *Route names*); the name
+    from the file is kept at the top of the notes (`Original name: …`).
 - **Library:** sortable table with filters on distance, elevation gain, paved %, quality,
   tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
 - **Select several routes** with the checkboxes in the library (the header box selects all
@@ -47,6 +49,12 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   library comes from the estimate (shown as ≈38%) unless you type your own value, which then
   always wins; the panel offers *use the estimate* to switch back, and clearing the field does
   the same. Needs BRouter (see Docker); routes outside the downloaded tiles can't be estimated.
+- **Route names:** *suggest names…* above the library (or *Rename…* for selected routes) opens
+  a review screen with a proposed name per route: the start town, then up to three places the
+  route visits, in riding order, e.g. *Tervuren – Kapucijnenbos – Duisburg – Hogenbos* (for a
+  point-to-point route the last place is where it ends). Edit proposals, untick routes to leave
+  alone, and rename; the current name is kept at the top of the notes (only the first time).
+  Routes with the same proposal get the distance added.
 - **Duplicates tab:** all groups of near-duplicate routes in the library (e.g. the same route
   downloaded from two sites), with overlap, source, rating and tags per route, "identical
   track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
@@ -239,6 +247,14 @@ Run the tests:
   street or cycleway is paved, a `grade1` track paved, other tracks and paths unpaved; the panel
   says how many km were guessed this way). paved % = (paved + cobbles) / (paved + cobbles +
   unpaved), and is left empty when more than half of the route is unknown.
+- **Route names:** place data comes from [GeoNames](https://www.geonames.org/) (CC BY 4.0):
+  the country files for `GEONAMES_COUNTRIES` (default `BE,NL,LU`, about 2.5 MB) are downloaded
+  on first use into `data/geonames/`. Towns and villages are ranked by population (villages
+  without one only count if they're widely known); landmarks are named forests, heaths, hills,
+  parks, lakes, castles and abbeys the route passes close to. Names are in `PLACE_NAME_LANGUAGE`
+  (Dutch by default: Zoniënwoud rather than Forêt de Soignes). The start is the nearest real
+  town to the start point; the places are the most notable one in each third of the route.
+  Add `DE` or `FR` (about 7 MB each) for routes across the border, e.g. `GEONAMES_COUNTRIES=BE,NL,LU,DE`.
 - **Duplicates:** a hash of each track's coordinates (rounded to ~1 m) finds the same track in
   different files. The Duplicates tab compares all routes with a spatial index and groups routes
   where ≥ 85 % of each lies within 50 m of the other; a route with ≥ 90 % on another is listed
@@ -250,7 +266,8 @@ Settings (environment variables): `LOOP_THRESHOLD_M` (200), `SIMILAR_TOLERANCE_M
 `http://brouter:17777` in docker-compose), `BROUTER_PROFILES` (`gravel,trekking,mtb,fastbike,shortest`;
 the first is the default), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25),
 `SURFACE_MATCH_PROFILE` (`shortest`), `SURFACE_WAYPOINT_SPACING_M` (300), `SURFACE_AUTO_ESTIMATE`
-(1; 0 to only estimate on request).
+(1; 0 to only estimate on request), `GEONAMES_COUNTRIES` (`BE,NL,LU`), `PLACE_NAME_LANGUAGE`
+(`nl`), `AUTO_RENAME_ON_IMPORT` (1; 0 keeps the names from the files).
 
 ## Adding metadata fields
 
@@ -268,6 +285,7 @@ app/
   combiner.py    cutting, direction handling and stitching of combined routes
   brouter.py     client for the BRouter HTTP API
   surface.py     surface estimate (map matching via BRouter) and its background worker
+  places.py      route names from GeoNames places (start town + places visited)
   models.py      SQLAlchemy model
   db.py          database setup and automatic column migration
   main.py        FastAPI app (JSON API + static frontend)

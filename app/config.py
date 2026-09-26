@@ -40,3 +40,11 @@ SURFACE_MATCH_PROFILE = os.environ.get("SURFACE_MATCH_PROFILE", "shortest")
 SURFACE_WAYPOINT_SPACING_M = float(os.environ.get("SURFACE_WAYPOINT_SPACING_M", 300))
 # Estimate automatically after uploads and saved combinations.
 SURFACE_AUTO_ESTIMATE = os.environ.get("SURFACE_AUTO_ESTIMATE", "1").lower() not in ("0", "false", "no")
+
+# Route names (generated from the places a route visits; GeoNames data, see app/places.py).
+GEONAMES_COUNTRIES = [
+    c.strip().upper() for c in os.environ.get("GEONAMES_COUNTRIES", "BE,NL,LU").split(",") if c.strip()
+]
+PLACE_NAME_LANGUAGE = os.environ.get("PLACE_NAME_LANGUAGE", "nl")
+# Give newly imported routes a generated name (the original name goes to Notes).
+AUTO_RENAME_ON_IMPORT = os.environ.get("AUTO_RENAME_ON_IMPORT", "1").lower() not in ("0", "false", "no")

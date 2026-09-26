@@ -2,6 +2,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| **0.5.0** | 2026-09-26 | Route names from the places a route visits (start town, then up to three places in riding order; GeoNames data, Dutch names): review screen to edit and apply proposals, original name kept in the notes, new imports named automatically |
 | **0.4.0** | 2026-09-26 | Phase 4: paved % estimated from OpenStreetMap via BRouter (paved / cobbles / unpaved breakdown, surface-coloured map, background estimates after upload and save, bulk "Estimate surface", CLI `estimate-surface`; your own value always wins); duplicates: same track in a different file is skipped on import, new Duplicates tab with groups, keep suggestion, "not duplicates" and variants. Combiner: pick the part of each route to ride (A1 → A2, B1 → B2) |
 | **0.3.2** | 2026-09-26 | New "stitch" logo: icon and wordmark in the header, browser-tab favicon, README header; combiner connectors drawn in the logo orange |
 | **0.3.1** | 2026-09-26 | Library: select several routes (checkboxes, select all shown) to download their GPX files (zip for several), show only them on the map, or remove them in one go |

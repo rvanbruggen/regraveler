@@ -11,10 +11,14 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import config
+import logging
+
+from . import config, places
 from .gpxstats import GpxError, compute_stats, parse_gpx
 from .models import Route
 from .similarity import find_similar
+
+log = logging.getLogger(__name__)
 
 # File names that describe the start rather than the route ("Start.gpx", "Start (48).gpx",
 # "Start Aarschot.gpx"): the track name inside the file is the better route name.
@@ -181,10 +185,18 @@ def import_gpx(
         library_path = store_upload(data, filename, source_name)
 
     candidates = session.scalars(select(Route)).all() if check_similar else []
+    taken = set(n.lower() for n in session.scalars(select(Route.name)).all())
     source_url = source_url or parsed.link
     created: list[Route] = []
     for i, track, st in stats:
         name = route_name(filename, track.name, len(parsed.tracks), i)
+        route_notes = notes
+        if config.AUTO_RENAME_ON_IMPORT and not derived_from:
+            generated = _generated_name(st)
+            if generated:
+                route_notes = places.notes_with_original(notes, name)
+                name = places.disambiguate(generated, st.distance_km, taken)
+        taken.add(name.lower())
         route = Route(
             name=name,
             slug=unique_slug(session, name),
@@ -210,7 +222,7 @@ def import_gpx(
             is_loop=st.is_loop,
             geometry=st.geometry,
             tags=list(tags or []),
-            notes=notes,
+            notes=route_notes,
             derived_from=list(derived_from or []),
             source_name=source_name or None,
             source_url=source_url or None,
@@ -242,6 +254,15 @@ def import_gpx(
         result.status = "partial"
         result.message = f"{len(result.duplicates)} track(s) already imported"
     return result
+
+
+def _generated_name(stats) -> str | None:
+    """A name from the places the route visits, or None (e.g. no place data available)."""
+    try:
+        return places.generate_name(stats.geometry, stats.is_loop)["name"]
+    except Exception as exc:  # never let naming break an import
+        log.warning("Could not generate a route name: %s", exc)
+        return None
 
 
 def import_folder(

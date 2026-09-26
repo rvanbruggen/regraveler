@@ -12,6 +12,8 @@ def library(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
     # No background surface estimates (they would call a real BRouter).
     monkeypatch.setattr(config, "SURFACE_AUTO_ESTIMATE", False)
+    # Keep file-based names in tests (generated names need GeoNames data).
+    monkeypatch.setattr(config, "AUTO_RENAME_ON_IMPORT", False)
     db.init_db(f"sqlite:///{tmp_path / 'test.db'}")
     yield gpx_dir
     db.engine.dispose()

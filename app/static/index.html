@@ -61,12 +61,14 @@
   <section id="view-library" class="view">
 
     <div class="table-head">
-      <p><span id="count" class="muted"></span> <span id="surface-job" class="muted small"></span></p>
+      <p><span id="count" class="muted"></span> <span id="surface-job" class="muted small"></span>
+        · <a class="link small" id="suggest-names" title="Name routes after their start town and the places they visit">suggest names…</a></p>
       <div id="sel-bar" hidden>
         <strong id="sel-count"></strong>
         <button type="button" id="sel-download" class="secondary">Download GPX</button>
         <button type="button" id="sel-map" class="secondary">Show on map</button>
         <button type="button" id="sel-surface" class="secondary" title="Estimate paved % from OpenStreetMap">Estimate surface</button>
+        <button type="button" id="sel-rename" class="secondary" title="Name after start town and places visited">Rename…</button>
         <button type="button" id="sel-remove" class="danger">Remove</button>
         <a class="link small" id="sel-clear">clear selection</a>
       </div>
@@ -158,6 +160,26 @@
       </div>
       <div id="combine-map"></div>
     </div>
+  </section>
+
+  <!-- Rename (opened from the library) -->
+  <section id="view-rename" class="view" hidden>
+    <p class="muted">Proposed names: the start town, then up to three places the route visits, in riding
+      order (for a point-to-point route the last one is where it ends). Edit a proposal if you like,
+      untick the routes to leave alone, then rename. The current name is kept at the top of the notes.</p>
+    <div class="actions">
+      <button type="button" id="rn-apply">Rename ticked</button>
+      <button type="button" id="rn-back" class="secondary">Back to the library</button>
+      <a class="link small" id="rn-all">tick all</a> · <a class="link small" id="rn-none">tick none</a>
+      <span id="rn-status" class="muted"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="rn-table">
+        <thead><tr><th class="sel"></th><th>Current name</th><th>New name</th><th class="num">Distance</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="muted small">Place names: <a class="link" href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a> (CC BY 4.0).</p>
   </section>
 
   <!-- Duplicates -->

@@ -53,7 +53,7 @@ function showView(name) {
   $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import and combine screens.
-  const noFilters = name === "import" || name === "combine" || name === "duplicates";
+  const noFilters = ["import", "combine", "duplicates", "rename"].includes(name);
   $("#filters").hidden = noFilters;
   updateIdsNote();
   if (noFilters) closeDetail();
@@ -1494,6 +1494,76 @@ $("#dup-reset").addEventListener("click", async () => {
   await api("/api/duplicates/reset", { method: "POST" });
   await loadDuplicates();
 });
+
+// ------------------------------------------------------------------ rename
+
+let renameRows = []; // [{id, name, proposal, input, box}]
+
+async function openRename(ids) {
+  showView("rename");
+  const tbody = $("#rn-table tbody");
+  tbody.replaceChildren();
+  $("#rn-status").textContent = "Looking up the places each route visits… (the first time this downloads GeoNames data)";
+  let proposals;
+  try {
+    const q = ids?.length ? ids.map((id) => `ids=${id}`).join("&") : "";
+    proposals = await api(`/api/rename/proposals${q ? `?${q}` : ""}`);
+  } catch (err) {
+    $("#rn-status").textContent = `Error: ${err.message}`;
+    return;
+  }
+  renameRows = proposals.map((p) => {
+    const changed = p.proposal && p.proposal !== p.name;
+    const input = el("input", { value: p.proposal || "", placeholder: p.proposal ? "" : "no places found nearby", "aria-label": `New name for ${p.name}` });
+    const box = el("input", { type: "checkbox", checked: !!changed && !p.is_derived, "aria-label": `Rename ${p.name}` });
+    input.addEventListener("input", () => { box.checked = input.value.trim() !== "" && input.value.trim() !== p.name; updateRenameCount(); });
+    box.addEventListener("change", updateRenameCount);
+    return { ...p, input, box, changed };
+  });
+  tbody.replaceChildren(
+    ...renameRows.map((r) =>
+      el("tr", { class: r.changed ? null : "unchanged" },
+        el("td", { class: "sel" }, r.box),
+        el("td", { class: "current" }, r.name, el("div", { class: "muted small" },
+          [r.source_name, r.is_derived ? "combined route" : null].filter(Boolean).join(" · "))),
+        el("td", { class: "proposal" }, r.input),
+        el("td", { class: "num" }, fmt.km(r.distance_km))))
+  );
+  updateRenameCount();
+}
+
+function updateRenameCount() {
+  const n = renameRows.filter((r) => r.box.checked && r.input.value.trim()).length;
+  $("#rn-apply").textContent = `Rename ticked (${n})`;
+  $("#rn-status").textContent = `${renameRows.length} route${renameRows.length === 1 ? "" : "s"}` +
+    (renameRows.some((r) => !r.proposal) ? " · some routes have no places nearby (outside the GeoNames countries)" : "");
+}
+
+$("#rn-apply").addEventListener("click", async () => {
+  const items = renameRows
+    .filter((r) => r.box.checked && r.input.value.trim() && r.input.value.trim() !== r.name)
+    .map((r) => ({ id: r.id, name: r.input.value.trim() }));
+  if (!items.length) return;
+  if (!confirm(`Rename ${items.length} route${items.length === 1 ? "" : "s"}? The current names are kept in the notes.`)) return;
+  try {
+    const res = await api("/api/rename/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    checked.clear();
+    showView("library");
+    await Promise.all([refresh(), loadFacets()]);
+    $("#surface-job").textContent = `· renamed ${res.renamed} route${res.renamed === 1 ? "" : "s"}`;
+  } catch (err) {
+    $("#rn-status").textContent = `Error: ${err.message}`;
+  }
+});
+$("#rn-back").addEventListener("click", () => showView("library"));
+$("#rn-all").addEventListener("click", () => { renameRows.forEach((r) => (r.box.checked = !!r.input.value.trim())); updateRenameCount(); });
+$("#rn-none").addEventListener("click", () => { renameRows.forEach((r) => (r.box.checked = false)); updateRenameCount(); });
+$("#suggest-names").addEventListener("click", () => openRename(routes.map((r) => r.id)));
+$("#sel-rename").addEventListener("click", () => openRename([...checked]));
 
 // ------------------------------------------------------------------ start
 
