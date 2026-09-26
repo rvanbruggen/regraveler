@@ -10,6 +10,8 @@ def library(tmp_path, monkeypatch):
     gpx_dir.mkdir()
     monkeypatch.setattr(config, "GPX_DIR", gpx_dir.resolve())
     monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
+    # No background surface estimates (they would call a real BRouter).
+    monkeypatch.setattr(config, "SURFACE_AUTO_ESTIMATE", False)
     db.init_db(f"sqlite:///{tmp_path / 'test.db'}")
     yield gpx_dir
     db.engine.dispose()

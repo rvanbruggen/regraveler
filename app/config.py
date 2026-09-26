@@ -17,7 +17,9 @@ LOOP_THRESHOLD_M = float(os.environ.get("LOOP_THRESHOLD_M", 200))
 # Near-duplicate detection: two routes are "very similar" when at least
 # SIMILAR_MIN_OVERLAP of each route lies within SIMILAR_TOLERANCE_M of the other.
 SIMILAR_TOLERANCE_M = float(os.environ.get("SIMILAR_TOLERANCE_M", 50))
-SIMILAR_MIN_OVERLAP = float(os.environ.get("SIMILAR_MIN_OVERLAP", 0.8))
+SIMILAR_MIN_OVERLAP = float(os.environ.get("SIMILAR_MIN_OVERLAP", 0.85))
+# Duplicates view: also list "variants", where one route lies (almost) entirely on another.
+VARIANT_MIN_OVERLAP = float(os.environ.get("VARIANT_MIN_OVERLAP", 0.9))
 # Map view: default and maximum distance (metres) for "routes near each other".
 PROXIMITY_DISTANCE_M = float(os.environ.get("PROXIMITY_DISTANCE_M", 100))
 PROXIMITY_MAX_DISTANCE_M = float(os.environ.get("PROXIMITY_MAX_DISTANCE_M", 5000))
@@ -32,3 +34,9 @@ BROUTER_PROFILES = [
 ]
 # Connection points closer than this are joined directly, without asking BRouter.
 DIRECT_JOIN_M = float(os.environ.get("DIRECT_JOIN_M", 25))
+
+# Surface estimate (phase 4): map matching through BRouter.
+SURFACE_MATCH_PROFILE = os.environ.get("SURFACE_MATCH_PROFILE", "shortest")
+SURFACE_WAYPOINT_SPACING_M = float(os.environ.get("SURFACE_WAYPOINT_SPACING_M", 300))
+# Estimate automatically after uploads and saved combinations.
+SURFACE_AUTO_ESTIMATE = os.environ.get("SURFACE_AUTO_ESTIMATE", "1").lower() not in ("0", "false", "no")

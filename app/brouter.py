@@ -34,18 +34,17 @@ def _explain(message: str) -> str:
     return message
 
 
-def route(
-    start: tuple[float, float],
-    end: tuple[float, float],
+def _request(
+    waypoints: list[tuple[float, float]],
     profile: str,
     params: dict[str, str] | None = None,
     base_url: str | None = None,
     timeout: float | None = None,
-) -> list[tuple[float, float, float | None]]:
-    """Route between two (lat, lon) points; returns [(lat, lon, ele), ...]."""
+) -> dict:
+    """One routing request through the given (lat, lon) waypoints; returns the GeoJSON feature."""
     base = (base_url or config.BROUTER_URL).rstrip("/")
     query = {
-        "lonlats": f"{start[1]:.6f},{start[0]:.6f}|{end[1]:.6f},{end[0]:.6f}",
+        "lonlats": "|".join(f"{lon:.6f},{lat:.6f}" for lat, lon in waypoints),
         "profile": profile,
         "alternativeidx": "0",
         "format": "geojson",
@@ -64,14 +63,61 @@ def route(
         raise BRouterUnavailable(f"BRouter is not reachable at {base}: {reason}")
 
     try:
-        data = json.loads(body)
-        coords = data["features"][0]["geometry"]["coordinates"]
+        feature = json.loads(body)["features"][0]
+        feature["geometry"]["coordinates"]
     except (ValueError, KeyError, IndexError, TypeError):
         raise BRouterError(_explain(body.strip()) or "BRouter returned an unexpected response")
+    return feature
+
+
+def _points(feature: dict) -> list[tuple[float, float, float | None]]:
     points = [
         (float(c[1]), float(c[0]), float(c[2]) if len(c) > 2 and c[2] is not None else None)
-        for c in coords
+        for c in feature["geometry"]["coordinates"]
     ]
     if len(points) < 2:
         raise BRouterError("BRouter returned an empty route")
     return points
+
+
+def route(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    profile: str,
+    params: dict[str, str] | None = None,
+    base_url: str | None = None,
+    timeout: float | None = None,
+) -> list[tuple[float, float, float | None]]:
+    """Route between two (lat, lon) points; returns [(lat, lon, ele), ...]."""
+    return _points(_request([start, end], profile, params, base_url, timeout))
+
+
+def way_tags(
+    waypoints: list[tuple[float, float]],
+    profile: str,
+    params: dict[str, str] | None = None,
+    base_url: str | None = None,
+    timeout: float | None = None,
+) -> tuple[float, list[tuple[float, dict[str, str]]], list[tuple[float, float]]]:
+    """Route through the waypoints: (length_m, [(distance_m, {tag: value}), ...], [(lat, lon), ...]).
+
+    Uses the per-segment "messages" table of BRouter's GeoJSON output (Distance and WayTags
+    columns). Pass params={"processUnusedTags": "1"} to get all OSM tags, not only the ones
+    the profile uses.
+    """
+    feature = _request(waypoints, profile, params, base_url, timeout)
+    props = feature.get("properties", {})
+    messages = props.get("messages") or []
+    rows: list[tuple[float, dict[str, str]]] = []
+    if messages:
+        header = messages[0]
+        try:
+            di, wi = header.index("Distance"), header.index("WayTags")
+        except ValueError:
+            raise BRouterError("BRouter response has no Distance/WayTags columns")
+        for m in messages[1:]:
+            tags = dict(kv.split("=", 1) for kv in str(m[wi]).split() if "=" in kv)
+            rows.append((float(m[di]), tags))
+    length = float(props.get("track-length") or sum(d for d, _ in rows))
+    coords = [(float(c[1]), float(c[0])) for c in feature["geometry"]["coordinates"]]
+    return length, rows, coords

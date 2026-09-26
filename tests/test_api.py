@@ -317,3 +317,147 @@ def test_zip_export_deduplicates_file_names(client):
     ids = [r["id"] for r in client.get("/api/routes").json()]
     zf = zipfile.ZipFile(io.BytesIO(client.get("/api/export/gpx.zip", params={"ids": ids}).content))
     assert sorted(zf.namelist()) == ["Same (2).gpx", "Same.gpx"]
+
+
+# ---------------------------------------------------------------- phase 4: surface
+
+def fake_way_tags(waypoints, profile, params=None, **kw):
+    assert profile == "shortest" and params == {"processUnusedTags": "1"}
+    n = len(waypoints) - 1
+    rows = [(n * 600.0, {"highway": "residential", "surface": "asphalt"}),
+            (n * 400.0, {"highway": "track", "surface": "gravel"})]
+    return n * 1000.0, rows, list(waypoints)
+
+
+def test_surface_estimate_and_manual_override(client, monkeypatch):
+    from app import brouter
+
+    monkeypatch.setattr(brouter, "way_tags", fake_way_tags)
+    upload(client, [("R.gpx", climb_gpx(5000, 10))])
+    rid = client.get("/api/routes").json()[0]["id"]
+
+    r = client.post(f"/api/routes/{rid}/surface").json()
+    assert r["paved_pct"] == 60 and r["paved_source"] == "estimated"
+    assert r["surface"]["unpaved_km"] > 0 and r["surface"]["segments"]
+
+    # A value typed by the user wins, and survives a new estimate...
+    r = client.patch(f"/api/routes/{rid}", json={"paved_pct": 25}).json()
+    assert (r["paved_pct"], r["paved_source"]) == (25, "manual")
+    r = client.post(f"/api/routes/{rid}/surface").json()
+    assert (r["paved_pct"], r["paved_source"]) == (25, "manual")
+    # ...unless explicitly overwritten.
+    r = client.post(f"/api/routes/{rid}/surface", params={"overwrite_manual": True}).json()
+    assert (r["paved_pct"], r["paved_source"]) == (60, "estimated")
+    # Clearing the field falls back to the estimate.
+    client.patch(f"/api/routes/{rid}", json={"paved_pct": 25})
+    r = client.patch(f"/api/routes/{rid}", json={"paved_pct": None}).json()
+    assert (r["paved_pct"], r["paved_source"]) == (60, "estimated")
+    # The list shows where the value comes from; the (large) estimate stays in the detail.
+    listed = client.get("/api/routes").json()[0]
+    assert listed["paved_source"] == "estimated" and "surface" not in listed
+
+
+def test_surface_estimate_errors(client, monkeypatch):
+    from app import brouter
+
+    upload(client, [("R.gpx", climb_gpx(5000, 10))])
+    rid = client.get("/api/routes").json()[0]["id"]
+
+    def down(*a, **kw):
+        raise brouter.BRouterUnavailable("BRouter is not reachable at http://brouter:17777")
+
+    monkeypatch.setattr(brouter, "way_tags", down)
+    assert client.post(f"/api/routes/{rid}/surface").status_code == 503
+
+
+def test_surface_bulk_estimate_in_background(client, monkeypatch):
+    from app import brouter, surface
+
+    monkeypatch.setattr(brouter, "way_tags", fake_way_tags)
+    upload(client, [("A.gpx", climb_gpx(3000, 5)), ("B.gpx", climb_gpx(4000, 5, start=(50.5, 5.0)))])
+    ids = [r["id"] for r in client.get("/api/routes").json()]
+    client.patch(f"/api/routes/{ids[0]}", json={"paved_pct": 10})
+
+    res = client.post("/api/surface/estimate", json={"ids": ids}).json()
+    assert res["queued"] == 2
+    assert surface.worker.wait(10)
+    status = client.get("/api/surface/status").json()
+    assert status["running"] is False and status["done"] == 2 and status["failed"] == 0
+    routes = {r["id"]: r for r in client.get("/api/routes").json()}
+    assert routes[ids[0]]["paved_pct"] == 10  # manual value kept
+    assert routes[ids[1]]["paved_pct"] == 60
+
+
+def test_auto_estimate_after_upload(client, monkeypatch):
+    from app import brouter, config, surface
+
+    monkeypatch.setattr(brouter, "way_tags", fake_way_tags)
+    monkeypatch.setattr(config, "SURFACE_AUTO_ESTIMATE", True)
+    upload(client, [("A.gpx", climb_gpx(3000, 5))])
+    assert surface.worker.wait(10)
+    assert client.get("/api/routes").json()[0]["paved_pct"] == 60
+
+
+# ---------------------------------------------------------------- phase 4: duplicates
+
+def test_same_track_in_a_different_file_is_a_duplicate(client):
+    original = climb_gpx(5000, 20)
+    # Same points, but a BOM, Windows line endings and another creator: different bytes.
+    variant = b"\xef\xbb\xbf" + original.replace(b'creator="tests"', b'creator="other"').replace(b"\n", b"\r\n")
+    assert upload(client, [("a.gpx", original)]).json()["results"][0]["status"] == "imported"
+    res = upload(client, [("b.gpx", variant)]).json()["results"][0]
+    assert res["status"] == "duplicate"
+    assert "Same track" in res["message"]
+    assert res["duplicates"][0]["name"] == "a"
+
+
+def test_track_hash_backfill(client, library):
+    from app import db
+    from app.main import backfill_track_hashes
+    from app.models import Route
+
+    upload(client, [("a.gpx", climb_gpx(5000, 20))])
+    with db.SessionLocal() as s:
+        route = s.query(Route).one()
+        expected = route.track_hash
+        route.track_hash = None
+        s.commit()
+    backfill_track_hashes()
+    with db.SessionLocal() as s:
+        assert s.query(Route).one().track_hash == expected
+
+
+def test_duplicates_groups_variants_and_ignore(client):
+    from tests.helpers import offset
+
+    def east(north_m, east_m, length_m, name, reverse=False):
+        pts = line_points(start=offset(51.0, 4.4, north_m, east_m), length_m=length_m, step_m=50, heading_deg=90,
+                          ele=lambda d: 10.0)
+        return (f"{name}.gpx", gpx_xml([(name, pts[::-1] if reverse else pts)]))
+
+    upload(client, [
+        east(0, 0, 8000, "Original"),
+        east(15, 0, 8000, "Copy from other site"),   # 15 m off: near-duplicate
+        east(0, 2000, 3000, "Short part", reverse=True),  # lies on Original, other direction
+        east(5000, 0, 8000, "Elsewhere"),
+    ])
+    ids = {r["name"]: r["id"] for r in client.get("/api/routes").json()}
+    client.patch(f"/api/routes/{ids['Copy from other site']}", json={"quality_rating": 4})
+
+    dup = client.get("/api/duplicates").json()
+    assert len(dup["groups"]) == 1
+    group = dup["groups"][0]
+    assert {r["name"] for r in group["routes"]} == {"Original", "Copy from other site"}
+    assert group["suggested_keep"] == ids["Copy from other site"]  # it has a rating
+    assert group["pairs"][0]["reversed"] is False
+
+    parts = {(v["part"]["name"], v["whole"]["name"]): v for v in dup["variants"]}
+    assert ("Short part", "Original") in parts
+    assert parts[("Short part", "Original")]["reversed"] is True
+    assert parts[("Short part", "Original")]["covered_pct"] >= 95
+
+    # "Not duplicates" hides the group; reset brings it back.
+    client.post("/api/duplicates/ignore", json={"ids": [r["id"] for r in group["routes"]]})
+    assert client.get("/api/duplicates").json()["groups"] == []
+    assert client.post("/api/duplicates/reset").json()["reset"] == 1
+    assert len(client.get("/api/duplicates").json()["groups"]) == 1

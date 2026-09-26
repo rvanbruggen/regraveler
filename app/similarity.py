@@ -175,3 +175,81 @@ def simplify_latlon(geometry: list[list[float]], tolerance_m: float) -> list[lis
         return geometry
     simple = to_metric_line(geometry).simplify(tolerance_m, preserve_topology=False)
     return to_latlon_lines(simple)[0] if not simple.is_empty else geometry
+
+
+# ------------------------------------------------------------------ library-wide duplicates
+
+
+@dataclass
+class DuplicatePair:
+    a_id: int
+    b_id: int
+    a_in_b: float  # share of a within tolerance of b
+    b_in_a: float
+    reversed: bool  # b runs in the opposite direction of a
+
+
+def _direction_reversed(a: LineString, b: LineString) -> bool:
+    """Does b run the opposite way along a? Projects points spread along a onto b and
+    checks whether their positions on b mostly decrease."""
+    fractions = np.linspace(0.05, 0.95, 19)
+    pos = np.array([b.project(a.interpolate(f, normalized=True)) for f in fractions])
+    steps = np.diff(pos)
+    # Loops wrap around at their start/end: ignore the big jumps.
+    steps = steps[np.abs(steps) < 0.5 * b.length]
+    return bool(len(steps) and (steps < 0).sum() > (steps > 0).sum())
+
+
+def duplicate_pairs(routes, tolerance_m: float | None = None, min_overlap: float = 0.9) -> list[DuplicatePair]:
+    """Pairs of routes where at least `min_overlap` of one lies within `tolerance_m` of the
+    other (so this includes a short route contained in a longer one)."""
+    tol = config.SIMILAR_TOLERANCE_M if tolerance_m is None else tolerance_m
+    routes = [r for r in routes if r.geometry and len(r.geometry) >= 2]
+    if len(routes) < 2:
+        return []
+    lines = [to_metric_line(r.geometry) for r in routes]
+    left, right = STRtree(lines).query(lines, predicate="dwithin", distance=tol)
+    buffers: dict[int, object] = {}
+
+    def buffer(i):
+        if i not in buffers:
+            buffers[i] = lines[i].buffer(tol, quad_segs=4)
+        return buffers[i]
+
+    def covered(i, j):  # share of route i within tolerance of route j
+        return lines[i].intersection(buffer(j)).length / lines[i].length if lines[i].length else 0.0
+
+    pairs = []
+    for i, j in zip(left.tolist(), right.tolist()):
+        if i >= j:
+            continue
+        a_in_b, b_in_a = covered(i, j), covered(j, i)
+        if max(a_in_b, b_in_a) < min_overlap:
+            continue
+        pairs.append(
+            DuplicatePair(
+                routes[i].id, routes[j].id, round(a_in_b, 3), round(b_in_a, 3),
+                _direction_reversed(lines[i], lines[j]),
+            )
+        )
+    return pairs
+
+
+def group_pairs(pairs: list[DuplicatePair], min_overlap: float) -> list[set[int]]:
+    """Connected groups of routes that are near-duplicates of each other (both ways)."""
+    parent: dict[int, int] = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for p in pairs:
+        if min(p.a_in_b, p.b_in_a) >= min_overlap:
+            parent[find(p.a_id)] = find(p.b_id)
+    groups: dict[int, set[int]] = {}
+    for x in list(parent):
+        groups.setdefault(find(x), set()).add(x)
+    return [g for g in groups.values() if len(g) > 1]

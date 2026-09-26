@@ -18,11 +18,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import __version__, brouter, combiner, config, db
+from . import __version__, brouter, combiner, config, db, surface
 from .gpxstats import compute_stats, parse_gpx, write_gpx
-from .importer import file_hash, import_gpx, store_derived
-from .models import Route
-from .similarity import find_similar, proximity_pairs, simplify_latlon
+from .importer import file_hash, import_gpx, store_derived, track_hash
+from .models import IgnoredDuplicate, Route
+from .similarity import duplicate_pairs, find_similar, group_pairs, proximity_pairs, simplify_latlon
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -32,7 +32,21 @@ async def lifespan(_app: FastAPI):
     if db.engine is None:
         db.init_db()
     config.GPX_DIR.mkdir(parents=True, exist_ok=True)
+    backfill_track_hashes()
     yield
+
+
+def backfill_track_hashes() -> None:
+    """Routes imported before track hashes existed get one from their GPX file."""
+    with db.SessionLocal() as session:
+        for route in session.scalars(select(Route).where(Route.track_hash.is_(None))).all():
+            path = config.GPX_DIR / route.gpx_path
+            try:
+                tracks = parse_gpx(path.read_bytes()).tracks
+                route.track_hash = track_hash(tracks[route.track_index].points)
+            except Exception:
+                continue  # missing or unreadable file: leave it empty
+        session.commit()
 
 
 app = FastAPI(title="Gravel Route Manager", version=__version__, lifespan=lifespan)
@@ -64,6 +78,7 @@ class RouteSummary(BaseModel):
     is_loop: bool
     quality_rating: int | None
     paved_pct: float | None
+    paved_source: str | None
     tags: list[str]
     notes: str | None
     source_name: str | None
@@ -80,6 +95,7 @@ class RouteDetail(RouteSummary):
     max_lat: float
     max_lon: float
     geometry: list[list[float]]
+    surface: dict | None
 
 
 class RouteUpdate(BaseModel):
@@ -259,12 +275,22 @@ def get_route(route_id: int, session: SessionDep):
 @app.patch("/api/routes/{route_id}", response_model=RouteDetail)
 def update_route(route_id: int, update: RouteUpdate, session: SessionDep):
     route = _get_route(session, route_id)
-    for key, value in update.model_dump(exclude_unset=True).items():
+    changes = update.model_dump(exclude_unset=True)
+    for key, value in changes.items():
         if key == "name" and not value:
             continue
         if isinstance(value, str):
             value = value.strip() or None
         setattr(route, key, value)
+    if "paved_pct" in changes:
+        # A value typed by the user wins over the estimate; clearing it falls back to the estimate.
+        if changes["paved_pct"] is not None:
+            route.paved_source = "manual"
+        elif route.surface and route.surface.get("paved_pct") is not None:
+            route.paved_pct = route.surface["paved_pct"]
+            route.paved_source = "estimated"
+        else:
+            route.paved_source = None
     session.commit()
     return route
 
@@ -279,6 +305,11 @@ def delete_routes(body: RouteIds, session: SessionDep):
     routes = session.scalars(select(Route).where(Route.id.in_(body.ids))).all()
     for route in routes:
         session.delete(route)
+    ids = [r.id for r in routes]
+    for row in session.scalars(
+        select(IgnoredDuplicate).where(IgnoredDuplicate.a_id.in_(ids) | IgnoredDuplicate.b_id.in_(ids))
+    ).all():
+        session.delete(row)
     session.commit()
     return {"deleted": len(routes)}
 
@@ -411,6 +442,9 @@ async def import_files(
             source_url=(ov.get("source_url") or source_url or "").strip() or None,
         )
         results.append(res.__dict__)
+    new_ids = [r["id"] for res in results for r in res["routes"]]
+    if new_ids and config.SURFACE_AUTO_ESTIMATE:
+        surface.worker.enqueue(new_ids)
     return {"results": results}
 
 
@@ -590,7 +624,134 @@ def combine_save(req: SaveCombinedRequest, session: SessionDep):
     )
     if res.status != "imported":
         raise HTTPException(500, f"Could not save the combined route: {res.message}")
+    if config.SURFACE_AUTO_ESTIMATE:
+        surface.worker.enqueue([res.routes[0]["id"]])
     return {"id": res.routes[0]["id"], "name": res.routes[0]["name"], "gpx_path": path, "similar": res.similar}
+
+
+# ---------------------------------------------------------------- surface (phase 4)
+
+
+@app.post("/api/routes/{route_id}/surface", response_model=RouteDetail)
+def estimate_surface(route_id: int, session: SessionDep, overwrite_manual: bool = False):
+    """Estimate the surface of one route now (map matching through BRouter)."""
+    route = _get_route(session, route_id)
+    try:
+        result = surface.estimate(load_track(route))
+    except brouter.BRouterUnavailable as exc:
+        raise HTTPException(503, str(exc))
+    except brouter.BRouterError as exc:
+        raise HTTPException(502, str(exc))
+    surface.apply_estimate(route, result, overwrite_manual)
+    session.commit()
+    return route
+
+
+class SurfaceJob(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    force: bool = False  # also routes that already have an estimate
+    overwrite_manual: bool = False
+
+
+@app.post("/api/surface/estimate")
+def estimate_surface_bulk(job: SurfaceJob):
+    """Queue surface estimates for several routes (runs in the background)."""
+    added = surface.worker.enqueue(job.ids, force=job.force, overwrite_manual=job.overwrite_manual)
+    return {"queued": added, **surface.worker.status()}
+
+
+@app.get("/api/surface/status")
+def surface_status():
+    return surface.worker.status()
+
+
+# ---------------------------------------------------------------- duplicates (phase 4)
+
+
+def _ignored_pairs(session: Session) -> set[tuple[int, int]]:
+    return {(r.a_id, r.b_id) for r in session.scalars(select(IgnoredDuplicate)).all()}
+
+
+@app.get("/api/duplicates")
+def duplicates(session: SessionDep):
+    """Groups of near-duplicate routes, and variants (a route lying on another route)."""
+    routes = session.scalars(select(Route)).all()
+    by_id = {r.id: r for r in routes}
+    ignored = _ignored_pairs(session)
+    pairs = [
+        p for p in duplicate_pairs(routes, config.SIMILAR_TOLERANCE_M, min(config.VARIANT_MIN_OVERLAP, config.SIMILAR_MIN_OVERLAP))
+        if (min(p.a_id, p.b_id), max(p.a_id, p.b_id)) not in ignored
+    ]
+    groups = group_pairs(pairs, config.SIMILAR_MIN_OVERLAP)
+    in_group = {rid: i for i, g in enumerate(groups) for rid in g}
+
+    def summary(r: Route) -> dict:
+        return {
+            "id": r.id, "name": r.name, "source_name": r.source_name, "distance_km": r.distance_km,
+            "elevation_gain_m": r.elevation_gain_m, "quality_rating": r.quality_rating, "tags": r.tags,
+            "has_notes": bool(r.notes), "imported_at": r.imported_at, "gpx_path": r.gpx_path,
+            "is_derived": bool(r.derived_from),
+        }
+
+    def keep_score(r: Route):
+        # Suggest keeping the route with the most personal metadata, then the oldest import.
+        return (-(r.quality_rating is not None) - bool(r.tags) - bool(r.notes) - (r.paved_source == "manual"), r.imported_at, r.id)
+
+    out_groups = []
+    for g in groups:
+        members = sorted((by_id[i] for i in g), key=keep_score)
+        gp = [p for p in pairs if p.a_id in g and p.b_id in g]
+        out_groups.append({
+            "routes": [summary(r) for r in members],
+            "suggested_keep": members[0].id,
+            "pairs": [
+                {"a": p.a_id, "b": p.b_id, "a_in_b_pct": round(p.a_in_b * 100), "b_in_a_pct": round(p.b_in_a * 100),
+                 "reversed": p.reversed, "same_track": by_id[p.a_id].track_hash == by_id[p.b_id].track_hash}
+                for p in gp
+            ],
+        })
+    out_groups.sort(key=lambda g: g["routes"][0]["name"].lower())
+
+    variants = []
+    for p in pairs:
+        if min(p.a_in_b, p.b_in_a) >= config.SIMILAR_MIN_OVERLAP:
+            continue  # already in a group
+        part, whole = (p.a_id, p.b_id) if p.a_in_b >= p.b_in_a else (p.b_id, p.a_id)
+        covered = max(p.a_in_b, p.b_in_a)
+        if covered < config.VARIANT_MIN_OVERLAP:
+            continue
+        variants.append({
+            "part": summary(by_id[part]), "whole": summary(by_id[whole]),
+            "covered_pct": round(covered * 100), "reversed": p.reversed,
+        })
+    variants.sort(key=lambda v: (v["whole"]["name"].lower(), v["part"]["name"].lower()))
+    return {"groups": out_groups, "variants": variants}
+
+
+@app.post("/api/duplicates/ignore")
+def ignore_duplicates(body: RouteIds, session: SessionDep):
+    """Mark routes as "not duplicates" of each other (every pair among the given ids)."""
+    ignored = _ignored_pairs(session)
+    ids = sorted(set(body.ids))
+    added = 0
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            if (a, b) not in ignored:
+                session.add(IgnoredDuplicate(a_id=a, b_id=b))
+                added += 1
+    session.commit()
+    return {"ignored_pairs": added}
+
+
+@app.post("/api/duplicates/reset")
+def reset_ignored_duplicates(session: SessionDep):
+    """Forget all "not duplicates" decisions."""
+    n = 0
+    for row in session.scalars(select(IgnoredDuplicate)).all():
+        session.delete(row)
+        n += 1
+    session.commit()
+    return {"reset": n}
 
 
 # ---------------------------------------------------------------- frontend

@@ -27,6 +27,8 @@ class Route(Base):
     track_index: Mapped[int] = mapped_column(Integer, default=0)
     track_name: Mapped[str | None] = mapped_column(String(300))
     file_hash: Mapped[str] = mapped_column(String(64), index=True)
+    # Hash of the track's coordinates (rounded): the same track in a different file.
+    track_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     # Computed on import
     distance_km: Mapped[float] = mapped_column(Float)
@@ -49,6 +51,9 @@ class Route(Base):
     # User metadata. Add new fields here (nullable); db.init_db adds the column.
     quality_rating: Mapped[int | None] = mapped_column(Integer)
     paved_pct: Mapped[float | None] = mapped_column(Float)
+    paved_source: Mapped[str | None] = mapped_column(String(20))  # "manual" or "estimated"
+    # Surface estimate from OpenStreetMap (see app/surface.py), or None.
+    surface: Mapped[dict | None] = mapped_column(JSON)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     notes: Mapped[str | None] = mapped_column(Text)
 
@@ -63,3 +68,14 @@ class Route(Base):
     @property
     def bbox(self) -> tuple[float, float, float, float]:
         return (self.min_lat, self.min_lon, self.max_lat, self.max_lon)
+
+
+class IgnoredDuplicate(Base):
+    """A pair of routes the user marked as "not duplicates"."""
+
+    __tablename__ = "ignored_duplicates"
+    __table_args__ = (UniqueConstraint("a_id", "b_id", name="uq_ignored_pair"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    a_id: Mapped[int] = mapped_column(Integer, index=True)  # always the smaller id
+    b_id: Mapped[int] = mapped_column(Integer, index=True)

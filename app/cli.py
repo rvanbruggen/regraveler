@@ -2,6 +2,7 @@
 
     python -m app.cli import <folder> [--source-name NAME] [--source-url URL] [--no-source-from-folder]
     python -m app.cli recompute
+    python -m app.cli estimate-surface [--all] [--overwrite-manual]
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from . import config, db
+from . import brouter, config, db, surface
 from .gpxstats import compute_stats, parse_gpx
 from .importer import import_folder
 from .models import Route
@@ -75,6 +76,34 @@ def cmd_recompute(_args) -> int:
     return 0
 
 
+def cmd_estimate_surface(args) -> int:
+    """Estimate the surface of routes via BRouter (only routes without an estimate, unless --all)."""
+    from .main import load_track
+
+    db.init_db()
+    failed = 0
+    with db.SessionLocal() as session:
+        routes = session.scalars(select(Route).order_by(Route.name)).all()
+        todo = [r for r in routes if args.all or not r.surface]
+        print(f"Estimating the surface of {len(todo)} route(s) via {config.BROUTER_URL}")
+        for route in todo:
+            try:
+                result = surface.estimate(load_track(route))
+            except brouter.BRouterUnavailable as exc:
+                print(f"ERR  {exc}")
+                return 2
+            except Exception as exc:
+                failed += 1
+                print(f"ERR  {route.name}: {getattr(exc, 'detail', exc)}")
+                continue
+            applied = surface.apply_estimate(route, result, args.overwrite_manual)
+            session.commit()
+            pct = "?" if result["paved_pct"] is None else f"{result['paved_pct']}%"
+            note = "" if applied else f"  (kept your {route.paved_pct:g}%)"
+            print(f"OK   {route.name}: {pct} paved, {result['cobbles_km']} km cobbles{note}")
+    return 1 if failed else 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Gravel Route Manager tools")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -92,6 +121,11 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("recompute", help="Recompute stats for all routes from their GPX files")
     p.set_defaults(func=cmd_recompute)
+
+    p = sub.add_parser("estimate-surface", help="Estimate paved %% from OpenStreetMap via BRouter")
+    p.add_argument("--all", action="store_true", help="Also routes that already have an estimate")
+    p.add_argument("--overwrite-manual", action="store_true", help="Replace paved %% values you entered yourself")
+    p.set_defaults(func=cmd_estimate_surface)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -57,6 +57,15 @@ def file_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def track_hash(points) -> str:
+    """Hash of a track's coordinates rounded to ~1 m, ignoring elevation, time and the file
+    format: detects the same track saved as a different file (other name, encoding, ...)."""
+    h = hashlib.sha256()
+    for lat, lon, *_ in points:
+        h.update(f"{lat:.5f},{lon:.5f};".encode())
+    return h.hexdigest()
+
+
 def route_name(filename: str, track_name: str | None, track_count: int, index: int) -> str:
     stem = Path(filename).stem.strip()
     if track_count > 1:
@@ -144,14 +153,22 @@ def import_gpx(
         for r in session.scalars(select(Route).where(Route.file_hash == digest)).all()
     }
     new_tracks = []
+    same_track = False
     for i, track in enumerate(parsed.tracks):
         if i in existing:
             result.duplicates.append({"id": existing[i].id, "name": existing[i].name})
+            continue
+        twin = session.scalars(select(Route).where(Route.track_hash == track_hash(track.points))).first()
+        if twin is not None:
+            result.duplicates.append({"id": twin.id, "name": twin.name})
+            same_track = True
         else:
             new_tracks.append((i, track))
     if not new_tracks:
         result.status = "duplicate"
-        result.message = "Identical file already imported"
+        result.message = (
+            "Same track already imported (from a different file)" if same_track else "Identical file already imported"
+        )
         return result
 
     try:
@@ -176,6 +193,7 @@ def import_gpx(
             track_index=i,
             track_name=track.name,
             file_hash=digest,
+            track_hash=track_hash(track.points),
             distance_km=st.distance_km,
             elevation_gain_m=st.elevation_gain_m,
             elevation_loss_m=st.elevation_loss_m,
