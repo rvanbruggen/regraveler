@@ -3,13 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gravel Route Manager</title>
+  <title>regraveler · gravel route manager</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
-  <h1>Gravel Route Manager <span id="version" class="muted small"></span></h1>
+  <h1 class="brand">
+    <img src="/static/logo.svg" alt="" width="36" height="36">
+    <span class="wordmark"><span class="re">re</span>graveler</span>
+    <span class="tagline">gravel route manager <span id="version"></span></span>
+  </h1>
   <nav>
     <button class="tab active" data-view="library">Library</button>
     <button class="tab" data-view="map">Map</button>

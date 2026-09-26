@@ -25,6 +25,11 @@ header {
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
 }
 header h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.brand img { display: block; }
+.brand .wordmark { font-size: 24px; letter-spacing: -0.5px; line-height: 1; }
+.brand .re { color: var(--accent); }
+.brand .tagline { align-self: flex-end; font-size: 12px; font-weight: 400; color: var(--muted); margin: 0 0 2px 4px; }
 nav { display: flex; flex-wrap: wrap; gap: 4px; }
 main { padding: 16px; }
 

@@ -119,8 +119,11 @@ def test_bad_upload_is_reported_per_file(client):
 
 
 def test_frontend_is_served(client):
-    assert "Gravel Route Manager" in client.get("/").text
-    assert client.get("/static/app.js").status_code == 200
+    page = client.get("/").text
+    assert "<title>regraveler" in page
+    assert 'href="/static/favicon.svg"' in page
+    for asset in ("app.js", "logo.svg", "favicon.svg"):
+        assert client.get(f"/static/{asset}").status_code == 200
 
 
 def test_version_endpoint(client):

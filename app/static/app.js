@@ -813,7 +813,7 @@ $("#prox-distance").addEventListener("input", () => {
 
 const COLOR_A = "#2f6fd6";
 const COLOR_B = "#d62f4b";
-const COLOR_CONNECTOR = "#8e24aa";
+const COLOR_CONNECTOR = "#b35c1e"; // the logo's "new line" orange
 
 const cb = {
   map: null,

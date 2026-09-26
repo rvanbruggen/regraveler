@@ -1,10 +1,15 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-wordmark-dark.svg">
+  <img alt="regraveler" src="docs/logo-wordmark-light.svg" width="360">
+</picture>
+
 # regraveler — Gravel Route Manager
 
 A self-hosted web app to manage a personal library of gravel cycling routes (GPX files):
 import them, compute stats, tag and rate them, show them on a map, and combine two routes into
 a new one with automatically routed gravel connectors (via a self-hosted BRouter).
 
-**Version:** 0.3.1 · **Status: phase 3 (import, library, map, combiner).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.3.2 · **Status: phase 3 (import, library, map, combiner).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Browser tab version of logo.svg: heavier lines, fewer dots, adapts to dark mode. -->
+  <style>
+    .orig { stroke: #9a988f; }
+    .hole { fill: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      .orig { stroke: #8a887f; }
+      .hole { fill: #202020; }
+    }
+  </style>
+  <g fill="none" stroke-linejoin="round" stroke-linecap="round">
+    <polyline class="orig" points="6,24 18,14 30,22 42,12 58,18" stroke-width="4"/>
+    <polyline class="orig" points="6,46 20,52 32,42 44,50 58,40" stroke-width="4"/>
+    <polyline points="6,24 18,14 30,22 32,42 44,50 58,40" stroke="#b35c1e" stroke-width="7.5"/>
+  </g>
+  <g fill="#b35c1e">
+    <circle cx="30" cy="22" r="5.5"/><circle cx="32" cy="42" r="5.5"/>
+  </g>
+  <g class="hole">
+    <circle cx="30" cy="22" r="2.2"/><circle cx="32" cy="42" r="2.2"/>
+  </g>
+</svg>
