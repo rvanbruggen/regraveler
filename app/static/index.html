@@ -68,10 +68,24 @@
         <button type="button" id="sel-download" class="secondary">Download GPX</button>
         <button type="button" id="sel-map" class="secondary">Show on map</button>
         <button type="button" id="sel-surface" class="secondary" title="Estimate paved % from OpenStreetMap">Estimate surface</button>
+        <button type="button" id="sel-tags" class="secondary" aria-expanded="false" aria-controls="tag-panel">Tags…</button>
         <button type="button" id="sel-rename" class="secondary" title="Name after start town and places visited">Rename…</button>
         <button type="button" id="sel-remove" class="danger">Remove</button>
         <a class="link small" id="sel-clear">clear selection</a>
       </div>
+    </div>
+    <div id="tag-panel" class="tag-panel" hidden>
+      <form id="tag-add-form" class="tag-add" autocomplete="off">
+        <label>Add a tag to the selected routes
+          <input id="tag-add" list="tag-list" placeholder="e.g. forest, or several: forest, spring">
+        </label>
+        <button type="submit">Add to selected</button>
+      </form>
+      <div class="small">
+        <span class="muted">Tags on the selected routes (click × to remove from all of them):</span>
+        <span id="tag-current"></span>
+      </div>
+      <span id="tag-status" class="muted small"></span>
     </div>
     <div class="table-wrap">
       <table id="routes">

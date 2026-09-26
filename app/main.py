@@ -299,6 +299,29 @@ class RouteIds(BaseModel):
     ids: list[int] = Field(min_length=1)
 
 
+class TagChange(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    add: list[str] = []
+    remove: list[str] = []
+
+
+@app.post("/api/routes/tags")
+def change_tags(body: TagChange, session: SessionDep):
+    """Add and/or remove tags on several routes at once."""
+    add, remove = normalise_tags(body.add), set(normalise_tags(body.remove))
+    if not add and not remove:
+        raise HTTPException(422, "Give at least one tag to add or remove")
+    updated = 0
+    for route in session.scalars(select(Route).where(Route.id.in_(body.ids))).all():
+        tags = [t for t in (route.tags or []) if t not in remove]
+        tags += [t for t in add if t not in tags]
+        if tags != (route.tags or []):
+            route.tags = tags
+            updated += 1
+    session.commit()
+    return {"updated": updated}
+
+
 @app.post("/api/routes/delete")
 def delete_routes(body: RouteIds, session: SessionDep):
     """Remove several routes from the library. GPX files on disk are left untouched."""

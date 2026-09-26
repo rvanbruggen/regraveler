@@ -501,3 +501,24 @@ def test_duplicates_groups_variants_and_ignore(client):
     assert client.get("/api/duplicates").json()["groups"] == []
     assert client.post("/api/duplicates/reset").json()["reset"] == 1
     assert len(client.get("/api/duplicates").json()["groups"]) == 1
+
+
+
+def test_bulk_tags(client):
+    upload(client, [("A.gpx", climb_gpx(3000, 5)), ("B.gpx", climb_gpx(4000, 5, start=(50.5, 5.0))),
+                    ("C.gpx", climb_gpx(5000, 5, start=(50.7, 4.6)))])
+    ids = {r["name"]: r["id"] for r in client.get("/api/routes").json()}
+    client.patch(f"/api/routes/{ids['A']}", json={"tags": ["forest", "mud"]})
+
+    res = client.post("/api/routes/tags", json={"ids": [ids["A"], ids["B"]], "add": [" Spring  Ride", "forest"]})
+    assert res.json() == {"updated": 2}
+    tags = {r["name"]: r["tags"] for r in client.get("/api/routes").json()}
+    assert tags == {"A": ["forest", "mud", "spring ride"], "B": ["spring ride", "forest"], "C": []}
+
+    res = client.post("/api/routes/tags", json={"ids": list(ids.values()), "remove": ["Forest"]})
+    assert res.json() == {"updated": 2}  # C had nothing to remove
+    tags = {r["name"]: r["tags"] for r in client.get("/api/routes").json()}
+    assert tags == {"A": ["mud", "spring ride"], "B": ["spring ride"], "C": []}
+
+    assert client.post("/api/routes/tags", json={"ids": [ids["A"]]}).status_code == 422
+    assert client.post("/api/routes/tags", json={"ids": [], "add": ["x"]}).status_code == 422

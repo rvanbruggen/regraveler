@@ -213,3 +213,16 @@ td.est { color: var(--muted); }
 #rn-table td.proposal input { font-weight: 500; }
 #rn-table tr.unchanged td { color: var(--muted); }
 #view-rename .actions { margin: 0 0 12px; }
+
+/* Bulk tags */
+.tag-panel {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.tag-add { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.tag-add label { flex: 1; min-width: 220px; }
+#tag-current .tag { padding-right: 2px; }
+#tag-current .tag button {
+  background: none; border: none; color: var(--muted); padding: 0 4px; font-size: 13px; line-height: 1;
+}
+#tag-current .tag button:hover { color: var(--danger); }

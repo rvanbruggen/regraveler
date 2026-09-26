@@ -9,7 +9,7 @@ A self-hosted web app to manage a personal library of gravel cycling routes (GPX
 import them, compute stats, tag and rate them, show them on a map, and combine two routes into
 a new one with automatically routed gravel connectors (via a self-hosted BRouter).
 
-**Version:** 0.5.1 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.5.2 · **Status: phase 4 (import, library, map, combiner, surface estimate, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -38,6 +38,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     with the original files (a multi-track file is included once).
   - **Show on map:** the map (and library) show only the selected routes until you click
     *show all routes* or *Clear*.
+  - **Tags…:** add one or more tags to all selected routes, or remove a tag from all of them
+    (the panel lists the tags on the selection with how many routes have each, e.g. `forest 3/5`).
   - **Estimate surface:** (re)estimates the paved % from OpenStreetMap; progress is shown next
     to the route count.
   - **Remove:** removes them from the library after one confirmation (GPX files stay on disk).

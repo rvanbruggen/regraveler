@@ -242,6 +242,8 @@ function toggleChecked(id, on) {
 function renderSelection() {
   const n = checked.size;
   $("#sel-bar").hidden = n === 0;
+  if (n === 0) toggleTagPanel(false);
+  else if (!$("#tag-panel").hidden) renderTagPanel();
   $("#sel-count").textContent = `${n} selected`;
   const all = $("#sel-all");
   all.checked = n > 0 && n === routes.length;
@@ -314,6 +316,59 @@ $("#sel-surface").addEventListener("click", async () => {
     return;
   }
   watchSurfaceJob();
+});
+
+// Tags for the selected routes.
+
+function toggleTagPanel(open) {
+  $("#tag-panel").hidden = !open;
+  $("#sel-tags").setAttribute("aria-expanded", String(open));
+  if (open) {
+    renderTagPanel();
+    $("#tag-add").focus();
+  }
+}
+
+function renderTagPanel() {
+  const selected = routes.filter((r) => checked.has(r.id));
+  const counts = new Map();
+  selected.forEach((r) => r.tags.forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
+  const sorted = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  $("#tag-current").replaceChildren(
+    ...(sorted.length
+      ? sorted.map(([t, n]) =>
+          el("span", { class: "tag" }, `${t} `,
+            el("span", { class: "muted" }, `${n}/${selected.length}`),
+            el("button", { type: "button", title: `Remove "${t}" from the selected routes`, "aria-label": `Remove ${t}`, onclick: () => changeTags({ remove: [t] }) }, "×")))
+      : [el("span", { class: "muted" }, " none")])
+  );
+}
+
+async function changeTags({ add = [], remove = [] }) {
+  const ids = [...checked];
+  if (!ids.length || (!add.length && !remove.length)) return;
+  try {
+    const res = await api("/api/routes/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, add, remove }),
+    });
+    const what = add.length ? `added ${add.map((t) => `"${t}"`).join(", ")}` : `removed "${remove[0]}"`;
+    await Promise.all([loadRoutes(), loadFacets()]); // keeps the selection (routes stay shown)
+    $("#tag-status").textContent = `${what} · ${res.updated} route${res.updated === 1 ? "" : "s"} changed`;
+    if (selectedId && checked.has(selectedId)) openDetail(selectedId);
+  } catch (err) {
+    $("#tag-status").textContent = `Error: ${err.message}`;
+  }
+}
+
+$("#sel-tags").addEventListener("click", () => toggleTagPanel($("#tag-panel").hidden));
+$("#tag-add-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const tags = splitTags($("#tag-add").value);
+  if (!tags.length) return $("#tag-add").focus();
+  await changeTags({ add: tags });
+  $("#tag-add").value = "";
 });
 
 /** Show progress of background surface estimates; refresh the table when they finish. */
