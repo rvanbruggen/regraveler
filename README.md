@@ -10,7 +10,7 @@ road cycling and hiking: import them, compute stats, tag and rate them, show the
 combine two routes into a new one with automatically routed connectors (via a self-hosted
 BRouter). Formerly *regraveler*.
 
-**Version:** 0.7.1 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.7.2 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -32,6 +32,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     from OpenStreetMap (see below).
   - **Name:** new routes are named after the places they visit (see *Route names*); the name
     from the file is kept at the top of the notes (`Original name: …`).
+
+![Import: batch source, activity and tags, with per-file overrides](docs/screenshots/import.png)
+
 - **Library:** sortable table with filters on activity, distance, elevation gain, paved %,
   quality, tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
 - **Activity:** every route is a gravel, road or hiking route (routes from before 0.6.0 start as
@@ -49,6 +52,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   - **Estimate surface:** (re)estimates the paved % from OpenStreetMap; progress is shown next
     to the route count.
   - **Remove:** removes them from the library after one confirmation (GPX files stay on disk).
+
+![Library: filters, activity, estimated paved %, ratings and tags; three routes selected](docs/screenshots/library.png)
+
 - **Route details:** map, stats, edit metadata (name, quality 1–5, paved %, tags, notes,
   source), list of similar/overlapping routes, download of the original GPX, remove from library.
 - **Surface from OpenStreetMap:** each route's surface is estimated as *paved*, *cobbles*
@@ -57,12 +63,17 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   library comes from the estimate (shown as ≈38%) unless you type your own value, which then
   always wins; the panel offers *use the estimate* to switch back, and clearing the field does
   the same. Needs BRouter (see Docker); routes outside the downloaded tiles can't be estimated.
+
+![Route panel: stats, the map coloured by surface and the surface breakdown](docs/screenshots/route-panel.png)
+
 - **Route names:** *suggest names…* above the library (or *Rename…* for selected routes) opens
   a review screen with a proposed name per route: the start town, then up to three places the
   route visits, in riding order, e.g. *Tervuren – Kapucijnenbos – Duisburg – Hogenbos* (for a
   point-to-point route the last place is where it ends). Edit proposals, untick routes to leave
   alone, and rename; the current name is kept at the top of the notes (only the first time).
   Routes with the same proposal get the distance added.
+
+![Rename: the original names next to the proposed ones](docs/screenshots/rename.png)
 
 - **Map:** all routes that match the filters (the same filter bar as the library) drawn as
   coloured lines on an OpenStreetMap map. Hover for the name, click a route to open its details
@@ -75,6 +86,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 - The filters, the active view and the proximity setting are kept in the URL, so a bookmark
   brings back the same screen.
 **Utilities** (the *Utilities* menu in the header) are the operations on routes:
+
+![Map: routes near each other highlighted, shared stretches in yellow](docs/screenshots/map.jpg)
 
 - **Combine** two routes into a new one by picking the part of each route you want to ride:
   1. Pick route A and B (dropdowns, click them on the map, "Combine…" in a route's
@@ -98,6 +111,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     says so; swapping B1 and B2 usually fixes it. For loop routes, *Other way round A/B* takes
     the other part of that loop (through its start). *Ride the whole result the other way*
     reverses the direction.
+
+![Combine: a loop from two routes, with gravel connectors routed by BRouter](docs/screenshots/combine.jpg)
+
 - **Change start point** of a loop route: choose a loop (dropdown, click it on the map, or
   *Change start…* in a loop's detail panel), then click where it should start (clicks snap onto
   the route), drag the *Start* marker, or use the slider. The preview shows the stats, the town
@@ -106,6 +122,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   file in `gpx/derived/`, with the original linked as its parent and its tags, activity,
   rating, paved % and source copied). The new route is marked as "not duplicates" of the
   original, so the Duplicates utility doesn't suggest removing one of them.
+
+![Change start point: the same loop, starting in Duisburg](docs/screenshots/change-start.jpg)
+
 - **Duplicates:** all groups of near-duplicate routes in the library (e.g. the same route
   downloaded from two sites), with overlap, source, rating and tags per route, "identical
   track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
@@ -114,6 +133,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   entirely on a longer route, such as a short loop inside a long one.
 
 Original GPX files are never modified.
+
+![Duplicates: the same routes from two sites, with a suggestion which one to keep](docs/screenshots/duplicates.png)
 
 ## Run with Docker
 
@@ -234,6 +255,10 @@ Run the tests:
 .venv/bin/python -m pytest
 ```
 
+The screenshots in this README are made with `docs/screenshots/take_screenshots.py` (Playwright,
+driving your installed Chrome). Its docstring explains the scratch setup; it's a docs helper,
+not part of the app, so Playwright isn't in the requirements.
+
 ## How the stats are computed
 
 - **Distance:** geodesic (WGS84) distance between consecutive points.
@@ -318,6 +343,8 @@ app/
   main.py        FastAPI app (JSON API + static frontend)
   cli.py         command line import / recompute
   static/        single-page frontend (vanilla JS + Leaflet)
+docs/
+  screenshots/   README screenshots and the script that takes them
 brouter/
   download-segments.sh  downloads BRouter routing data tiles (used by docker-compose)
 tests/           pytest tests

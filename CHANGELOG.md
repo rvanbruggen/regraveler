@@ -2,6 +2,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| **0.7.2** | 2026-09-26 | README: screenshots of every major feature (library, route panel, rename, map, combine, change start point, duplicates, import) and the script that retakes them |
 | **0.7.1** | 2026-09-26 | Import: tags for the whole batch plus extra tags per file (Import screen), and `--tags` for the CLI import |
 | **0.7.0** | 2026-09-26 | Utilities menu in the header: Combine and Duplicates moved into it. New utility **Change start point**: start a loop route anywhere on the loop (click, drag or slider; optionally the other way round), preview with stats and start town, download the GPX or save as a new derived route (tags, activity, rating, paved % and source copied; marked as "not duplicates" of the original). "Change start…" in a loop's detail panel |
 | **0.6.0** | 2026-09-26 | Renamed from regraveler to **rerouter** (same logo): routes for gravel cycling, road cycling and hiking. New activity field (gravel / road / hiking): filter and column in the library, set per route or for a selection, batch and per-file setting on import (CLI `--activity`), and it picks the combiner's routing profile (gravel, fastbike, hiking-mountain). Existing routes start as gravel |
