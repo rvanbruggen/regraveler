@@ -57,6 +57,15 @@ def unique_slug(session: Session, name: str) -> str:
     return slug
 
 
+def normalise_tags(tags: list[str]) -> list[str]:
+    out: list[str] = []
+    for t in tags:
+        t = " ".join(t.strip().lower().split())
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
 def file_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -222,7 +231,7 @@ def import_gpx(
             max_lon=st.max_lon,
             is_loop=st.is_loop,
             geometry=st.geometry,
-            tags=list(tags or []),
+            tags=normalise_tags(tags or []),
             notes=route_notes,
             activity=activity or config.ACTIVITIES[0],
             derived_from=list(derived_from or []),
@@ -275,6 +284,7 @@ def import_folder(
     source_url: str | None = None,
     source_from_folder: bool = True,
     activity: str | None = None,
+    tags: list[str] | None = None,
     progress=None,
 ) -> list[ImportResult]:
     """Import every .gpx file below `folder`.
@@ -303,6 +313,7 @@ def import_folder(
             source_url=source_url,
             library_path=relative_to_library(path),
             activity=activity,
+            tags=tags,
         )
         results.append(res)
         if progress:

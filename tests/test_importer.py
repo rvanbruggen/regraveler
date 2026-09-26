@@ -129,3 +129,11 @@ def test_import_folder_outside_library_copies_files(session, library, tmp_path):
     route = session.scalars(select(Route)).one()
     assert route.gpx_path == "uploads/manual/x.gpx"
     assert (config.GPX_DIR / route.gpx_path).exists()
+
+
+def test_import_folder_with_tags(session, library):
+    src = library / "batch"
+    src.mkdir()
+    (src / "a.gpx").write_bytes(loop_gpx())
+    import_folder(session, library, tags=["Hageland", " favourite "])
+    assert session.scalars(select(Route)).one().tags == ["hageland", "favourite"]

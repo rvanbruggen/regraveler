@@ -248,13 +248,14 @@
       <label>Source name (whole batch) <input type="text" id="batch-source-name" list="source-list" placeholder="e.g. gravelroutedatabase.be"></label>
       <label>Source URL (whole batch) <input type="url" id="batch-source-url" placeholder="https://…"></label>
       <label>Activity (whole batch) <select id="batch-activity" class="activity-select"></select></label>
+      <label>Tags (whole batch) <input type="text" id="batch-tags" list="tag-list" placeholder="comma separated, e.g. kempen, favourite"></label>
       <datalist id="source-list"></datalist>
     </div>
     <div id="dropzone">
       <p>Drop GPX files here, or <label class="link">choose files<input type="file" id="file-input" accept=".gpx,application/gpx+xml" multiple hidden></label></p>
     </div>
     <table id="pending" hidden>
-      <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th>Activity (override)</th><th></th></tr></thead>
+      <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th>Activity (override)</th><th>Extra tags</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     <p class="actions">

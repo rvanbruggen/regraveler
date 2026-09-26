@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from . import __version__, brouter, combiner, config, db, places, surface
 from .gpxstats import compute_stats, parse_gpx, write_gpx
-from .importer import file_hash, import_gpx, store_derived, track_hash, unique_slug
+from .importer import file_hash, import_gpx, normalise_tags, store_derived, track_hash, unique_slug
 from .models import IgnoredDuplicate, Route
 from .similarity import duplicate_pairs, find_similar, group_pairs, proximity_pairs, simplify_latlon
 
@@ -136,15 +136,6 @@ def check_activity(value: str) -> str:
     if value not in config.ACTIVITIES:
         raise ValueError(f"activity must be one of {', '.join(config.ACTIVITIES)}")
     return value
-
-
-def normalise_tags(tags: list[str]) -> list[str]:
-    out: list[str] = []
-    for t in tags:
-        t = " ".join(t.strip().lower().split())
-        if t and t not in out:
-            out.append(t)
-    return out
 
 
 # ---------------------------------------------------------------- routes
@@ -492,6 +483,14 @@ def facets(session: SessionDep):
     }
 
 
+def _split_tags(value) -> list[str]:
+    """Tags given as "a, b" or ["a", "b"]."""
+    if not value:
+        return []
+    items = value.split(",") if isinstance(value, str) else [str(v) for v in value]
+    return [t for t in items if t.strip()]
+
+
 @app.post("/api/import")
 async def import_files(
     session: SessionDep,
@@ -499,7 +498,9 @@ async def import_files(
     source_name: Annotated[str | None, Form()] = None,
     source_url: Annotated[str | None, Form()] = None,
     activity: Annotated[str | None, Form()] = None,
-    # JSON list aligned with `files`: [{"source_name": ..., "source_url": ..., "activity": ...}, ...]
+    tags: Annotated[str | None, Form()] = None,  # comma separated, for the whole batch
+    # JSON list aligned with `files`:
+    # [{"source_name": ..., "source_url": ..., "activity": ..., "tags": "extra, tags"}, ...]
     overrides: Annotated[str | None, Form()] = None,
 ):
     try:
@@ -515,6 +516,7 @@ async def import_files(
         ]
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+    batch_tags = _split_tags(tags)
     for i, upload in enumerate(files):
         ov = per_file[i] if i < len(per_file) and isinstance(per_file[i], dict) else {}
         data = await upload.read()
@@ -525,6 +527,8 @@ async def import_files(
             source_name=(ov.get("source_name") or source_name or "").strip() or None,
             source_url=(ov.get("source_url") or source_url or "").strip() or None,
             activity=(file_activities[i] if i < len(file_activities) else None) or batch_activity,
+            # Per-file tags are added to the batch tags.
+            tags=batch_tags + _split_tags(ov.get("tags")),
         )
         results.append(res.__dict__)
     new_ids = [r["id"] for res in results for r in res["routes"]]

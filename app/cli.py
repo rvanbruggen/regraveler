@@ -47,6 +47,7 @@ def cmd_import(args) -> int:
             source_url=args.source_url,
             source_from_folder=not args.no_source_from_folder,
             activity=args.activity,
+            tags=[t for t in (args.tags or "").split(",") if t.strip()],
             progress=progress,
         )
     print(
@@ -120,6 +121,7 @@ def main(argv=None) -> int:
     )
     p.add_argument("--activity", choices=config.ACTIVITIES, default=config.ACTIVITIES[0],
                    help="Activity of the imported routes (default: %(default)s)")
+    p.add_argument("--tags", help='Tags for all imported routes, comma separated, e.g. "kempen, favourite"')
     p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("recompute", help="Recompute stats for all routes from their GPX files")

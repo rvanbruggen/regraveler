@@ -10,7 +10,7 @@ road cycling and hiking: import them, compute stats, tag and rate them, show the
 combine two routes into a new one with automatically routed connectors (via a self-hosted
 BRouter). Formerly *regraveler*.
 
-**Version:** 0.7.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.7.1 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -18,6 +18,7 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 - **Import** GPX files by drag and drop (many at once) or with a CLI script for a whole folder.
   - Source name, URL and **activity** (gravel, road or hiking; default gravel) per batch, with
     per-file override. If no URL is given, the link inside the GPX file (if any) is used.
+  - **Tags** for the whole batch, plus optional extra tags per file (added to the batch tags).
   - Computed on import: distance, elevation gain/loss (smoothed, see below), min/max elevation,
     start/end point, bounding box, loop detection (start and end within 200 m) and a
     simplified geometry for maps.
@@ -185,6 +186,7 @@ Options:
 - `--source-url URL` — source URL for all files
 - `--no-source-from-folder` — don't use the subfolder name as source name
 - `--activity gravel|road|hiking` — activity of the imported routes (default `gravel`)
+- `--tags "kempen, favourite"` — tags for all imported routes
 
 A folder outside `./gpx` can also be imported; its files are copied into `gpx/uploads/`.
 

@@ -658,3 +658,19 @@ def test_restart_errors(client):
     res = client.post("/api/restart/preview", json={"route_id": line_id, "start": [51.0, 4.42]})
     assert res.status_code == 422 and "not a loop" in res.json()["detail"]
     assert client.post("/api/restart/preview", json={"route_id": 999, "start": [51.0, 4.42]}).status_code == 404
+
+
+def test_import_with_batch_and_per_file_tags(client):
+    import json as _json
+
+    res = client.post(
+        "/api/import",
+        files=[("files", (n, d, "application/gpx+xml")) for n, d in [
+            ("A.gpx", climb_gpx(3000, 5)), ("B.gpx", climb_gpx(4000, 5, start=(50.5, 5.0)))]],
+        data={"tags": "Kempen,  spring ride", "overrides": _json.dumps([{"tags": "favourite, kempen"}, {}])},
+    )
+    assert res.status_code == 200
+    tags = {r["name"]: r["tags"] for r in client.get("/api/routes").json()}
+    # Batch tags for every file, per-file tags added; normalised, no duplicates.
+    assert tags == {"A": ["kempen", "spring ride", "favourite"], "B": ["kempen", "spring ride"]}
+    assert client.get("/api/facets").json()["tags"] == [["kempen", 2], ["spring ride", 2], ["favourite", 1]]

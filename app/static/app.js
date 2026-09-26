@@ -731,7 +731,7 @@ function addFiles(fileList) {
   for (const file of fileList) {
     if (!file.name.toLowerCase().endsWith(".gpx")) continue;
     if (pending.some((p) => p.file.name === file.name && p.file.size === file.size)) continue;
-    pending.push({ file, source_name: "", source_url: "", activity: "" });
+    pending.push({ file, source_name: "", source_url: "", activity: "", tags: "" });
   }
   renderPending();
 }
@@ -760,6 +760,11 @@ function renderPending() {
           sel.value = p.activity;
           return sel;
         })()),
+        el("td", {}, el("input", {
+          value: p.tags, list: "tag-list", placeholder: "added to the batch tags",
+          "aria-label": `Extra tags for ${p.file.name}`,
+          oninput: (e) => (p.tags = e.target.value),
+        })),
         el("td", {}, el("button", {
           class: "icon", title: "Remove from list",
           onclick: () => { pending.splice(i, 1); renderPending(); },
@@ -785,7 +790,10 @@ $("#import-btn").addEventListener("click", async () => {
   fd.append("source_name", $("#batch-source-name").value);
   fd.append("source_url", $("#batch-source-url").value);
   fd.append("activity", $("#batch-activity").value);
-  fd.append("overrides", JSON.stringify(pending.map((p) => ({ source_name: p.source_name, source_url: p.source_url, activity: p.activity }))));
+  fd.append("tags", $("#batch-tags").value);
+  fd.append("overrides", JSON.stringify(pending.map((p) => ({
+    source_name: p.source_name, source_url: p.source_url, activity: p.activity, tags: p.tags,
+  }))));
 
   $("#import-btn").disabled = true;
   $("#import-status").textContent = `importing ${pending.length} file(s)…`;
