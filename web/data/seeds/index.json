@@ -1,3 +1,76 @@
 {
-  "seeds": []
+  "seeds": [
+    {
+      "file": "rerouter-bar-leon.zip",
+      "title": "Bar Leon",
+      "description": "Seed files for Bar Leon routes",
+      "routes": 109,
+      "km": 9821.5,
+      "activities": [
+        "gravel",
+        "road"
+      ]
+    },
+    {
+      "file": "rerouter-gravelroutedatabase-be.zip",
+      "title": "GravelRouteDatabase.be",
+      "description": "Seed files for GravelRouteDatabase routes",
+      "routes": 36,
+      "km": 2579.4,
+      "activities": [
+        "gravel"
+      ]
+    },
+    {
+      "file": "rerouter-gritgravel-cc.zip",
+      "title": "GritGravel.cc",
+      "description": "Seed files for GritGravel.cc routes",
+      "routes": 28,
+      "km": 3482.4,
+      "activities": [
+        "gravel"
+      ]
+    },
+    {
+      "file": "rerouter-medias-bike-marathon.zip",
+      "title": "Medias Bike Marathon",
+      "description": "Seed files for MBM routes",
+      "routes": 12,
+      "km": 600.2,
+      "activities": [
+        "gravel",
+        "mtb"
+      ]
+    },
+    {
+      "file": "rerouter-rixroutes.zip",
+      "title": "RixRoutes",
+      "description": "Seed files for RixRoutes",
+      "routes": 12,
+      "km": 711.2,
+      "activities": [
+        "gravel"
+      ]
+    },
+    {
+      "file": "rerouter-sportvlaanderen.zip",
+      "title": "SportVlaanderen",
+      "description": "Seed files for SportVlaanderen routes",
+      "routes": 39,
+      "km": 2731.7,
+      "activities": [
+        "gravel"
+      ]
+    },
+    {
+      "file": "rerouter-vitesse-cc.zip",
+      "title": "Vitesse.cc",
+      "description": "Seed files for Vitesse.cc routes",
+      "routes": 16,
+      "km": 1058.1,
+      "activities": [
+        "gravel"
+      ]
+    }
+  ]
 }
