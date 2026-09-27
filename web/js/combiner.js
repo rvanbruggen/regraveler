@@ -203,18 +203,63 @@ export const part = (track, startAt, endAt, otherWay = false) => ({ track, start
 export const partKey = (i) => String.fromCharCode(97 + i);
 
 /**
- * Four starting points (A1, A2, B1, B2) for combining A and B.
- * closed: A1 -> A2 -> B1 -> B2 -> back to A1, using the two closest, well separated pairs.
- * open:   A from its start to where it comes closest to B, then B from there to its end.
+ * Where to cross from A to B when riding "out on A, back on B": the closest pair of points
+ * that is well away from both starts. (Routes that share a start are closest right there,
+ * which is no use as a crossing.) Returns {aAt, bAt}.
  */
-export function suggestParts(a, b, closed = true, stepM = 50) {
-  if (closed) {
+export function suggestCrossover(a, b, stepM = 50) {
+  const step = Math.max(stepM, Math.sqrt((a.length * b.length) / 4e6));
+  const A = samples(a, step), B = samples(b, step);
+  // At least 20 % of the route (and 1 km) from its start; for a loop also from its end,
+  // which is the same place.
+  const away = (t) => Math.min(Math.max(1000, 0.2 * t.length), 0.4 * t.length);
+  const exA = away(a), exB = away(b);
+  let best = Infinity, bi = -1, bj = -1;
+  for (let i = 0; i < A.ds.length; i++) {
+    if (along(A.ds[i], 0, a.length, a.isLoop) <= exA) continue;
+    for (let j = 0; j < B.ds.length; j++) {
+      if (along(B.ds[j], 0, b.length, b.isLoop) <= exB) continue;
+      const d = hyp(A.xy[i], B.xy[j]);
+      if (d < best) {
+        best = d;
+        bi = i;
+        bj = j;
+      }
+    }
+  }
+  if (bi < 0) throw new CombineError("The routes are too short to suggest where to cross over");
+  return { aAt: A.ds[bi], bAt: B.ds[bj] };
+}
+
+/**
+ * Four starting points (A1, A2, B1, B2) for combining A and B, for a pattern:
+ * - "loop" (or true):  A1 -> A2 -> B1 -> B2 -> back to A1, using the two closest, well
+ *                      separated pairs.
+ * - "open" (or false): A from its start to where it comes closest to B, then B from there
+ *                      to its end.
+ * - "outback":         out on A, back on B: A from its start to a crossing (A2), over to B
+ *                      (B1), then B back to its start (B2); the result returns to A1. B is
+ *                      ridden in its own direction when it is a loop (on to its end, which is
+ *                      its start), otherwise backwards.
+ */
+export function suggestParts(a, b, pattern = "loop", stepM = 50) {
+  if (pattern === true) pattern = "loop";
+  if (pattern === false) pattern = "open";
+  if (pattern === "outback") {
+    const c = suggestCrossover(a, b, stepM);
+    // For a loop, "to its start" = on to its end: from bAt the other way round to 0.
+    return [part(a, 0, c.aAt), part(b, c.bAt, 0, b.isLoop)];
+  }
+  if (pattern === "loop") {
     const [c1, c2] = suggestConnections(a, b, 2, stepM);
     return [part(a, c2.aAt, c1.aAt), part(b, c1.bAt, c2.bAt)];
   }
   const [c] = suggestConnections(a, b, 1, stepM);
   return [part(a, 0, c.aAt), part(b, c.bAt, b.length)];
 }
+
+/** Is the part ridden in the route's own direction? */
+export const withRoute = (p) => (p.otherWay ? p.startAt > p.endAt : p.startAt <= p.endAt);
 
 async function connector(p, q, router, directJoinM) {
   if (hyp(p, q) <= directJoinM) return { kind: "connector", xyz: [p, q], routed: false };

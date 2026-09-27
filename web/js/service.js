@@ -578,13 +578,23 @@ const ll = (p) => [round(p[0], 6), round(p[1], 6)];
 // ------------------------------------------------------------------ combiner
 
 /** Suggested points: where routes A and B come closest (count 1: point to point, 2: loop). */
-export async function combineSuggest(aId, bId, count = 1) {
+/**
+ * Suggested points for combining routes A and B. pattern: "loop" (two crossings, back to
+ * A1), "open" (A then B, point to point) or "outback" (out on A, back on B to its start);
+ * the old form 2 / 1 still means loop / open.
+ */
+export async function combineSuggest(aId, bId, pattern = "open") {
   if (aId === bId) throw new ServiceError("Choose two different routes");
+  if (pattern === 2) pattern = "loop";
+  if (pattern === 1) pattern = "open";
+  if (!["loop", "open", "outback"].includes(pattern)) throw new ServiceError(`Unknown pattern '${pattern}'`);
   const [a, b] = await Promise.all([loadTrack(getRoute(aId)), loadTrack(getRoute(bId))]);
   let connections, parts;
   try {
-    connections = cb.suggestConnections(a, b, count);
-    parts = cb.suggestParts(a, b, count === 2);
+    connections = pattern === "outback"
+      ? [cb.suggestCrossover(a, b)]
+      : cb.suggestConnections(a, b, pattern === "loop" ? 2 : 1);
+    parts = cb.suggestParts(a, b, pattern);
   } catch (err) {
     if (err instanceof cb.CombineError) throw new ServiceError(err.message);
     throw err;
@@ -606,6 +616,7 @@ function partOut(p, routeId) {
     start_km: round(p.startAt / 1000, 2),
     end_km: round(p.endAt / 1000, 2),
     other_way: p.otherWay,
+    with_route: cb.withRoute(p),
   };
 }
 
@@ -666,6 +677,7 @@ export async function combinePreview(req) {
       start_km: round(result.parts[i].startAt / 1000, 2),
       end_km: round(result.parts[i].endAt / 1000, 2),
       distance_km: round(cb.legLength(partLegs[i].xyz) / 1000, 2),
+      with_route: cb.withRoute(result.parts[i]),
     })),
     distance_km: stats.distance_km,
     elevation_gain_m: stats.elevation_gain_m,

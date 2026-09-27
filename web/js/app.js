@@ -180,7 +180,7 @@ function updateHash() {
   if (currentView === "combine") {
     if (cb.a) p.set("a", cb.a);
     if (cb.b) p.set("b", cb.b);
-    if (cb.mode === "open") p.set("open", "1");
+    if (cb.mode !== "loop") p.set("pattern", cb.mode);
   }
   if (currentView === "restart" && rs.id) p.set("route", rs.id);
   if (currentView === "weather" && wx.id) {
@@ -1323,7 +1323,8 @@ const cb = {
   byId: new Map(),
   a: null,
   b: null,
-  mode: "loop", // "loop" (back to A1) or "open" (point to point)
+  mode: "loop", // "outback" (out on A, back on B), "loop" (two crossings) or "open" (A then B)
+  modeTouched: false, // pattern chosen by the user (otherwise picked from the routes' starts)
   points: { a1: null, a2: null, b1: null, b2: null }, // [lat, lon] each
   pointsTouched: false, // placed or moved by the user (not just suggested)
   placing: [], // point keys still to click, in order
@@ -1354,7 +1355,11 @@ function showCombine() {
     m.on("click", (e) => { if (cb.placing.length) placeAt(e.latlng); });
     cb.map = m;
     const p = new URLSearchParams(location.hash.slice(1));
-    if (p.get("open") === "1") setMode("open");
+    const pattern = p.get("pattern") || (p.get("open") === "1" ? "open" : null);
+    if (["outback", "loop", "open"].includes(pattern)) {
+      setMode(pattern);
+      cb.modeTouched = true;
+    }
     cb.initial = { a: Number(p.get("a")) || null, b: Number(p.get("b")) || null };
   }
   setTimeout(() => cb.map.invalidateSize(), 0);
@@ -1430,8 +1435,21 @@ async function setRoutes(a, b) {
   drawCombineResult();
   const lines = [cb.a, cb.b].filter(Boolean).map((id) => L.polyline(cb.byId.get(id).geometry));
   if (lines.length) cb.map.fitBounds(L.featureGroup(lines).getBounds(), { padding: [30, 30] });
-  if (cb.a && cb.b) await suggestPoints();
-  else cbEl.status.textContent = cb.a ? "Now choose route B (or click it on the map)." : "Choose route A (or click it on the map).";
+  if (cb.a && cb.b) {
+    // Routes that start in the same place: out on A, back on B; otherwise two crossings.
+    if (!cb.modeTouched) setMode(startsNear(cb.a, cb.b) ? "outback" : "loop");
+    updateHash();
+    await suggestPoints();
+  } else cbEl.status.textContent = cb.a ? "Now choose route B (or click it on the map)." : "Choose route A (or click it on the map).";
+}
+
+/** Do routes a and b start within 1 km of each other? */
+function startsNear(a, b) {
+  const [p, q] = [a, b].map((id) => cb.byId.get(id)?.geometry?.[0]);
+  if (!p || !q) return false;
+  const dy = (q[0] - p[0]) * 111320;
+  const dx = (q[1] - p[1]) * 111320 * Math.cos((p[0] * Math.PI) / 180);
+  return Math.hypot(dx, dy) <= 1000;
 }
 
 function drawCombineRoutes() {
@@ -1559,9 +1577,12 @@ async function suggestPoints() {
   stopPlacing();
   cbEl.status.textContent = "Looking for the closest points…";
   try {
-    const res = await svc.combineSuggest(cb.a, cb.b, cb.mode === "loop" ? 2 : 1);
+    const res = await svc.combineSuggest(cb.a, cb.b, cb.mode);
     const [pa, pb] = res.parts;
     cb.points = { a1: pa.start, a2: pa.end, b1: pb.start, b2: pb.end };
+    // E.g. back on a loop B to its start = on to its end, "the other way round" to its start.
+    if (!cbEl.revA.disabled) cbEl.revA.checked = !!pa.other_way;
+    if (!cbEl.revB.disabled) cbEl.revB.checked = !!pb.other_way;
     cb.pointsTouched = false;
   } catch (err) {
     cbEl.status.textContent = `Error: ${err.message}`;
@@ -1577,7 +1598,7 @@ function combineRequest(extra = {}) {
       { route_id: cb.a, start: p.a1, end: p.a2, other_way: cbEl.revA.checked },
       { route_id: cb.b, start: p.b1, end: p.b2, other_way: cbEl.revB.checked },
     ],
-    closed: cb.mode === "loop",
+    closed: cb.mode !== "open",
     reverse: cbEl.rev.checked,
     profile: cbEl.profile.value,
     prefer_unpaved: cbEl.unpaved.checked,
@@ -1628,6 +1649,41 @@ async function runPreview() {
   renderPoints();
 }
 
+/** "Your ride": the combined route in words, step by step. */
+function renderRide(res) {
+  $("#cb-ride").hidden = !res;
+  if (!res) return;
+  const [pa, pb] = res.parts;
+  const routeA = cb.byId.get(cb.a), routeB = cb.byId.get(cb.b);
+  // Where a point lies on its route, in words: "the start", "km 37.6", ...
+  const where = (route, km) => {
+    const len = route?.distance_km ?? Infinity;
+    if (km < 0.05) return route?.is_loop ? "the start/finish" : "the start";
+    if (km > len - 0.05) return route?.is_loop ? "the start/finish" : "the end";
+    return `km ${km.toFixed(1)}`;
+  };
+  const direction = (p, letter) => (p.with_route
+    ? `in ${letter}'s own direction`
+    : el("span", { class: "against" }, `against ${letter}'s direction (backwards)`));
+  // A connector step: routed, a short straight join, or none at all (the points touch).
+  const connector = (c, to, touching) => (!c ? null
+    : !c.routed && c.distance_km < 0.03 ? touching
+    : `Connector to ${to}: ${fmt.km(c.distance_km)}${c.routed ? ", routed along roads and paths" : ", joined in a straight line"}.`);
+  const [c1, c2] = res.connectors;
+  const steps = [
+    [`Start at A1: ${where(routeA, pa.start_km)} of route A.`],
+    [`Ride route A to A2 (${where(routeA, pa.end_km)}): ${fmt.km(pa.distance_km)}, `, direction(pa, "A"), "."],
+    [connector(c1, `B1 (${where(routeB, pb.start_km)} of route B)`,
+      `Switch to route B at B1 (${where(routeB, pb.start_km)} of route B): the routes touch there.`)],
+    [`Ride route B to B2 (${where(routeB, pb.end_km)}): ${fmt.km(pb.distance_km)}, `, direction(pb, "B"), "."],
+  ];
+  if (cb.mode !== "open") {
+    steps.push([connector(c2, "A1, where you started", "You're back at A1, where you started: no connector needed.")]);
+  }
+  steps.push([`${res.is_loop ? "A loop" : "Point to point"} of ${fmt.km(res.distance_km)} with ${fmt.m(res.elevation_gain_m)} of climbing.`]);
+  $("#cb-steps").replaceChildren(...steps.map((parts) => el("li", {}, ...parts.filter((x) => x !== null && x !== ""))));
+}
+
 function markerIcon(label, cls) {
   return L.divIcon({ className: `cb-marker ${cls}`, html: label, iconSize: [28, 22], iconAnchor: [14, 11] });
 }
@@ -1638,6 +1694,7 @@ function drawCombineResult() {
   const res = cb.preview;
   cbEl.stats.hidden = !res;
   cbEl.save.hidden = !res;
+  renderRide(res);
   if (res) {
     for (const leg of res.legs) {
       const color = leg.kind === "a" ? COLOR_A : leg.kind === "b" ? COLOR_B : COLOR_CONNECTOR;
@@ -1681,6 +1738,7 @@ cbEl.b.addEventListener("change", () => setRoutes(cb.a, Number(cbEl.b.value) || 
 $$('input[name="cb-mode"]').forEach((r) =>
   r.addEventListener("change", () => {
     setMode(r.value);
+    cb.modeTouched = true;
     updateHash();
     // Suggested points depend on the mode; points the user placed are kept.
     if (cb.pointsTouched) runPreview();

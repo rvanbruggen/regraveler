@@ -185,16 +185,34 @@
   <section id="view-combine" class="view" hidden>
     <div class="map-layout">
       <div class="map-side" id="cb-side">
-        <p class="muted small">Pick two routes (or click them on the map). You ride route A from A1 to A2 and
-          route B from B1 to B2; connectors fill the gaps.</p>
+        <div class="cb-intro small">
+          <p>Make a new route from two routes: you ride a stretch of <strong>route A</strong> (from point
+            A1 to A2) and a stretch of <strong>route B</strong> (from B1 to B2). Where there is a gap
+            between them, an <span class="cb-conn">orange connector</span> is routed along real roads and
+            paths.</p>
+          <p class="muted">Pick the two routes (or click them on the map), then the way to combine them.
+            Suggested points are placed for you; drag any point along its route to change it.</p>
+        </div>
         <label><span><span class="swatch" style="background:#2f6fd6"></span>Route A</span> <select id="cb-a"></select></label>
         <label><span><span class="swatch" style="background:#d62f4b"></span>Route B</span> <select id="cb-b"></select></label>
-        <div class="radio-row">
-          <label class="check"><input type="radio" name="cb-mode" value="loop" checked> Loop: A1 → A2 → B1 → B2 → back to A1</label>
-          <label class="check"><input type="radio" name="cb-mode" value="open"> Point to point: A1 → A2 → B1 → B2</label>
-        </div>
+        <fieldset class="options cb-patterns">
+          <legend>How to combine them</legend>
+          <label class="check"><input type="radio" name="cb-mode" value="outback">
+            <span><strong>Out on A, back on B</strong>
+              <small>Start where A starts, ride A to a crossing, switch to B and ride B back to its
+                start. For two routes that start in the same place.</small></span></label>
+          <label class="check"><input type="radio" name="cb-mode" value="loop" checked>
+            <span><strong>Two crossings (loop)</strong>
+              <small>Ride part of A, switch to B, ride part of B and switch back to where you joined A.
+                For two routes that cross or come close in two places.</small></span></label>
+          <label class="check"><input type="radio" name="cb-mode" value="open">
+            <span><strong>A, then B (point to point)</strong>
+              <small>Ride part of A, switch to B and finish somewhere on B.</small></span></label>
+        </fieldset>
         <fieldset class="options">
           <legend>Points</legend>
+          <p class="muted small cb-legend">A1 = where you join route A, A2 = where you leave it;
+            B1 and B2 the same on route B.</p>
           <div id="cb-points" class="cb-points"></div>
           <div class="actions">
             <button type="button" id="cb-click-all" class="secondary">Click all four</button>
@@ -218,6 +236,10 @@
           <label class="check"><input type="checkbox" id="cb-straight"> Straight lines (no routing)</label>
         </fieldset>
         <p id="cb-status" class="muted small"></p>
+        <div id="cb-ride" class="cb-ride" hidden>
+          <h3>Your ride</h3>
+          <ol id="cb-steps"></ol>
+        </div>
         <dl id="cb-stats" class="stats" hidden></dl>
         <div id="cb-save" hidden>
           <label>Name <input id="cb-name"></label>

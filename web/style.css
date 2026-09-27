@@ -183,6 +183,16 @@ fieldset.options legend { font-size: 12px; color: var(--muted); padding: 0 4px; 
 .cb-point button { padding: 1px 8px; font-size: 12px; }
 #combine-map.placing, #combine-map.placing .leaflet-interactive { cursor: crosshair; }
 .cb-warn { color: #b35c1e; font-weight: 600; }
+.cb-intro p { margin: 0 0 6px; }
+.cb-conn { color: #b35c1e; font-weight: 600; }
+.cb-patterns label.check { align-items: flex-start; }
+.cb-patterns label.check input { margin-top: 3px; }
+.cb-patterns small { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.cb-legend { margin: 0 0 6px; }
+.cb-ride h3 { font-size: 14px; margin: 4px 0; }
+.cb-ride ol { margin: 0; padding-left: 20px; font-size: 13px; }
+.cb-ride li { margin: 2px 0; }
+.cb-ride .against { color: #b35c1e; }
 
 /* Multi-select */
 .table-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; }

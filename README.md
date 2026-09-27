@@ -21,7 +21,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.11.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, import from a link, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.12.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, import from a link, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -111,8 +111,18 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 - **Combine** two routes into a new one by picking the part of each route you want to ride:
   1. Pick route A and B (dropdowns, click them on the map, "Combine…" in a route's
      detail panel, or "combine" next to a pair in the map's proximity list).
-  2. The app suggests four points where the routes come closest: you ride route A from A1 to
-     A2 and route B from B1 to B2.
+  2. Choose how to combine them (the screen explains each):
+     - **Out on A, back on B:** start where A starts, ride A to a crossing, switch to B and ride
+       B back to its start: A1 is A's start, B2 is B's start. The crossing is where the routes
+       come closest, but well away from their starts (routes that share a start are closest
+       right there). A loop route B is ridden on in its own direction to its start/finish;
+       any other route B is ridden backwards.
+     - **Two crossings (loop):** A1 → A2 → connector → B1 → B2 → connector back to A1.
+     - **A, then B (point to point):** A1 → A2 → connector → B1 → B2.
+
+     When the two routes start within 1 km of each other the screen starts with *Out on A, back
+     on B*, otherwise with the loop. The app suggests the four points for the chosen pattern:
+     you ride route A from A1 to A2 and route B from B1 to B2.
   3. Change them with *Click all four* (click A1, A2, B1, B2 on the map in turn; Esc cancels),
      *Place* next to a single point, or drag a point along its route. Clicks snap onto the
      route. *Suggest* puts the suggested points back.
@@ -121,11 +131,12 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
      hiking; for gravel optionally
      *prefer unpaved paths*; other profiles or plain straight lines are possible).
      Points less than 25 m apart are joined directly.
-  5. Preview with total distance, elevation gain, the km on each route and connector lengths.
+  5. Preview with total distance, elevation gain, the km on each route and connector lengths,
+     and **Your ride**: the combined route in words, step by step (where you start, how far
+     you ride on each route and in which direction, each connector).
   6. Save as a new route (a new GPX file in `gpx/derived/`, source *combined*, with the parent
      routes recorded and linked in its detail panel), or just download the GPX.
-  - **Loop:** A1 → A2 → connector → B1 → B2 → connector back to A1. The loop starts at A1.
-  - **Point to point:** A1 → A2 → connector → B1 → B2.
+  - A loop starts at A1.
   - The riding direction on a route follows the order of its two points: *Swap A1 ↔ A2* (or
     B1 ↔ B2) rides it the other way. When the connectors of a loop cross each other, the app
     says so; swapping B1 and B2 usually fixes it. For loop routes, *Other way round A/B* takes

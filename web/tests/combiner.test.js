@@ -289,6 +289,69 @@ test("suggest parts: loop and point to point", () => {
   assert.equal(ob.endAt, b.length);
 });
 
+/** A route through corner points given as [north, east] metres from START, every 50 m. */
+function polyline(corners) {
+  const pts = [];
+  for (let k = 0; k < corners.length - 1; k++) {
+    const [n0, e0] = corners[k], [n1, e1] = corners[k + 1];
+    const steps = Math.max(1, Math.round(Math.hypot(n1 - n0, e1 - e0) / 50));
+    for (let i = k ? 1 : 0; i <= steps; i++) {
+      const t = i / steps;
+      pts.push([...offset(...START, n0 + t * (n1 - n0), e0 + t * (e1 - e0)), 10]);
+    }
+  }
+  return pts;
+}
+
+// Two square loops from the same start, A to the east and B to the west; their top
+// corners are 400 m apart, far from the start.
+const loopA = () => cb.makeTrack(polyline([[0, 0], [0, 4000], [4000, 4000], [4000, 200], [0, 0]]), true);
+const loopB = () => cb.makeTrack(polyline([[0, 0], [0, -4000], [4000, -4000], [4000, -200], [0, 0]]), true);
+
+test("out on A, back on B: crossing away from the shared start, B ridden in its direction", async () => {
+  const a = loopA(), b = loopB();
+  const [pa, pb] = cb.suggestParts(a, b, "outback");
+  // A from its start to the crossing, B from the crossing on to its end = its (shared) start.
+  assert.equal(pa.startAt, 0);
+  assert.equal(pa.otherWay, false);
+  assert.equal(pb.endAt, 0);
+  assert.equal(pb.otherWay, true);
+  assert.ok(cb.withRoute(pa) && cb.withRoute(pb));
+  // The crossing is where the routes come closest (at most the 400 m between the top
+  // corners), but not near the shared start (at least 20 % of each loop away from it).
+  const gap = dist(xy(a, pa.endAt), xy(b, pb.startAt));
+  assert.ok(gap <= 400 + 1, `gap ${gap}`);
+  const fromStart = (t, at) => Math.min(at, t.length - at);
+  assert.ok(fromStart(a, pa.endAt) > 0.2 * a.length);
+  assert.ok(fromStart(b, pb.startAt) > 0.2 * b.length);
+
+  const res = await cb.combineParts([pa, pb], fakeRouter, { closed: true });
+  const conns = cb.connectorsOf(res);
+  assert.equal(conns.length, 2);
+  assert.equal(conns[1].routed, false); // already back at the start: joined directly
+  assert.equal(calls.length, 1); // only the crossing is routed
+  // A up to the crossing + the crossing + the rest of B (projected metres ~ ground metres).
+  approx(lengthM(res.points), pa.endAt + gap + (b.length - pb.startAt), { rel: 0.02 });
+  approxLL(res.points[0], res.points[res.points.length - 1], 1e-5);
+  approxLL(res.points[0], cb.latLonOf(cb.pointAt(a, 0)), 1e-5);
+});
+
+test("out on A, back on B: a route B that isn't a loop is ridden backwards to its start", () => {
+  const a = loopA();
+  const b = cb.makeTrack(polyline([[0, 0], [0, -4000], [4000, -4000], [4000, -200]]), false);
+  const [, pb] = cb.suggestParts(a, b, "outback");
+  assert.equal(pb.otherWay, false);
+  assert.equal(pb.endAt, 0);
+  assert.equal(cb.withRoute(pb), false);
+});
+
+test("out on A, back on B: short routes still cross away from their starts", () => {
+  const a = cb.makeTrack(east({ lengthM: 600 }));
+  const b = cb.makeTrack(east({ northM: 100, lengthM: 600 }));
+  const c = cb.suggestCrossover(a, b, 10);
+  assert.ok(c.aAt > 0.4 * a.length - 10 && c.bAt > 0.4 * b.length - 10);
+});
+
 test("straight router", async () => {
   assert.deepEqual(await cb.straightRouter([51.0, 4.4], [51.1, 4.5]), [[51.0, 4.4, null], [51.1, 4.5, null]]);
 });

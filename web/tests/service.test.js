@@ -341,3 +341,36 @@ test("mountain biking: an activity with its own connector profile", async () => 
   }
   assert.deepEqual(profiles, ["mtb", "mtb"]);
 });
+
+test("combine pattern 'out on A, back on B' for two loops from the same start", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  const square = (sign) => {
+    const corners = [[0, 0], [0, 4000 * sign], [4000, 4000 * sign], [4000, 200 * sign], [0, 0]];
+    const pts = [];
+    for (let k = 0; k < corners.length - 1; k++) {
+      const [n0, e0] = corners[k], [n1, e1] = corners[k + 1];
+      const steps = Math.round(Math.hypot(n1 - n0, e1 - e0) / 50);
+      for (let i = k ? 1 : 0; i <= steps; i++) pts.push([...at(n0 + (i / steps) * (n1 - n0), e0 + (i / steps) * (e1 - e0)), 10]);
+    }
+    return pts;
+  };
+  await importOne("East.gpx", square(1));
+  await importOne("West.gpx", square(-1));
+  const [a, b] = ["East", "West"].map((n) => svc.listRoutes("").find((r) => r.name === n));
+  const sug = await svc.combineSuggest(a.id, b.id, "outback");
+  const [pa, pb] = sug.parts;
+  assert.equal(pa.start_km, 0);
+  assert.equal(pb.end_km, 0);
+  assert.ok(pa.with_route && pb.with_route);
+  const prev = await svc.combinePreview({
+    parts: [
+      { route_id: a.id, start: pa.start, end: pa.end, other_way: pa.other_way },
+      { route_id: b.id, start: pb.start, end: pb.end, other_way: pb.other_way },
+    ],
+    closed: true, straight: true,
+  });
+  assert.equal(prev.is_loop, true);
+  assert.deepEqual(prev.parts.map((p) => p.with_route), [true, true]);
+  assert.equal(prev.connectors[1].routed, false); // back at the shared start already
+  await assert.rejects(svc.combineSuggest(a.id, b.id, "zigzag"), svc.ServiceError);
+});
