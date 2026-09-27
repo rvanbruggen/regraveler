@@ -300,8 +300,10 @@ The pytest run includes a check that backups made by the page restore on the ser
 other way round (it needs Node; skipped without it).
 
 The screenshots in this README are made with `docs/screenshots/take_screenshots.py` (Playwright,
-driving your installed Chrome). Its docstring explains the scratch setup; it's a docs helper,
-not part of the app, so Playwright isn't in the requirements.
+driving your installed Chrome). It drives the page served by two scratch rerouter servers and
+can fill their libraries itself, by importing GPX files through the Import screen (`--seed`) or
+by restoring backups (`--restore`); its docstring explains the setup. It's a docs helper, not
+part of the app, so Playwright isn't in the requirements.
 
 ## How the stats are computed
 
