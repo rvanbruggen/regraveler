@@ -234,3 +234,35 @@ test("routes without a track hash get one from their file", async () => {
   const res = await svc.importGpx(gpxXml([["other name", east(0, 3000)]], { name: "x" }), "B.gpx");
   assert.equal(res.status, "duplicate");
 });
+
+test("mountain biking: an activity with its own connector profile", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  assert.ok(svc.clientConfig().activities.includes("mtb"));
+  assert.ok(config.BROUTER_PROFILES.includes(config.ACTIVITY_PROFILES.mtb));
+  await importOne("A.gpx", east(0, 6000), { activity: "mtb" });
+  await importOne("B.gpx", east(800, 6000));
+  const [a, b] = ["A", "B"].map((n) => svc.listRoutes("").find((r) => r.name === n));
+  assert.equal(a.activity, "mtb");
+  assert.deepEqual(await svc.setActivity([b.id], "mtb"), { updated: 1 });
+  assert.equal(svc.listRoutes("activity=mtb").length, 2);
+
+  // Both routes are mountain-bike routes: connectors are routed with BRouter's mtb profile.
+  const profiles = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const q = new URL(url).searchParams;
+    profiles.push(q.get("profile"));
+    const coords = q.get("lonlats").split("|").map((ll) => [...ll.split(",").map(Number), 10]);
+    return new Response(JSON.stringify({ features: [{ geometry: { coordinates: coords } }] }));
+  };
+  try {
+    const [pa, pb] = (await svc.combineSuggest(a.id, b.id, 2)).parts;
+    await svc.combinePreview({
+      parts: [{ route_id: a.id, start: pa.start, end: pa.end }, { route_id: b.id, start: pb.start, end: pb.end }],
+      closed: true,
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(profiles, ["mtb", "mtb"]);
+});

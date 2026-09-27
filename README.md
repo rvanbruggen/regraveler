@@ -5,8 +5,8 @@
 
 # rerouter — route manager
 
-A web app to manage a personal library of routes (GPX files) for gravel cycling, road cycling
-and hiking: import them, compute stats, tag and rate them, show them on a map, and combine two
+A web app to manage a personal library of routes (GPX files) for gravel cycling, road cycling,
+mountain biking and hiking: import them, compute stats, tag and rate them, show them on a map, and combine two
 routes into a new one with automatically routed connectors (via BRouter). Formerly *regraveler*.
 
 The whole app is one page (`web/`) that runs in the browser, and it runs two ways:
@@ -21,14 +21,14 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.9.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.9.1 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
 
 - **Import** GPX files by drag and drop: many files at once, whole folders or zip files. On a
   server, the Import screen also offers the GPX files that are already in its `gpx/` folder.
-  - Source name, URL and **activity** (gravel, road or hiking; default gravel) per batch, with
+  - Source name, URL and **activity** (gravel, road, mountain biking or hiking; default gravel) per batch, with
     per-file override. If no URL is given, the link inside the GPX file (if any) is used.
   - **Tags** for the whole batch, plus optional extra tags per file (added to the batch tags).
   - Computed on import: distance, elevation gain/loss (smoothed, see below), min/max elevation,
@@ -50,10 +50,11 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 - **Library:** sortable table with filters on activity, distance, elevation gain, paved %,
   quality, tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
-- **Activity:** every route is a gravel, road or hiking route (routes from before 0.6.0 start as
-  gravel). Change it in the route panel, or for a selection with *Set activity…*. The activity
-  also picks the combiner's routing profile (gravel → `gravel`, road → `fastbike`,
-  hiking → `hiking-mountain`).
+- **Activity:** every route is a gravel, road, mountain biking or hiking route (routes from
+  before 0.6.0 start as gravel). Change it in the route panel, or for a selection with *Set
+  activity…*. The activity also picks the combiner's routing profile (gravel → `gravel`,
+  road → `fastbike`, mountain biking → `mtb`, hiking → `hiking-mountain`) and the default speed
+  for the ride weather (20, 25, 15 and 4.5 km/h).
 - **Select several routes** with the checkboxes in the library (the header box selects all
   shown routes), then:
   - **Download GPX:** one route downloads its original file; several download as `routes.zip`
@@ -113,7 +114,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
      *Place* next to a single point, or drag a point along its route. Clicks snap onto the
      route. *Suggest* puts the suggested points back.
   4. The gaps are filled with connectors routed by BRouter (the profile follows the routes'
-     activity: *gravel*, *fastbike* for road, *hiking-mountain* for hiking; for gravel optionally
+     activity: *gravel*, *fastbike* for road, *mtb* for mountain biking, *hiking-mountain* for
+     hiking; for gravel optionally
      *prefer unpaved paths*; other profiles or plain straight lines are possible).
      Points less than 25 m apart are joined directly.
   5. Preview with total distance, elevation gain, the km on each route and connector lengths.

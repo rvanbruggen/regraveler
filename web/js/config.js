@@ -1,7 +1,7 @@
 // Settings. The defaults below can be changed by the user in Utilities > Settings (stored
 // with the library); `applySettings` copies those over the defaults at start-up.
 
-export const VERSION = "0.9.0";
+export const VERSION = "0.9.1";
 
 export const config = {
   // "browser": the library lives in this browser (a static host such as GitHub Pages);
@@ -41,15 +41,15 @@ export const config = {
   // Ride weather: the forecast service (Open-Meteo, free, no key), and the average speed
   // (km/h) offered for each activity until the user fills in their own.
   OPEN_METEO_URL: "https://api.open-meteo.com",
-  WEATHER_SPEEDS: { gravel: 20, road: 25, hiking: 4.5 },
+  WEATHER_SPEEDS: { gravel: 20, road: 25, mtb: 15, hiking: 4.5 },
 
   // Route names from the places a route visits (GeoNames data in data/places/).
   AUTO_RENAME_ON_IMPORT: true,
 
   // Activity of a route. The first is the default for imports; each maps to the BRouter
   // profile the combiner uses by default for connectors.
-  ACTIVITIES: ["gravel", "road", "hiking"],
-  ACTIVITY_PROFILES: { gravel: "gravel", road: "fastbike", hiking: "hiking-mountain" },
+  ACTIVITIES: ["gravel", "road", "mtb", "hiking"],
+  ACTIVITY_PROFILES: { gravel: "gravel", road: "fastbike", mtb: "mtb", hiking: "hiking-mountain" },
 };
 
 // Settings the user can change (key -> type).

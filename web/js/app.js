@@ -65,7 +65,7 @@ const filesFate = (n) => onServer()
 
 const splitTags = (s) => s.split(",").map((t) => t.trim()).filter(Boolean);
 
-const ACTIVITY_LABELS = { gravel: "Gravel", road: "Road", hiking: "Hiking" };
+const ACTIVITY_LABELS = { gravel: "Gravel", road: "Road", mtb: "Mountain biking", hiking: "Hiking" };
 const activityLabel = (a) => ACTIVITY_LABELS[a] || a || "–";
 let activityProfiles = {};
 
@@ -1265,7 +1265,8 @@ async function setRoutes(a, b) {
   cb.nameTouched = false;
   cbEl.saved.textContent = "";
   syncSelects();
-  // Connector profile that fits the activity (gravel -> gravel, road -> fastbike, hiking -> hiking-mountain).
+  // Connector profile that fits the activity (gravel -> gravel, road -> fastbike, mtb -> mtb,
+  // hiking -> hiking-mountain).
   const acts = new Set([cb.a, cb.b].filter(Boolean).map((id) => cb.byId.get(id)?.activity));
   const profile = acts.size === 1 ? activityProfiles[[...acts][0]] : null;
   if (profile && [...cbEl.profile.options].some((o) => o.value === profile)) cbEl.profile.value = profile;

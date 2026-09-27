@@ -233,6 +233,7 @@ td.est { color: var(--muted); }
 .activity { display: inline-block; font-size: 12px; padding: 0 8px; border-radius: 10px; }
 .activity.gravel { background: #f6e7db; color: #7a3d12; }
 .activity.road { background: #e3e8f0; color: #2d3f5c; }
+.activity.mtb { background: #efe2ec; color: #6b2a5c; }
 .activity.hiking { background: #e2efdf; color: #2d5a27; }
 #sel-activity { width: auto; }
 .batch label:has(#batch-activity) { flex: 0 1 180px; min-width: 150px; }
