@@ -237,6 +237,9 @@ td.est { color: var(--muted); }
 .activity.hiking { background: #e2efdf; color: #2d5a27; }
 #sel-activity { width: auto; }
 .batch label:has(#batch-activity) { flex: 0 1 180px; min-width: 150px; }
+#view-link .batch label.wide { flex-basis: 100%; }
+#view-link .batch label:has(#link-activity) { flex: 0 1 180px; min-width: 150px; }
+#link-form .actions { align-self: flex-end; margin: 0; }
 
 /* Bulk tags */
 .tag-panel {

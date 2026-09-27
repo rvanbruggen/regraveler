@@ -26,6 +26,7 @@
         <button type="button" role="menuitem" data-view="combine">Combine routes<small>Join two routes with routed connectors</small></button>
         <button type="button" role="menuitem" data-view="restart">Change start point<small>Start a loop somewhere else on the loop</small></button>
         <button type="button" role="menuitem" data-view="weather">Ride weather<small>Rain, temperature and wind along a route on the day you ride</small></button>
+        <button type="button" role="menuitem" data-view="link">Import from a link<small>A RideWithGPS, Komoot or Strava route, or any GPX file online</small></button>
         <button type="button" role="menuitem" data-view="duplicates">Duplicates<small>Find and clean up (near-)duplicate routes</small></button>
         <button type="button" role="menuitem" data-view="data">Library &amp; settings<small>Back up, restore, storage and routing server</small></button>
       </div>
@@ -352,6 +353,37 @@
       <span id="import-status" class="muted"></span>
     </p>
     <div id="import-results"></div>
+  </section>
+
+  <!-- Import from a link (utility) -->
+  <section id="view-link" class="view" hidden>
+    <form id="link-form" class="batch" autocomplete="off">
+      <label class="wide">Link <input type="url" id="link-url" required placeholder="https://ridewithgps.com/routes/…, komoot.com/tour/…, strava.com/routes/…, or a link to a .gpx file"></label>
+      <p class="actions"><button type="submit" id="link-fetch">Fetch route</button></p>
+    </form>
+    <p id="link-status" class="muted small"></p>
+    <div id="link-strava" hidden>
+      <p class="small"><a id="link-strava-export" target="_blank" rel="noopener">Download the GPX from Strava</a>
+        (opens Strava; sign in there if it asks), then
+        <label class="link">choose the downloaded file<input type="file" id="link-file" accept=".gpx,application/gpx+xml" hidden></label>.</p>
+    </div>
+    <div id="link-details" hidden>
+      <p id="link-summary"></p>
+      <div class="batch">
+        <label>Source name <input type="text" id="link-source-name" list="source-list"></label>
+        <label>Source URL <input type="url" id="link-source-url"></label>
+        <label>Activity <select id="link-activity" class="activity-select"></select></label>
+        <label>Tags <input type="text" id="link-tags" list="tag-list" placeholder="comma separated"></label>
+        <label class="wide">Notes <textarea id="link-notes" rows="3"></textarea></label>
+        <label class="check" id="link-paved-row" hidden><input type="checkbox" id="link-paved"> <span id="link-paved-text"></span></label>
+      </div>
+      <p class="muted small">The name follows your naming setting (Utilities › Library &amp; settings), like any import.</p>
+      <p class="actions">
+        <button type="button" id="link-import">Import</button>
+        <button type="button" id="link-cancel" class="secondary">Cancel</button>
+      </p>
+    </div>
+    <div id="link-results"></div>
   </section>
 
   <!-- Library & settings (utility) -->

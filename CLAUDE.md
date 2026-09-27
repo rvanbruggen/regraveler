@@ -6,7 +6,7 @@ A web app (formerly "regraveler") to manage a personal library of routes (GPX fi
 
 One codebase for the route logic: the page in `web/` (vanilla JS ES modules + Leaflet) does everything — GPX parsing, stats, names, combining, similarity, surface estimate. It runs two ways:
 
-- **Self-hosted** (`docker compose up`): the thin Python server in `app/` serves `web/`, stores the library (SQLite route documents + the GPX folder) through a small storage API, and proxies `/brouter` to the BRouter container. It computes nothing.
+- **Self-hosted** (`docker compose up`): the thin Python server in `app/` serves `web/`, stores the library (SQLite route documents + the GPX folder) through a small storage API, proxies `/brouter` to the BRouter container, and fetches GPX files from public links for "Import from a link" (`/api/fetch-gpx`, public internet addresses only). It computes nothing.
 - **Static site** (GitHub Pages): the same page keeps the library in IndexedDB and uses the public BRouter at brouter.de (it allows CORS).
 
 The page picks its storage at start-up (`GET api/info` answers → server). Both share one backup format (`library.json` + `gpx/<sha256>.gpx`). Route logic changes go in `web/js/`; the server only changes when the storage contract does. Up to 0.7.x the logic was in Python; `app/legacy.py` moves an old library to the new store.

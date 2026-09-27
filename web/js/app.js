@@ -5,6 +5,7 @@ import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from 
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
+import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
 import { RemoteBackend, detectServer } from "./remote.js";
 import * as svc from "./service.js";
 import * as weather from "./weather.js";
@@ -88,7 +89,7 @@ function fillActivitySelects(activities) {
 let currentView = "library";
 
 // Views reached through the Utilities menu.
-const UTILITIES = ["combine", "restart", "weather", "duplicates", "data"];
+const UTILITIES = ["combine", "restart", "weather", "link", "duplicates", "data"];
 // Views a link (URL hash) can open.
 const LINKABLE_VIEWS = ["library", "map", "import", ...UTILITIES];
 
@@ -923,10 +924,10 @@ function routeLink(id, name) {
   return el("a", { onclick: () => { showView("library"); openDetail(id); } }, name);
 }
 
-function renderResults(results) {
+function renderResults(results, target = $("#import-results")) {
   const counts = results.reduce((c, r) => ((c[r.status] = (c[r.status] || 0) + 1), c), {});
   const summary = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ");
-  $("#import-results").replaceChildren(
+  target.replaceChildren(
     el("h3", {}, `Import results: ${summary}`),
     ...results.map((r) =>
       el("div", { class: `result ${r.status}` },
@@ -940,6 +941,123 @@ function renderResults(results) {
     )
   );
 }
+
+// ------------------------------------------------------------------ import from a link
+
+// The route being imported: {link, data (GPX bytes), filename, paved_pct}.
+let linkRoute = null;
+
+function resetLink(keepResults = false) {
+  linkRoute = null;
+  $("#link-details").hidden = true;
+  $("#link-strava").hidden = true;
+  $("#link-file").value = "";
+  if (!keepResults) $("#link-results").replaceChildren();
+}
+
+/** Show the form for the route, pre-filled from what the link and the service tell. */
+function showLinkDetails({ summary, activity = null, notes = "", pavedPct = null }) {
+  const { link } = linkRoute;
+  $("#link-summary").replaceChildren(...summary);
+  $("#link-source-name").value = serviceName(link);
+  $("#link-source-url").value = link.url;
+  if (activity) $("#link-activity").value = activity;
+  $("#link-tags").value = "";
+  $("#link-notes").value = notes;
+  $("#link-paved-row").hidden = pavedPct == null;
+  $("#link-paved").checked = false;
+  if (pavedPct != null) {
+    $("#link-paved-text").textContent = `Use ${serviceName(link)}'s surface: ${pavedPct}% paved ` +
+      "(otherwise rerouter estimates it from OpenStreetMap)";
+  }
+  $("#link-details").hidden = false;
+}
+
+$("#link-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  resetLink();
+  const status = $("#link-status");
+  let link;
+  try {
+    link = parseRouteLink($("#link-url").value);
+    status.textContent = link.service === "web" ? `Fetching the file from ${serviceName(link)}…` : `Fetching the ${serviceName(link)} ${link.kind}…`;
+    $("#link-fetch").disabled = true;
+    // On a rerouter server, files other sites won't let the browser read are fetched by the server.
+    const proxy = onServer() ? (url) => fetch(new URL(`api/fetch-gpx?url=${encodeURIComponent(url)}`, document.baseURI)) : null;
+    const r = await fetchRoute(link, fetch, { proxy });
+    linkRoute = { link, data: r.data, filename: r.filename, paved_pct: r.paved_pct };
+    status.textContent = "";
+    const facts = [r.distance_km != null ? fmt.km(r.distance_km) : null, r.tracks > 1 ? `${r.tracks} tracks` : null, `${r.points} points`];
+    // A GPX file is named like any imported file (from its file name or track name).
+    const name = link.service === "web" ? svc.routeName(r.filename, r.track_name, r.tracks, 0) : r.name;
+    showLinkDetails({
+      summary: [el("strong", {}, name), ` — ${facts.filter(Boolean).join(", ")}, from `,
+        el("a", { href: link.url, target: "_blank", rel: "noopener" }, serviceName(link))],
+      activity: r.activity, notes: r.description || "", pavedPct: r.paved_pct,
+    });
+  } catch (err) {
+    if (!(err instanceof LinkImportError)) throw err;
+    status.textContent = err.message;
+    if (err.exportUrl) {
+      // Strava: the user downloads the GPX, then picks the file here.
+      linkRoute = { link };
+      $("#link-strava-export").href = err.exportUrl;
+      $("#link-strava").hidden = false;
+    }
+  } finally {
+    $("#link-fetch").disabled = false;
+  }
+});
+
+$("#link-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file || !linkRoute) return;
+  linkRoute.data = new Uint8Array(await file.arrayBuffer());
+  linkRoute.filename = file.name;
+  $("#link-strava").hidden = true;
+  $("#link-status").textContent = "";
+  showLinkDetails({ summary: [el("strong", {}, file.name), " — the GPX from ",
+    el("a", { href: linkRoute.link.url, target: "_blank", rel: "noopener" }, serviceName(linkRoute.link))] });
+});
+
+$("#link-cancel").addEventListener("click", () => {
+  resetLink();
+  $("#link-status").textContent = "";
+});
+
+$("#link-import").addEventListener("click", async () => {
+  if (!linkRoute) return;
+  const status = $("#link-status");
+  const button = $("#link-import");
+  button.disabled = true;
+  status.textContent = "Importing…";
+  try {
+    const res = await svc.importGpx(linkRoute.data, linkRoute.filename, {
+      source_name: $("#link-source-name").value.trim() || null,
+      source_url: $("#link-source-url").value.trim() || null,
+      activity: svc.checkActivity($("#link-activity").value),
+      tags: splitTags($("#link-tags").value),
+      notes: $("#link-notes").value.trim() || null,
+    });
+    const ids = res.routes.map((r) => r.id);
+    if (ids.length && $("#link-paved").checked && linkRoute.paved_pct != null) {
+      for (const id of ids) await svc.updateRoute(id, { paved_pct: linkRoute.paved_pct });
+    } else if (ids.length && config.SURFACE_AUTO_ESTIMATE) {
+      svc.surfaceJob.enqueue(ids);
+      watchSurfaceJob();
+    }
+    if (ids.length) requestPersistence();
+    status.textContent = "";
+    renderResults([res], $("#link-results"));
+    resetLink(true);
+    $("#link-url").value = "";
+    await Promise.all([refresh(), loadFacets()]);
+  } catch (err) {
+    status.textContent = `error: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 // ------------------------------------------------------------------ overview map
 

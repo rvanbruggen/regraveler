@@ -24,3 +24,8 @@ BROUTER_TIMEOUT_S = float(os.environ.get("BROUTER_TIMEOUT_S", 120))
 
 # Largest GPX file the page may store (bytes).
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", 50_000_000))
+
+# Import from a link: GPX files the page can't read straight from another site are fetched by
+# the server (only from public internet addresses, never from this network).
+LINK_FETCH_TIMEOUT_S = float(os.environ.get("LINK_FETCH_TIMEOUT_S", 20))
+LINK_FETCH_MAX_BYTES = int(os.environ.get("LINK_FETCH_MAX_BYTES", 20_000_000))

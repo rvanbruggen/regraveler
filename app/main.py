@@ -6,12 +6,16 @@ folder, and passes BRouter requests on to the BRouter container.
 """
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import logging
+import re
+import socket
 import urllib.error
 import urllib.request
 from contextlib import asynccontextmanager
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
@@ -208,6 +212,109 @@ def brouter(request: Request):
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
         raise HTTPException(503, f"BRouter is not reachable at {config.BROUTER_URL}: {reason}")
+
+
+# ---------------------------------------------------------------- import from a link
+
+
+class BlockedAddress(OSError):
+    """The link leads to an address on this machine or network, which is never fetched."""
+
+
+def is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_global and not ip.is_multicast
+
+
+class _PublicOnly:
+    """Checks the address actually connected to (after DNS), so a name can't lead inside."""
+
+    def connect(self):
+        super().connect()
+        ip = ipaddress.ip_address(self.sock.getpeername()[0].split("%")[0])
+        if not is_public(ip):
+            self.sock.close()
+            raise BlockedAddress(f"{self.host} is not on the public internet")
+
+
+class _HTTPConnection(_PublicOnly, http.client.HTTPConnection):
+    pass
+
+
+class _HTTPSConnection(_PublicOnly, http.client.HTTPSConnection):
+    pass
+
+
+class _HTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_HTTPConnection, req)
+
+
+class _HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_HTTPSConnection, req, context=self._context)
+
+
+class _Redirects(urllib.request.HTTPRedirectHandler):
+    max_redirections = 5
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlsplit(newurl).scheme not in ("http", "https"):
+            raise urllib.error.HTTPError(newurl, 400, "Redirect to a non-web address", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _link_opener() -> urllib.request.OpenerDirector:
+    """http(s) only (no file:, ftp:, data:), no proxies from the environment, public addresses only."""
+    opener = urllib.request.OpenerDirector()
+    for handler in (_HTTPHandler(), _HTTPSHandler(), _Redirects(),
+                    urllib.request.HTTPDefaultErrorHandler(), urllib.request.HTTPErrorProcessor()):
+        opener.add_handler(handler)
+    return opener
+
+
+_GPX_START = re.compile(rb"<(\w+:)?gpx[\s>]", re.IGNORECASE)
+
+
+@app.get("/api/fetch-gpx")
+def fetch_gpx(url: str):
+    """Fetch a GPX file for the page (Import from a link), for sites that don't let the page
+    read their files itself. Only GPX files, only from public internet addresses."""
+    if urlsplit(url).scheme not in ("http", "https") or not urlsplit(url).hostname:
+        raise HTTPException(400, "Only web links (http:// or https://) can be fetched")
+    host = urlsplit(url).hostname
+    # Refuse addresses inside this network straight away. (The connection itself is checked too,
+    # for redirects and for names that resolve differently the second time.)
+    try:
+        addresses = {info[4][0].split("%")[0] for info in socket.getaddrinfo(host, None)}
+    except (socket.gaierror, UnicodeError) as exc:
+        raise HTTPException(502, f"{host} could not be found: {exc}")
+    if not all(is_public(ipaddress.ip_address(a)) for a in addresses):
+        raise HTTPException(403, f"rerouter only fetches files from the public internet ({host} is not on it)")
+    limit = config.LINK_FETCH_MAX_BYTES
+    req = urllib.request.Request(url, headers={"User-Agent": f"rerouter/{__version__}", "Accept": "application/gpx+xml, application/xml, */*"})
+    try:
+        with _link_opener().open(req, timeout=config.LINK_FETCH_TIMEOUT_S) as resp:
+            data = resp.read(limit + 1)
+    except BlockedAddress as exc:
+        raise HTTPException(403, f"rerouter only fetches files from the public internet ({exc})")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            raise HTTPException(502, f"{host} wants you to sign in for this file. Download it yourself and add it on the Import screen.")
+        if exc.code == 404:
+            raise HTTPException(502, f"There is nothing at that link on {host} (404).")
+        raise HTTPException(502, f"{host} answered {exc.code} {exc.reason}")
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, BlockedAddress):
+            raise HTTPException(403, f"rerouter only fetches files from the public internet ({reason})")
+        raise HTTPException(502, f"{host} could not be reached: {reason}")
+    if len(data) > limit:
+        raise HTTPException(413, f"That file is too large (over {limit // 1_000_000} MB)")
+    if not _GPX_START.search(data[:4096]):
+        raise HTTPException(422, "That link doesn't lead to a GPX file. Use the link of the file itself, e.g. the site's \"Download GPX\" link.")
+    return Response(data, media_type="application/gpx+xml")
 
 
 # ---------------------------------------------------------------- the page

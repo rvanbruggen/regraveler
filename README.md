@@ -160,6 +160,25 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   the wind, the panel says so and offers to flip it (⇄ in the table). The forecast comes from
   [Open-Meteo](https://open-meteo.com/) (free, no key); only about 2 to 21 points along the route are sent.
 
+- **Import from a link:** paste a link and rerouter fetches the route, shows its name and
+  distance, and pre-fills the source (the service or site + the link), the activity and the
+  notes (the route's description). The route is then imported like a GPX file: named by your
+  naming setting (the original name goes into the notes), and checked for duplicates.
+  - **RideWithGPS** routes and rides (`ridewithgps.com/routes/…`, `/trips/…`), if public.
+  - **Komoot** tours (`komoot.com/tour/…`, any language), if public, or private ones shared
+    with you by a link with a `share_token` in it. Komoot's "gravel ride" becomes Gravel.
+  - For both, their surface figure can be used as the paved % (it then counts as yours),
+    instead of rerouter's own estimate. Both let any website read their public route data,
+    so this works in the browser version too.
+  - **Strava** links are recognised, but Strava only hands out a route's GPX to someone signed
+    in to Strava: rerouter gives you the export link, you download the GPX (signed in), choose
+    the file, and it is imported with the Strava link as its source.
+  - **Any other link to a GPX file** is fetched and imported unchanged, if it is a GPX file.
+    In the browser version that only works when the site lets other websites read its files
+    (many don't; then download the file and use the Import screen). A rerouter server fetches
+    such files itself, only from public internet addresses (never from your own network), at
+    most 20 MB, and only GPX files.
+
 - **Duplicates:** all groups of near-duplicate routes in the library (e.g. the same route
   downloaded from two sites), with overlap, source, rating and tags per route, "identical
   track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
@@ -196,8 +215,8 @@ Volumes (bind mounts next to `docker-compose.yml`):
 | `./gpx` | `/gpx` | The GPX library. Files already here are referenced in place; uploaded files are stored in `gpx/uploads/<source>/`, combined routes and new start points in `gpx/derived/`, files from a restored backup that weren't here yet in `gpx/restored/`. |
 | `./brouter/segments4` | `/segments4` (brouter) | BRouter routing data tiles (`.rd5`) |
 
-Services: `app` (serves the page, stores the library, and passes `/brouter` requests on to
-BRouter), `brouter` (routing engine, built from the official
+Services: `app` (serves the page, stores the library, passes `/brouter` requests on to
+BRouter, and fetches GPX files for *Import from a link* when a site won't let the page do it), `brouter` (routing engine, built from the official
 [abrensch/brouter](https://github.com/abrensch/brouter) v1.7.10 source; only reachable through
 the app, not published on the host) and `brouter-segments` (one-off job that downloads missing
 routing data before BRouter starts).
@@ -469,7 +488,8 @@ and the default distance for routes near each other. They are stored with the li
 The server's environment variables: `DATA_DIR` (`./data`), `GPX_DIR` (`./gpx`), `WEB_DIR`
 (`./web`), `DATABASE_URL` (SQLite in `DATA_DIR`), `BROUTER_URL` (`http://localhost:17777`; set to
 `http://brouter:17777` in docker-compose; empty for no `/brouter`), `BROUTER_TIMEOUT_S` (120),
-`MAX_FILE_BYTES` (50 MB).
+`MAX_FILE_BYTES` (50 MB), `LINK_FETCH_TIMEOUT_S` (20) and `LINK_FETCH_MAX_BYTES` (20 MB) for GPX
+files the server fetches for *Import from a link*.
 
 ## Adding metadata fields
 
@@ -494,6 +514,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     combiner.js      cutting, direction handling and stitching of combined routes; new start points
     brouter.js       client for the BRouter HTTP API
     surface.js       surface estimate (map matching via BRouter)
+    linkimport.js    import from a link: RideWithGPS, Komoot, Strava, GPX files online
     weather.js       ride weather: forecast along the route (Open-Meteo), headwind / tailwind
     places.js        route names from GeoNames places (start town + places visited)
     zip.js, backup.js  zip files, library backups and exported route sets
