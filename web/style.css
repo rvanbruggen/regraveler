@@ -286,3 +286,9 @@ footer a { color: var(--muted); }
   background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 6px;
 }
 .disk-import span { flex: 1; min-width: 260px; }
+
+/* Start-up: until the page knows whether it runs on a server or in the browser only, show
+   just "Loading…" (visibility, not display, so the maps still get their size). */
+#starting { display: none; margin: 0 0 12px; }
+body.starting #starting { display: block; visibility: visible; }
+body.starting main > :not(#starting), body.starting nav, body.starting footer, body.starting #version { visibility: hidden; }

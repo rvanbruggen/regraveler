@@ -2288,6 +2288,15 @@ async function checkDiskFiles() {
 }
 
 async function start() {
+  try {
+    await startApp();
+  } finally {
+    // Now the texts match the mode (server or browser) and the library is on screen.
+    document.body.classList.remove("starting");
+  }
+}
+
+async function startApp() {
   $("#version").textContent = `v${VERSION}`;
   let lib;
   const server = await detectServer();

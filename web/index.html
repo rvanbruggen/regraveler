@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="starting">
 <header>
   <h1 class="brand">
     <img src="logo.svg" alt="" width="36" height="36">
@@ -33,6 +33,10 @@
 </header>
 
 <main>
+  <!-- Shown until the page knows whether a rerouter server serves it (the library is then
+       there) or not (the library is in this browser); the rest stays invisible until then. -->
+  <p id="starting" class="muted">Loading your routes…</p>
+  <noscript><p>rerouter needs JavaScript.</p></noscript>
   <!-- Filters, shared by the library and the map -->
     <form id="filters" class="filters" autocomplete="off">
       <label class="wide">Search <input type="search" name="q" placeholder="name or notes"></label>
