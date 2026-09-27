@@ -2019,7 +2019,7 @@ function updateRenameCount() {
   const n = renameRows.filter((r) => r.box.checked && r.input.value.trim()).length;
   $("#rn-apply").textContent = `Rename ticked (${n})`;
   $("#rn-status").textContent = `${renameRows.length} route${renameRows.length === 1 ? "" : "s"}` +
-    (renameRows.some((r) => !r.proposal) ? " · some routes have no places nearby (outside Belgium, the Netherlands, Luxembourg, France and Germany)" : "");
+    (renameRows.some((r) => !r.proposal) ? " · some routes have no places nearby (outside Belgium, the Netherlands, Luxembourg, Germany, France, Italy and Romania)" : "");
 }
 
 $("#rn-apply").addEventListener("click", async () => {

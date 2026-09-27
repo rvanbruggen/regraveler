@@ -21,7 +21,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.8.2 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.8.3 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -385,16 +385,20 @@ and generated name for all of them, identical elevation gain for 74 (the other 3
   says how many km were guessed this way). paved % = (paved + cobbles) / (paved + cobbles +
   unpaved), and is left empty when more than half of the route is unknown.
 - **Route names:** place data comes from [GeoNames](https://www.geonames.org/) (CC BY 4.0) for
-  Belgium, the Netherlands, Luxembourg, Germany and France, built by
-  `web/tools/build_places.py` into 1 × 1 degree tiles in `web/data/places/` (11 MB in all, about
-  150 KB per tile, 40 KB compressed; a route loads only the tiles it passes). Towns and villages are ranked by population (villages
+  Belgium, the Netherlands, Luxembourg, Germany, France, Italy and Romania, built by
+  `web/tools/build_places.py` into 1 × 1 degree tiles in `web/data/places/` (16 MB in all, at
+  most about 150 KB per tile, 40 KB compressed; a route loads only the tiles it passes). Towns and villages are ranked by population (villages
   without one only count if they're widely known); landmarks are named forests, heaths, hills,
-  parks, lakes, castles and abbeys the route passes close to. Names are in Dutch where GeoNames
-  has one (Zoniënwoud rather than Forêt de Soignes; `build_places.py --lang` picks another
-  language). The start is the nearest real
+  parks, lakes, castles and abbeys the route passes close to. Names are local: in the
+  country's own language (Köln, Milano, București rather than Cologne, Milan, Bucharest), in
+  Belgium in the region's (Dutch in Flanders and Brussels, French in Wallonia), and GeoNames'
+  official names in Luxembourg. A landmark that crosses a language border can get its local
+  name in `NAME_OVERRIDES` in the build script (Zoniënwoud, whose GeoNames point lies just
+  inside Wallonia); `--languages` sets the language per country or region. The start is the nearest real
   town to the start point; the places are the most notable one in each third of the route.
   Rebuild the tiles with `python3 web/tools/build_places.py` (standard library only; downloads
-  about 150 MB of GeoNames dumps once), e.g. with `--countries` to add a country.
+  about 200 MB of GeoNames dumps once), e.g. with `--countries` to add a country (and
+  `--languages` for its language).
 - **Duplicates:** a hash of each track's coordinates (rounded to ~1 m) finds the same track in
   different files. The Duplicates utility compares all routes (bounding-box sweep, then the
   exact shares) and groups routes

@@ -3,7 +3,7 @@
 // Place data: GeoNames (https://www.geonames.org/, CC BY 4.0), trimmed by
 // tools/build_places.py into 1 x 1 degree tiles under data/places/. Towns and villages come
 // with their population; landmarks are named forests, heaths, hills, parks, lakes, castles and
-// abbeys. Names are in Dutch where GeoNames has one (Zoniënwoud, not Forêt de Soignes).
+// abbeys. Names are local: the country's (or, in Belgium, the region's) own language.
 //
 // A generated name looks like "Tervuren – Zoniënwoud – Overijse – Huldenberg": the start
 // town, then up to three noteworthy places in riding order (for a point-to-point route, the
@@ -13,7 +13,7 @@ import { SegmentGrid, closestOnSegment, cumulative, lineToMetric, toMetric } fro
 
 export const SEPARATOR = " – ";
 
-const TOWN_CODES = new Set(["PPL", "PPLA", "PPLA2", "PPLA3", "PPLA4", "PPLC", "PPLS", "PPLF", "PPLL"]);
+const TOWN_CODES = new Set(["PPL", "PPLA", "PPLA2", "PPLA3", "PPLA4", "PPLC", "PPLG", "PPLS", "PPLF", "PPLL"]);
 // Landmarks worth putting in a route name, with how close (m) the route must pass their
 // (single) GeoNames point: forests and heaths are large, a castle or abbey is not.
 export const LANDMARK_CODES = {

@@ -4,12 +4,20 @@
 GeoNames (https://download.geonames.org/export/dump/, CC BY 4.0): for each country the
 places dump and the alternate names dump. Kept: towns and villages (with population) and
 landmarks worth putting in a route name (forests, heaths, hills, parks, lakes, castles,
-abbeys). Names are taken in Dutch where GeoNames has one (Zoniënwoud, not Forêt de Soignes).
+abbeys). Names are local: in the language of the country, or in Belgium of the region, where
+GeoNames has one (--languages): Köln, Paris, Milano and București rather than the English
+Cologne, Paris, Milan and Bucharest; in Flanders and Brussels Dutch (Zoniënwoud, not Forêt de
+Soignes), in Wallonia French (Liège). Luxembourg keeps GeoNames' own (official) names.
 
 The output is split into 1 x 1 degree tiles, so the browser only loads the area around a
 route: data/places/<lat>_<lon>.json, plus data/places/index.json listing the tiles.
 
-    python3 tools/build_places.py [--countries BE,NL,LU,FR,DE] [--cache DIR] [--lang nl]
+    python3 web/tools/build_places.py [--countries BE,NL,LU,DE,FR,IT,RO] [--cache DIR]
+                                      [--languages BE=VLG:nl/BRU:nl/WAL:fr,NL=nl,...]
+
+A language per country, or per first-level region ("VLG:nl/WAL:fr", GeoNames admin1 codes).
+Places without a language (a country or region not listed, e.g. Luxembourg) keep the name
+GeoNames lists first.
 
 Standard library only. Downloads are cached in --cache (default: ./.geonames-cache).
 """
@@ -27,12 +35,17 @@ BASE_URL = "https://download.geonames.org/export/dump"
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "data" / "places"
 
-TOWN_CODES = {"PPL", "PPLA", "PPLA2", "PPLA3", "PPLA4", "PPLC", "PPLS", "PPLF", "PPLL"}
+TOWN_CODES = {"PPL", "PPLA", "PPLA2", "PPLA3", "PPLA4", "PPLC", "PPLG", "PPLS", "PPLF", "PPLL"}
 # Must match LANDMARK_CODES in js/places.js.
 LANDMARK_CODES = {
     "FRST", "FRSTF", "HTH", "PRK", "RESN", "RESF", "HLL", "HLLS", "MT", "LK", "LKS", "RSV",
     "CSTL", "MSTY", "HSTS",
 }
+# Landmarks whose single GeoNames point lies in another language region than most of the
+# landmark: {geonameid: local name}. The Sonian Forest is ~56 % in Flanders, 38 % in Brussels
+# and 6 % in Wallonia, but its point is in Wallonia.
+NAME_OVERRIDES = {2786422: "Zoniënwoud"}
+
 _FRENCH_START = ("forêt", "foret", "bois", "château", "chateau", "abbaye", "parc", "lac", "étang", "mont ")
 _DUTCH_END = ("woud", "bos", "bossen", "kasteel", "abdij", "park", "meer", "vijver", "berg", "heide")
 
@@ -74,6 +87,8 @@ def preferred_names(path: Path, lang: str, wanted: set[int]):
 
 
 def display_name(gid, name, local, untagged, lang):
+    if gid in NAME_OVERRIDES:
+        return NAME_OVERRIDES[gid]
     if gid in local:
         return local[gid]
     if lang == "nl" and name.lower().startswith(_FRENCH_START):
@@ -85,13 +100,25 @@ def display_name(gid, name, local, untagged, lang):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--countries", default="BE,NL,LU,DE,FR")
+    ap.add_argument("--countries", default="BE,NL,LU,DE,FR,IT,RO")
     ap.add_argument("--cache", default=str(ROOT / ".geonames-cache"))
-    ap.add_argument("--lang", default="nl")
+    ap.add_argument("--languages", default="BE=VLG:nl/BRU:nl/WAL:fr,NL=nl,DE=de,FR=fr,IT=it,RO=ro",
+                    help="name language per country (or per region), e.g. IT=it,BE=VLG:nl/WAL:fr")
     args = ap.parse_args()
     cache = Path(args.cache)
     cache.mkdir(parents=True, exist_ok=True)
     countries = [c.strip().upper() for c in args.countries.split(",") if c.strip()]
+    # {country: {admin1 code or "*": language}}
+    languages: dict[str, dict[str, str]] = {}
+    for item in args.languages.split(","):
+        if "=" not in item:
+            continue
+        cc, spec = item.split("=", 1)
+        regions = {}
+        for part in spec.split("/"):
+            region, _, lang = part.rpartition(":")
+            regions[region.strip().upper() or "*"] = lang.strip().lower()
+        languages[cc.strip().upper()] = regions
 
     tiles: dict[str, list] = {}
     total = 0
@@ -110,14 +137,19 @@ def main():
                     continue
                 rows.append(f)
         wanted = {int(f[0]) for f in rows}
-        local, untagged = preferred_names(cache / f"{cc}.alt.txt", args.lang, wanted)
+        regions = languages.get(cc, {})
+        names_by_lang = {
+            lang: preferred_names(cache / f"{cc}.alt.txt", lang, wanted) for lang in set(regions.values()) if lang
+        }
         for f in rows:
+            lang = regions.get(f[10], regions.get("*", ""))
+            local, untagged = names_by_lang.get(lang, ({}, {}))
             gid = int(f[0])
             lat, lon = float(f[4]), float(f[5])
             notability = len([a for a in f[3].split(",") if a]) if f[3] else 0
             # [name, feature code, lat, lon, population, notability, order]. The order (position
             # in the GeoNames files) breaks ties between equally important places.
-            rec = [display_name(gid, f[1], local, untagged, args.lang), f[7],
+            rec = [display_name(gid, f[1], local, untagged, lang), f[7],
                    lat, lon, int(f[14] or 0), notability, order]
             order += 1
             key = f"{math.floor(lat)}_{math.floor(lon)}"
@@ -134,7 +166,7 @@ def main():
     index = {
         "source": "GeoNames (https://www.geonames.org/), CC BY 4.0",
         "countries": countries,
-        "language": args.lang,
+        "languages": {cc: languages.get(cc) or None for cc in countries},
         "tile_deg": 1,
         "tiles": sorted(tiles),
         "count": total,
