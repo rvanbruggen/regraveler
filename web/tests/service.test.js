@@ -219,3 +219,18 @@ test("backup and restore round trip", async () => {
   const file = await other.getFile(other.all()[0].file_hash);
   assert.equal(parseGpx(file.data).tracks.length, 1);
 });
+
+test("routes without a track hash get one from their file", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  await importOne("A.gpx", east(0, 3000));
+  const [r] = svc.listRoutes("");
+  const expected = r.track_hash;
+  r.track_hash = null; // as moved from an early server version
+  await svc.library().saveRoutes([r]);
+  assert.equal(await svc.backfillTrackHashes(), 1);
+  assert.equal(svc.route(r.id).track_hash, expected);
+  assert.equal(await svc.backfillTrackHashes(), 0);
+  // The same track in another file is now a duplicate again.
+  const res = await svc.importGpx(gpxXml([["other name", east(0, 3000)]], { name: "x" }), "B.gpx");
+  assert.equal(res.status, "duplicate");
+});

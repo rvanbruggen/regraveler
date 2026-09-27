@@ -730,10 +730,11 @@ let pending = []; // [{name, path, size, data (bytes), folder, source_name, sour
 
 /** Add files: GPX files, zip files (their GPX files are added) and files from folders. */
 async function addFiles(fileList) {
-  const add = (name, path, data) => {
+  // diskPath: the file's path in the server's GPX folder, when it came from there.
+  const add = (name, path, data, diskPath = null) => {
     if (pending.some((p) => p.path === path && p.size === data.length)) return;
     // Files in a subfolder: the subfolder's name is the default source name (like the CLI import).
-    pending.push({ name, path, size: data.length, data, folder: folderOf(path), source_name: "", source_url: "", activity: "", tags: "" });
+    pending.push({ name, path, size: data.length, data, diskPath, folder: folderOf(path), source_name: "", source_url: "", activity: "", tags: "" });
   };
   const skipped = [];
   for (const item of fileList) {
@@ -741,7 +742,7 @@ async function addFiles(fileList) {
     const path = item.path || file.webkitRelativePath || file.name;
     const lower = file.name.toLowerCase();
     try {
-      if (lower.endsWith(".gpx")) add(file.name, path, new Uint8Array(await file.arrayBuffer()));
+      if (lower.endsWith(".gpx")) add(file.name, path, new Uint8Array(await file.arrayBuffer()), item.diskPath || null);
       else if (lower.endsWith(".zip")) {
         for (const e of await readZip(await file.arrayBuffer())) {
           if (!e.name.toLowerCase().endsWith(".gpx") || e.name.split("/").some((x) => x.startsWith("__MACOSX") || x.startsWith("._"))) continue;
@@ -857,10 +858,14 @@ $("#import-btn").addEventListener("click", async () => {
       tags: $("#batch-tags").value,
     }, (n, total, name) => ($("#import-status").textContent = `importing ${n + 1} of ${total}: ${name}…`));
     renderResults(results);
+    const imported = pending;
     pending = [];
     renderPending();
     if (results.some((r) => r.routes.length)) requestPersistence();
-    if (onServer()) checkDiskFiles();
+    if (onServer()) {
+      await ignoreSkippedDiskFiles(imported, results);
+      checkDiskFiles();
+    }
     watchSurfaceJob();
     await Promise.all([refresh(), loadFacets()]);
   } catch (err) {
@@ -2209,18 +2214,59 @@ function renderServerMode(info) {
   $("footer").textContent = "rerouter on your own server. Maps © OpenStreetMap contributors · routing by BRouter · place names by GeoNames";
 }
 
+/**
+ * Files from the server's GPX folder that were skipped (a duplicate of a route in the library,
+ * or not a usable GPX file) are not offered again.
+ */
+async function ignoreSkippedDiskFiles(imported, results) {
+  const skipped = imported
+    .map((p, i) => ({ p, r: results[i] }))
+    .filter(({ p, r }) => p.diskPath && r && (r.status === "duplicate" || r.status === "error"))
+    .map(({ p, r }) => ({ path: p.diskPath, reason: `${r.status}: ${r.message}` }));
+  if (!skipped.length) return;
+  try {
+    await svc.library().backend.ignoreDiskFiles(skipped);
+    $("#import-status").textContent = `${skipped.length} file${skipped.length === 1 ? "" : "s"} from the server's GPX folder ` +
+      `${skipped.length === 1 ? "was" : "were"} skipped and won't be offered again.`;
+  } catch (err) {
+    console.warn("Could not ignore the skipped files:", err);
+  }
+}
+
 /** GPX files in the server's GPX folder that are not in the library yet (the old CLI import). */
 async function checkDiskFiles() {
-  let files;
+  let files, ignored;
   try {
-    files = await svc.library().backend.diskFiles();
+    ({ files, ignored } = await svc.library().backend.diskFiles());
   } catch (_) {
     return;
   }
-  $("#disk-import").hidden = !files.length;
+  $("#disk-import").hidden = !files.length && !ignored;
+  $("#disk-ignored").replaceChildren(ignored
+    ? el("span", {}, `${ignored} ignored file${ignored === 1 ? "" : "s"} · `,
+        el("a", { class: "link", onclick: async () => {
+          await svc.library().backend.unignoreDiskFiles();
+          checkDiskFiles();
+        } }, "offer them again"))
+    : "");
+  $("#disk-import-btn").hidden = $("#disk-ignore-btn").hidden = !files.length;
+  $("#disk-import-text").textContent = files.length
+    ? `${files.length} GPX file${files.length === 1 ? " is" : "s are"} in the server's GPX folder but not in the library yet. ` +
+      "They are referenced where they are (not copied); files in a subfolder get the subfolder's name as source name."
+    : "All GPX files in the server's GPX folder are in the library.";
   if (!files.length) return;
-  $("#disk-import-text").textContent = `${files.length} GPX file${files.length === 1 ? " is" : "s are"} in the server's GPX folder but not in the library yet. ` +
-    "They are referenced where they are (not copied); files in a subfolder get the subfolder's name as source name.";
+  $("#disk-ignore-btn").onclick = async () => {
+    const list = files.slice(0, 10).map((f) => `• ${f.path}`).join("\n") + (files.length > 10 ? `\n… and ${files.length - 10} more` : "");
+    if (!confirm(`Don't offer these files for import again?\n\n${list}\n\nThey stay in the GPX folder; "offer them again" brings them back.`)) return;
+    try {
+      await svc.library().backend.ignoreDiskFiles(files.map((f) => ({ path: f.path, reason: "ignored by hand" })));
+      pending = pending.filter((p) => !p.diskPath);
+      renderPending();
+      checkDiskFiles();
+    } catch (err) {
+      $("#import-status").textContent = `error: ${err.message}`;
+    }
+  };
   $("#disk-import-btn").onclick = async () => {
     const btn = $("#disk-import-btn");
     btn.disabled = true;
@@ -2229,7 +2275,7 @@ async function checkDiskFiles() {
       for (const [n, f] of files.entries()) {
         $("#import-status").textContent = `reading ${n + 1} of ${files.length} from the server…`;
         const data = await svc.library().backend.diskFile(f.path);
-        items.push({ file: new File([data], f.path.split("/").pop()), path: `gpx/${f.path}` });
+        items.push({ file: new File([data], f.path.split("/").pop()), path: `gpx/${f.path}`, diskPath: f.path });
       }
       await addFiles(items);
       $("#disk-import").hidden = true;
@@ -2274,5 +2320,7 @@ async function start() {
   showView(LINKABLE_VIEWS.includes(view) ? view : "library");
   watchSurfaceJob();
   await loadRoutes();
+  // Once, for libraries from before track hashes existed (in the background).
+  svc.backfillTrackHashes().catch((err) => console.warn("Track hashes:", err));
 }
 start();

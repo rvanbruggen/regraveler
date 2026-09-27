@@ -215,7 +215,10 @@ Put the files somewhere under `./gpx` (subfolders are fine), open the Import scr
 *Add them to the list*: it lists every GPX file in the folder that isn't in the library yet.
 Files in a subfolder get the subfolder's name as source name (unless you fill in a source name
 for the batch), and they are referenced where they are, not copied. Doing it again is safe:
-files that are already imported are not offered again. Dropping a folder on the Import screen
+files that are already imported are not offered again, and neither are files that were skipped
+(the same track as a route already in the library, or not a usable GPX file) or that you
+dismissed with *Ignore them*. That goes by content, so every copy of such a file is ignored;
+the files themselves stay in the folder, and *offer them again* brings them back. Dropping a folder on the Import screen
 works too; files that aren't in `./gpx` yet are then copied into `gpx/uploads/<source>/`.
 
 ### Upgrading from 0.7.x (the Python version)
@@ -223,7 +226,9 @@ works too; files that aren't in `./gpx` yet are then copied into `gpx/uploads/<s
 Up to 0.7.x the route logic ran in Python on the server. Now it runs in the page, and the
 server only stores the library. The first start moves your library to the new storage by
 itself: every route with its id, ratings, tags, notes, surface estimate and "not duplicates"
-decisions, referencing the GPX files where they are. The old tables stay untouched in
+decisions, referencing the GPX files where they are. Routes from early versions without a
+track hash get one from their GPX file the first time the page opens, so duplicates are
+recognised. The old tables stay untouched in
 `routes.db`, so the old version still works on the same database. By hand:
 `docker compose run --rm app python -m app.cli migrate`.
 

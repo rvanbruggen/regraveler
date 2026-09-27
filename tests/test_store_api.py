@@ -37,6 +37,9 @@ def test_the_page_is_served(client):
     assert "rerouter" in client.get("/").text
     assert client.get("/js/service.js").status_code == 200
     assert client.get("/data/places/index.json").status_code == 200
+    # Always checked with the server, so an upgrade never runs an old page.
+    assert client.get("/js/app.js").headers["cache-control"] == "no-cache"
+    assert client.get("/").headers["cache-control"] == "no-cache"
 
 
 def test_files_are_stored_by_hash_in_their_folder(client, library):
@@ -199,3 +202,31 @@ def test_brouter_unreachable(client, monkeypatch):
 def test_store_rejects_paths_outside_the_gpx_folder(library):
     with pytest.raises(store.StoreError):
         store.resolve("../outside.gpx")
+
+
+def test_ignored_files_are_not_offered_again(client, library):
+    dup, bad, other = gpx(1), b"<gpx>not really</gpx>", gpx(2)
+    for folder in ("sportvlaanderen", "uploads/sport-vlaanderen"):
+        (library / folder).mkdir(parents=True)
+        (library / folder / "verbinding.gpx").write_bytes(dup)  # the same file twice
+    (library / "uploads/sport-vlaanderen/kapot.gpx").write_bytes(bad)
+    (library / "keep.gpx").write_bytes(other)
+    listed = client.get("/api/disk-files").json()
+    assert [f["path"] for f in listed["files"]] == ["keep.gpx", "sportvlaanderen/verbinding.gpx", "uploads/sport-vlaanderen/kapot.gpx"]
+    assert listed["ignored"] == 0
+
+    res = client.post("/api/disk-files/ignore", json={"files": [
+        {"path": "sportvlaanderen/verbinding.gpx", "reason": "duplicate: Same track already imported"},
+        {"path": "uploads/sport-vlaanderen/kapot.gpx", "reason": "error: no track"},
+    ]})
+    assert res.json() == {"ignored": 2}
+    # Every copy is ignored (by content), not only the one that was listed.
+    listed = client.get("/api/disk-files").json()
+    assert [f["path"] for f in listed["files"]] == ["keep.gpx"]
+    assert listed["ignored"] == 2
+    # The files stay on disk.
+    assert (library / "uploads/sport-vlaanderen/verbinding.gpx").exists()
+    assert client.post("/api/disk-files/ignore", json={"files": [{"path": "nope.gpx"}]}).status_code == 404
+
+    assert client.post("/api/disk-files/unignore").json() == {"unignored": 2}
+    assert len(client.get("/api/disk-files").json()["files"]) == 3

@@ -134,9 +134,22 @@ export class RemoteBackend {
     return this.request("api/restore", { method: "POST", body: bytes, headers: { "Content-Type": "application/zip" } });
   }
 
-  /** GPX files in the server's GPX folder that are not in the library yet: [{path, size}] */
+  /**
+   * GPX files in the server's GPX folder that are not in the library yet:
+   * {files: [{path, size}], ignored: how many more are ignored}
+   */
   async diskFiles() {
-    return (await this.request("api/disk-files")).files;
+    return this.request("api/disk-files");
+  }
+
+  /** Don't offer these files again: [{path, reason}] (every copy of each file). */
+  async ignoreDiskFiles(files) {
+    return this.request("api/disk-files/ignore", { method: "POST", json: { files } });
+  }
+
+  /** Offer the ignored files again. */
+  async unignoreDiskFiles() {
+    return this.request("api/disk-files/unignore", { method: "POST" });
   }
 
   async diskFile(path) {

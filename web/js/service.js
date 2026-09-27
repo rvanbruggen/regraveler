@@ -534,6 +534,29 @@ export async function importFiles(files, batch = {}, onProgress = null) {
   return { results };
 }
 
+/**
+ * Routes without a track hash (moved from an early version of the server, which didn't have
+ * them) get one from their GPX file, so the same track in another file is recognised as a
+ * duplicate. Returns how many routes were updated.
+ */
+export async function backfillTrackHashes() {
+  const missing = lib.all().filter((r) => !r.track_hash);
+  const changed = [];
+  for (const r of missing) {
+    try {
+      const file = await lib.getFile(r.file_hash);
+      const track = file && parseGpx(file.data).tracks[r.track_index || 0];
+      if (!track) continue;
+      r.track_hash = await trackHash(track.points);
+      changed.push(r);
+    } catch (err) {
+      console.warn(`No track hash for '${r.name}':`, err);
+    }
+  }
+  for (let i = 0; i < changed.length; i += 50) await lib.saveRoutes(changed.slice(i, i + 50));
+  return changed.length;
+}
+
 // ------------------------------------------------------------------ tracks (full resolution)
 
 const trackCache = new Map(); // route id -> {hash, track}

@@ -19,7 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from . import __version__, config
-from .models import IgnoredPair, RouteDoc, Setting, StoredFile
+from .models import IgnoredFile, IgnoredPair, RouteDoc, Setting, StoredFile
 
 BACKUP_FORMAT = "rerouter-backup"
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -232,14 +232,52 @@ def get_file(session: Session, file_hash: str) -> tuple[StoredFile, Path]:
     return f, path
 
 
-def disk_files(session: Session) -> list[dict]:
-    """GPX files in the GPX folder whose content is not in the library yet."""
+def disk_files(session: Session) -> dict:
+    """GPX files in the GPX folder whose content is not in the library yet (and not ignored):
+    {"files": [{path, size}], "ignored": number of ignored files still in the folder}."""
     known = set(session.scalars(select(RouteDoc.file_hash)))
-    out = []
+    ignored = set(session.scalars(select(IgnoredFile.hash)))
+    out, n_ignored = [], 0
     for h, rel in disk_index().items():
-        if h not in known:
-            out.append({"path": rel, "size": resolve(rel).stat().st_size})
-    return sorted(out, key=lambda f: f["path"].lower())
+        if h in known:
+            continue
+        if h in ignored:
+            n_ignored += 1
+            continue
+        out.append({"path": rel, "size": resolve(rel).stat().st_size})
+    return {"files": sorted(out, key=lambda f: f["path"].lower()), "ignored": n_ignored}
+
+
+def ignore_disk_files(session: Session, items: list[dict]) -> int:
+    """Stop offering these files for import: items [{path, reason}] (paths relative to
+    GPX_DIR). Ignored by content, so other copies of the same file are ignored too."""
+    disk_index()  # refreshes the cache, which has every copy (not only the first)
+    by_path = {rel: h for rel, (_, _, h) in _disk_cache.items()}
+    added = 0
+    for item in items:
+        rel = str(item.get("path", ""))
+        h = by_path.get(rel)
+        if h is None:
+            path = resolve(rel)
+            if not path.is_file():
+                raise StoreError(f"No such GPX file: {rel}", 404)
+            h = sha256(path.read_bytes())
+        reason = (str(item.get("reason") or "")[:300]) or None
+        row = session.get(IgnoredFile, h)
+        if row is None:
+            session.add(IgnoredFile(hash=h, path=rel, reason=reason, ignored_at=now()))
+            added += 1
+        else:
+            row.reason = reason or row.reason
+    session.commit()
+    return added
+
+
+def unignore_disk_files(session: Session) -> int:
+    """Offer every ignored file again."""
+    n = session.execute(delete(IgnoredFile)).rowcount
+    session.commit()
+    return n
 
 
 # ------------------------------------------------------------------ pairs and settings
@@ -277,7 +315,7 @@ def put_settings(session: Session, settings: dict) -> None:
 
 def clear(session: Session) -> None:
     """Remove every route, pair and setting (and forget the files; they stay on disk)."""
-    for model in (RouteDoc, IgnoredPair, Setting, StoredFile):
+    for model in (RouteDoc, IgnoredPair, Setting, StoredFile, IgnoredFile):
         session.execute(delete(model))
     session.commit()
 

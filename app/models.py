@@ -34,6 +34,19 @@ class StoredFile(Base):
     path: Mapped[str] = mapped_column(String(1000))  # relative to GPX_DIR
 
 
+class IgnoredFile(Base):
+    """A GPX file in the GPX folder that is not offered for import (by content, so every copy
+    of it is ignored): a duplicate of a route already in the library, a file that can't be
+    read, or one the user dismissed."""
+
+    __tablename__ = "library_ignored_files"
+
+    hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    path: Mapped[str] = mapped_column(String(1000))  # where it was when it was ignored
+    reason: Mapped[str | None] = mapped_column(String(300))
+    ignored_at: Mapped[str] = mapped_column(String(40))
+
+
 class IgnoredPair(Base):
     """Two routes the user marked as "not duplicates" (key "a_b", a < b)."""
 

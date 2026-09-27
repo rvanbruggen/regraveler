@@ -108,8 +108,25 @@ async def put_file(file_hash: str, request: Request, session: SessionDep, name: 
 
 @app.get("/api/disk-files")
 def disk_files(session: SessionDep):
-    """GPX files in the GPX folder that are not in the library yet (to import from the page)."""
-    return {"files": store.disk_files(session)}
+    """GPX files in the GPX folder that are not in the library yet (to import from the page),
+    and how many are ignored."""
+    return store.disk_files(session)
+
+
+class IgnoreFilesIn(BaseModel):
+    files: list[dict]  # [{path, reason}]
+
+
+@app.post("/api/disk-files/ignore")
+def ignore_disk_files(body: IgnoreFilesIn, session: SessionDep):
+    """Stop offering these files (every copy of them) for import."""
+    return {"ignored": store.ignore_disk_files(session, body.files)}
+
+
+@app.post("/api/disk-files/unignore")
+def unignore_disk_files(session: SessionDep):
+    """Offer the ignored files again."""
+    return {"unignored": store.unignore_disk_files(session)}
 
 
 @app.get("/api/disk-files/content")
@@ -196,10 +213,22 @@ def brouter(request: Request):
 # ---------------------------------------------------------------- the page
 
 
+# Browsers check the page's files with the server every time (a cheap "not modified" when
+# nothing changed), so after an upgrade they never run an old page against a new server.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class WebFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(NO_CACHE)
+        return response
+
+
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(config.WEB_DIR / "index.html")
+    return FileResponse(config.WEB_DIR / "index.html", headers=NO_CACHE)
 
 
 # Everything else: the page's files (JS, CSS, place data). Mounted last.
-app.mount("/", StaticFiles(directory=config.WEB_DIR), name="web")
+app.mount("/", WebFiles(directory=config.WEB_DIR), name="web")
