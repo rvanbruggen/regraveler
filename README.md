@@ -16,7 +16,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
   self-hosted BRouter. Every browser on your network sees the same library.
 - **As a static site** (e.g. GitHub Pages): the same page keeps the library in the browser
   (IndexedDB) and uses the public BRouter at brouter.de. Nothing to install; one browser is
-  one library.
+  one library. **Try it: <https://rvanbruggen.github.io/rerouter/>**
 
 Both use the same backup format, so a library moves between them in either direction.
 
@@ -253,8 +253,9 @@ python3 -m http.server 8000 --directory web
 ```
 
 On GitHub, `.github/workflows/pages.yml` runs the JavaScript tests and publishes `web/` to
-GitHub Pages on every push to `main` that touches it. Turn it on once under *Settings › Pages ›
-Build and deployment › Source: GitHub Actions*. The app is then at
+GitHub Pages on every push to `main` that touches it: this repository's version is live at
+<https://rvanbruggen.github.io/rerouter/>. In a fork, turn it on once under *Settings › Pages ›
+Build and deployment › Source: GitHub Actions*; the app is then at
 `https://<user>.github.io/<repo>/`.
 
 In the browser version everything stays on the device: the library is in the browser's
