@@ -5,14 +5,22 @@ Not part of the app: a helper for the docs. It drives Chrome with Playwright
 
 Setup (use scratch folders, not your real library):
 
-1. A BRouter server on localhost:17777 with tiles for Flanders (see the README),
-   for the surface estimates and the combiner.
-2. App A, with generated names and surface estimates, on port 8766:
-       DATA_DIR=/tmp/shots/data GPX_DIR=/tmp/shots/gpx python -m app.cli import /tmp/shots/gpx
-       DATA_DIR=/tmp/shots/data GPX_DIR=/tmp/shots/gpx python -m app.cli estimate-surface
-       DATA_DIR=/tmp/shots/data GPX_DIR=/tmp/shots/gpx SURFACE_AUTO_ESTIMATE=0 uvicorn app.main:app --port 8766
-3. App B, with the original file names (for the rename screen), on port 8767: the same with
-   AUTO_RENAME_ON_IMPORT=0 on import and another DATA_DIR.
+1. A BRouter server on localhost:17777 with tiles for Flanders (see the README), for the
+   surface estimates and the combiner. The rerouter servers pass the page's BRouter requests
+   on to it (BROUTER_URL, default http://localhost:17777).
+2. Two rerouter servers on scratch folders, both with the GPX files in /tmp/shots/gpx:
+       DATA_DIR=/tmp/shots/data-a GPX_DIR=/tmp/shots/gpx uvicorn app.main:app --port 8766
+       DATA_DIR=/tmp/shots/data-b GPX_DIR=/tmp/shots/gpx uvicorn app.main:app --port 8767
+   App A (8766) gets generated names and surface estimates; app B (8767) keeps the original
+   file names, for the rename screen.
+3. Fill both libraries, once. Either let the script import the files through the page:
+       python docs/screenshots/take_screenshots.py --seed --demo-metadata
+   --seed adds the files in the servers' GPX folder with the Import screen's "Add them to the
+   list"; --seed DIR uploads the GPX files of DIR instead. App A waits for the surface
+   estimates; on app B generated names and surface estimates are switched off first.
+   Libraries that already have routes are left alone.
+   Or restore backup zips: --restore A.zip --rename-restore B.zip (or, before starting a
+   server, DATA_DIR=... GPX_DIR=... python -m app.cli restore A.zip).
 
 Then:
     python docs/screenshots/take_screenshots.py            # all screens
@@ -51,19 +59,32 @@ DEMO_METADATA = [
     ("Beernem – Hertsberge", 3, ["forest"]),
 ]
 
+# The page is an ES module and keeps its Leaflet maps to itself. Keep every map it makes in
+# window.__maps (by container id), so the script can move them. Leaflet sets window.L when it
+# has loaded, before the page's module runs.
+MAP_HOOK = """(() => {
+  let leaflet;
+  Object.defineProperty(window, "L", {
+    configurable: true, enumerable: true,
+    get: () => leaflet,
+    set: (v) => {
+      leaflet = v;
+      v?.Map?.addInitHook(function () { (window.__maps ||= {})[this.getContainer().id] = this; });
+    },
+  });
+})()"""
 
-def add_demo_metadata(base: str) -> None:
-    def call(path, body=None, method="GET"):
-        req = urllib.request.Request(base + path, method=method, headers={"Content-Type": "application/json"},
-                                     data=None if body is None else json.dumps(body).encode())
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.load(resp)
+# The page's service module (web/js/service.js); the same URL gives the same module instance.
+SVC = "await import(new URL('js/service.js', document.baseURI).href)"
 
-    routes = call("/api/routes")
-    for prefix, rating, tags in DEMO_METADATA:
-        route = next((r for r in routes if r["name"].startswith(prefix)), None)
-        if route:
-            call(f"/api/routes/{route['id']}", {"quality_rating": rating, "tags": tags}, "PATCH")
+
+def restore(base: str, zip_path: str) -> None:
+    """Replace a server's library with a backup zip."""
+    req = urllib.request.Request(f"{base}/api/restore", data=Path(zip_path).read_bytes(), method="POST",
+                                 headers={"Content-Type": "application/zip"})
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        res = json.load(resp)
+    print(f"{base}: restored {res['routes']} routes")
 
 
 def main() -> None:
@@ -71,16 +92,25 @@ def main() -> None:
     ap.add_argument("screens", nargs="*", help="only these screens (default: all)")
     ap.add_argument("--base", default="http://localhost:8766", help="app with generated names")
     ap.add_argument("--rename-base", default="http://localhost:8767", help="app with the original names")
+    ap.add_argument("--seed", nargs="?", const="", metavar="DIR",
+                    help="first import GPX files through the page into empty libraries: "
+                         "the files in the servers' GPX folder, or those in DIR")
+    ap.add_argument("--restore", metavar="ZIP", help="first restore this backup on --base")
+    ap.add_argument("--rename-restore", metavar="ZIP", help="first restore this backup on --rename-base")
     ap.add_argument("--demo-metadata", action="store_true", help="first add a few ratings and tags")
     args = ap.parse_args()
     wanted = set(args.screens)
-    if args.demo_metadata:
-        add_demo_metadata(args.base)
+    if args.restore:
+        restore(args.base, args.restore)
+    if args.rename_restore:
+        restore(args.rename_base, args.rename_restore)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="chrome")
-        page = browser.new_context(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=SCALE,
-                                   color_scheme="light", locale="nl-BE").new_page()
+        context = browser.new_context(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=SCALE,
+                                      color_scheme="light", locale="nl-BE")
+        context.add_init_script(MAP_HOOK)
+        page = context.new_page()
 
         def settle(ms=1500):
             page.wait_for_load_state("networkidle")
@@ -89,11 +119,67 @@ def main() -> None:
         def go(hash_="", base=args.base):
             page.goto(f"{base}/{'#' + hash_ if hash_ else ''}")
             page.reload()  # the app reads the URL hash on load
+            # The library has loaded once the route count is shown.
+            page.wait_for_function("document.querySelector('#count').textContent.includes('route')")
             settle()
 
+        def svc(body, arg=None):
+            """Run `body` in the page with `svc` (the page's service module) and `arg`."""
+            return page.evaluate(f"async (arg) => {{ const svc = {SVC}; {body} }}", arg)
+
         def route_id(prefix):
-            return page.evaluate(
-                f"(async () => (await api('/api/routes')).find(r => r.name.startsWith({prefix!r})).id)()")
+            rid = svc("return svc.library().all().find((r) => r.name.startsWith(arg))?.id ?? null;", prefix)
+            if rid is None:
+                raise SystemExit(f"No route whose name starts with {prefix!r} at {page.url}")
+            return rid
+
+        def seed(base, generated_names):
+            go("view=import", base)
+            count = svc("return svc.library().all().length;")
+            if count:
+                print(f"{base}: already has {count} routes, not seeding")
+                return
+            if not generated_names:
+                # Settings are stored with the library; the page reads them at start-up.
+                page.evaluate("""async () => {
+                  const res = await fetch('api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: { AUTO_RENAME_ON_IMPORT: false, SURFACE_AUTO_ESTIMATE: false } }) });
+                  if (!res.ok) throw new Error(`settings: HTTP ${res.status}`);
+                }""")
+                go("view=import", base)
+            if args.seed:
+                files = sorted(str(f) for f in Path(args.seed).expanduser().rglob("*") if f.suffix.lower() == ".gpx")
+                if not files:
+                    raise SystemExit(f"No GPX files in {args.seed}")
+                page.set_input_files("#file-input", files)
+            else:
+                button = page.locator("#disk-import-btn")
+                try:
+                    button.wait_for(state="visible", timeout=15_000)
+                except Exception:
+                    raise SystemExit(f"{base}: no GPX files in the server's GPX folder to add") from None
+                button.click()
+            page.wait_for_function("!document.querySelector('#import-btn').disabled", timeout=0)
+            page.click("#import-btn")
+            page.wait_for_selector("#import-results h3", timeout=0)
+            print(f"{base}: {page.locator('#import-results h3').text_content()}")
+            if generated_names:
+                print(f"{base}: waiting for the surface estimates…")
+                svc("window.__svc = svc;")
+                page.wait_for_function("!window.__svc.surfaceJob.status().running", timeout=0, polling=2000)
+                print(f"{base}: {page.locator('#surface-job').text_content().strip(' ·')}")
+
+        if args.seed is not None:
+            seed(args.base, generated_names=True)
+            seed(args.rename_base, generated_names=False)
+
+        if args.demo_metadata:
+            go()
+            svc("""const all = svc.library().all();
+              for (const [prefix, rating, tags] of arg) {
+                const r = all.find((r) => r.name.startsWith(prefix));
+                if (r) await svc.updateRoute(r.id, { quality_rating: rating, tags });
+              }""", DEMO_METADATA)
 
         def shot(name):
             if name in JPEG:
@@ -114,30 +200,34 @@ def main() -> None:
 
         if want("route"):
             go("sort=quality_rating&order=desc")
-            page.evaluate(f"openDetail({route_id('Tervuren – Kapucijnenbos')})")
+            page.click(f"#routes tbody tr[data-id='{route_id('Tervuren – Kapucijnenbos')}'] td:nth-child(2)")
             settle(2500)
             shot("route-panel")
 
         if want("rename"):
             go(base=args.rename_base)
-            page.evaluate("openRename(routes.map(r => r.id))")
+            page.click("#suggest-names")
+            page.wait_for_selector("#rn-table tbody tr", timeout=0)
             settle(2000)
             shot("rename")
 
         if want("map"):
             go("view=map&near=100")
             settle(2500)
-            page.evaluate("() => { overview.map.setView([50.83, 4.58], 11); }")
+            page.evaluate("() => { window.__maps['overview-map'].setView([50.83, 4.58], 11); }")
             settle(2500)
             shot("map")
 
         if want("combine"):
-            go("view=combine")
+            go()
             a, b = route_id("Tervuren – Kapucijnenbos"), route_id("Blauwput – Korbeek-Lo")
-            page.evaluate(f"openCombiner({a}, {b})")
+            go(f"view=combine&a={a}&b={b}")
             settle(3000)
-            page.evaluate("() => { cb.map.fitBounds(L.featureGroup(cb.resultLayer.getLayers()).getBounds(),"
-                          " { padding: [50, 50] }); }")
+            # Zoom to the result: its legs are the thick lines on the combine map.
+            page.evaluate("""() => { const m = window.__maps['combine-map'], legs = [];
+              m.eachLayer((l) => { if (l instanceof L.Polyline && l.options.weight >= 5) legs.push(l); });
+              if (!legs.length) throw new Error(`no combined route: ${document.querySelector('#cb-status').textContent}`);
+              m.fitBounds(L.featureGroup(legs).getBounds(), { padding: [50, 50] }); }""")
             settle(2500)
             shot("combine")
 
@@ -167,8 +257,10 @@ def main() -> None:
               document.querySelector('#batch-source-name').value = 'gravelroutedatabase.be';
               document.querySelector('#batch-source-url').value = 'https://gravelroutedatabase.be/';
               document.querySelector('#batch-tags').value = 'kempen, spring';
-              document.querySelectorAll('#pending tbody td:nth-child(5) input')[0].value = 'favourite';
             })()""")
+            # The dropped files are read asynchronously: wait for the list, then add a per-file tag.
+            page.wait_for_selector("#pending tbody tr")
+            page.evaluate("document.querySelector('#pending tbody td:nth-child(5) input').value = 'favourite'")
             page.wait_for_timeout(500)
             shot("import")
 

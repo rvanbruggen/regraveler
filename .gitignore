@@ -4,7 +4,9 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 # Runtime data: database and the GPX library (personal data, not part of the code)
-data/
-gpx/
+/data/
+/gpx/
 # BRouter routing data tiles (downloaded)
-brouter/segments4/
+/brouter/segments4/
+.geonames-cache/
+node_modules/

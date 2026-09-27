@@ -3,13 +3,16 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
-    GPX_DIR=/gpx
+    GPX_DIR=/gpx \
+    WEB_DIR=/srv/web
 
 WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+# The page: all route logic runs in the browser; the server stores the library.
+COPY web ./web
 
 VOLUME ["/data", "/gpx"]
 EXPOSE 8000

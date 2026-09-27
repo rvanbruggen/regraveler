@@ -1,26 +1,36 @@
 # rerouter - project brief
 
-A self-hosted web app (formerly "regraveler") to manage a personal library of routes (GPX files) for gravel cycling, road cycling and hiking: store them with structured metadata, show them on a map, and combine two routes into a new one using an automatically routed connector.
+A web app (formerly "regraveler") to manage a personal library of routes (GPX files) for gravel cycling, road cycling and hiking: store them with structured metadata, show them on a map, and combine two routes into a new one using an automatically routed connector.
+
+## Architecture (since the js-core branch)
+
+One codebase for the route logic: the page in `web/` (vanilla JS ES modules + Leaflet) does everything — GPX parsing, stats, names, combining, similarity, surface estimate. It runs two ways:
+
+- **Self-hosted** (`docker compose up`): the thin Python server in `app/` serves `web/`, stores the library (SQLite route documents + the GPX folder) through a small storage API, and proxies `/brouter` to the BRouter container. It computes nothing.
+- **Static site** (GitHub Pages): the same page keeps the library in IndexedDB and uses the public BRouter at brouter.de (it allows CORS).
+
+The page picks its storage at start-up (`GET api/info` answers → server). Both share one backup format (`library.json` + `gpx/<sha256>.gpx`). Route logic changes go in `web/js/`; the server only changes when the storage contract does. Up to 0.7.x the logic was in Python; `app/legacy.py` moves an old library to the new store.
 
 ## Context
 
 - Owner: Rik (Antwerp, Belgium). Routes are mainly in Flanders / Belgium.
 - Scale: hundreds of routes to start. No need to design for thousands yet.
-- Deployment: Docker (docker compose) on Rik's own home server. Possibly hosted publicly later, so keep that door open but don't build for it now (no user accounts, no multi-tenancy).
+- Deployment: Docker (docker compose) on Rik's own home server, and the browser-only version on GitHub Pages. Possibly hosted publicly later, so keep that door open but don't build for it now (no user accounts, no multi-tenancy).
 - Existing data: a folder of GPX files (downloaded from gravelroutedatabase.be, renamed to the route name). The files contain `<ele>` elevation tags, so elevation gain can be computed from the files directly.
-- Language preference: Python over Node.js.
+- Language preference: Python over Node.js for servers and tools. The route logic is JavaScript because it has to run in the browser (decided 2026-09-27: one codebase instead of a Python and a JS copy).
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
-| Backend | Python 3.12, FastAPI |
-| GPX parsing | gpxpy |
-| Geometry | Shapely (+ pyproj for metric distances) |
-| Database | SQLite (via SQLAlchemy), single file on a Docker volume |
-| Frontend | Single-page HTML + vanilla JS + Leaflet, OpenStreetMap tiles. No heavy framework. |
-| Routing (phase 3) | BRouter, self-hosted as a separate container, with routing data tiles for Belgium and neighbouring areas |
-| Deployment | docker-compose.yml with `app` and `brouter` services; volumes for `data/` (db) and `gpx/` (files) |
+| Route logic + UI | `web/`: single page, vanilla JS (ES modules, no build step, no npm dependencies) + Leaflet, OpenStreetMap tiles |
+| Geometry | Own code in `web/js/geo.js` (EPSG:3035 LAEA projection, Vincenty distance, grid index, exact buffer intersections) |
+| Browser storage | IndexedDB (`web/js/db.js`) |
+| Server | Python 3.12, FastAPI, SQLAlchemy + SQLite (route documents as JSON), `app/` |
+| Routing | BRouter, self-hosted as a separate container (proxied at `/brouter`), or the public brouter.de for the static version |
+| Place names | GeoNames tiles in `web/data/places/`, built by `web/tools/build_places.py` |
+| Tests | Node's built-in test runner for `web/js` (`cd web && npm test`); pytest for the server |
+| Deployment | docker-compose.yml with `app` and `brouter` services; volumes for `data/` (db) and `gpx/` (files). GitHub Pages workflow for `web/` |
 
 Keep dependencies minimal. Verify BRouter's current Docker setup, data tile download and profile options from its official repository before implementing phase 3 - don't assume.
 
@@ -75,8 +85,8 @@ Design requirement: support one OR two connection pairs. A single pair gives a p
 
 - Build phase by phase; each phase should be usable on its own and runnable with `docker compose up`.
 - Include a README with setup, run and import instructions.
-- Write tests for the GPX stats and stitching logic (these are where bugs will hide).
+- Write tests for the GPX stats and stitching logic (these are where bugs will hide) — in `web/tests/` (Node).
 - Never modify original GPX files; derived routes are new files.
 - Ask before adding significant new dependencies or changing the stack.
 - Keep the UI simple and functional; clarity over polish.
-- Releases go through the `/bump` skill (major / minor / dot). The version source of truth is `__version__` in `app/__init__.py`; see "Version Tracking" in the README for every place it appears. Each release is committed, tagged `v<version>` and pushed.
+- Releases go through the `/bump` skill (major / minor / dot). The version source of truth is `__version__` in `app/__init__.py`; `web/js/config.js` (`VERSION`) and `web/package.json` must match. See "Version Tracking" in the README for every place it appears. Each release is committed, tagged `v<version>` and pushed.

@@ -1,0 +1,11 @@
+{
+  "name": "rerouter-web",
+  "version": "0.7.2",
+  "private": true,
+  "description": "rerouter: the page (all route logic). Runs as a static site or served by the rerouter server",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "serve": "python3 -m http.server 8000"
+  }
+}

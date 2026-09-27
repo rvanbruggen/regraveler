@@ -8,3 +8,7 @@ tests
 .pytest_cache
 .DS_Store
 brouter
+web/tests
+web/tools
+web/node_modules
+.github
