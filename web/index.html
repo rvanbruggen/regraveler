@@ -89,6 +89,12 @@
         use rerouter at least once a week. Keep a backup, or use another browser (Firefox, Chrome, Edge) for rerouter.</p>
       <p><button type="button" id="welcome-import">Import GPX files</button>
         <button type="button" id="welcome-restore" class="secondary">Restore a backup</button></p>
+      <div id="welcome-seeds" hidden>
+        <p><strong>Just looking around?</strong> Load a set of example routes to try the map, the weather and
+          combining routes right away. You can remove them again at any time.</p>
+        <div class="seed-list"></div>
+        <p class="seed-status small"></p>
+      </div>
     </div>
     <p id="backup-note" class="backup-note" hidden></p>
 
@@ -98,6 +104,7 @@
       <div id="sel-bar" hidden>
         <strong id="sel-count"></strong>
         <button type="button" id="sel-download" class="secondary">Download GPX</button>
+        <button type="button" id="sel-export" class="secondary" aria-expanded="false" aria-controls="export-panel" title="A rerouter zip with these routes and their details, to add to another library">Export set…</button>
         <button type="button" id="sel-map" class="secondary">Show on map</button>
         <button type="button" id="sel-surface" class="secondary" title="Estimate paved % from OpenStreetMap (asks the BRouter server; one route at a time)">Estimate surface</button>
         <select id="sel-activity" class="activity-select" data-any="Set activity…" aria-label="Set the activity of the selected routes"></select>
@@ -106,6 +113,20 @@
         <button type="button" id="sel-remove" class="danger">Remove</button>
         <a class="link small" id="sel-clear">clear selection</a>
       </div>
+    </div>
+    <div id="export-panel" class="tag-panel" hidden>
+      <form id="export-form" class="tag-add" autocomplete="off">
+        <label>Name of the set
+          <input name="title" placeholder="e.g. Gravel around Leuven">
+        </label>
+        <label>Description (optional)
+          <input name="description" placeholder="e.g. Five loops of 50–80 km">
+        </label>
+        <button type="submit">Download zip</button>
+      </form>
+      <label class="check small"><input type="checkbox" name="strip" form="export-form" checked> Leave out my notes and quality ratings
+        (e.g. for a set you share or publish)</label>
+      <span id="export-status" class="muted small"></span>
     </div>
     <div id="tag-panel" class="tag-panel" hidden>
       <form id="tag-add-form" class="tag-add" autocomplete="off">
@@ -368,7 +389,19 @@
           <button type="button" id="data-backup">Download backup</button>
           <label class="button secondary">Restore from backup…<input type="file" id="data-restore" accept=".zip,application/zip" hidden></label>
         </div>
+        <p class="small">To share only some routes, select them in the library and choose <em>Export set…</em>. Such a
+          zip (or a whole backup) can also be <em>added</em> to a library, keeping the routes that are already there.</p>
+        <div class="actions">
+          <label class="button secondary">Add routes from a zip…<input type="file" id="data-add" accept=".zip,application/zip" hidden></label>
+        </div>
         <p id="data-status" class="small"></p>
+      </div>
+      <div class="panel" id="data-seeds" hidden>
+        <h3>Example routes</h3>
+        <p class="small">Sets of routes to start with. They are added to your library (routes you already have are
+          skipped).</p>
+        <div class="seed-list"></div>
+        <p class="seed-status small"></p>
       </div>
       <div class="panel">
         <h3>Settings</h3>

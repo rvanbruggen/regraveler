@@ -1,7 +1,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { makeBackup, readBackup } from "../js/backup.js";
+import { addBackup, makeBackup, makeSelection, readBackup } from "../js/backup.js";
 import { config } from "../js/config.js";
 import { Library, MemoryBackend } from "../js/db.js";
 import { parseGpx } from "../js/gpx.js";
@@ -218,6 +218,81 @@ test("backup and restore round trip", async () => {
   assert.equal(other.settings.BROUTER_URL, "http://nas:17777");
   const file = await other.getFile(other.all()[0].file_hash);
   assert.equal(parseGpx(file.data).tracks.length, 1);
+});
+
+test("a selection of routes is added to another library without replacing it", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  await importOne("A.gpx", east(0, 3000));
+  await importOne("B.gpx", east(2000, 3000));
+  await importOne("C.gpx", east(4000, 3000));
+  const [a, b, c] = svc.listRoutes("").sort((x, y) => x.id - y.id);
+  const d = svc.library().get(c.id);
+  d.derived_from = [a.id];
+  await svc.library().saveRoutes([d]);
+  await svc.ignoreDuplicates([a.id, c.id]);
+  await svc.ignoreDuplicates([a.id, b.id]);
+  const zip = await makeSelection(svc.library(), [a.id, c.id], { title: "Two routes" });
+  const data = await readBackup(new Uint8Array(await zip.arrayBuffer()));
+  assert.equal(data.kind, "selection");
+  assert.equal(data.title, "Two routes");
+  assert.equal(data.routes.length, 2);
+  assert.equal(data.files.length, 2);
+  assert.deepEqual(data.ignored, [`${a.id}_${c.id}`]);
+  assert.deepEqual(data.settings, {});
+
+  // Another library that already has B and C: only A is new; C keeps its own id.
+  const other = await Library.open(new MemoryBackend());
+  const keep = svc.library();
+  svc.setLibrary(other);
+  await importOne("B.gpx", east(2000, 3000));
+  await importOne("C again.gpx", east(4000, 3000));
+  svc.setLibrary(keep);
+  assert.equal(other.all().length, 2);
+  const res = await addBackup(other, data);
+  assert.deepEqual([res.added, res.skipped], [1, 1]);
+  assert.equal(other.all().length, 3);
+  const added = other.get(res.ids[0]);
+  assert.equal(added.name, a.name);
+  assert.ok(await other.getFile(added.file_hash));
+  // C was already there (the same track): the "not duplicates" decision now points at it.
+  const cThere = other.all().find((r) => r.name.startsWith("C"));
+  assert.equal(other.isIgnored(added.id, cThere.id), true);
+  // Adding the same set again adds nothing.
+  assert.deepEqual((await addBackup(other, data)).added, 0);
+});
+
+test("a shared set can leave out notes and ratings", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  await importOne("A.gpx", east(0, 3000), { notes: "my secret", tags: ["forest"] });
+  const r = svc.library().all()[0];
+  r.quality_rating = 4;
+  await svc.library().saveRoutes([r]);
+  const read = async (opts) => (await readBackup(new Uint8Array(await (await makeSelection(svc.library(), [r.id], opts)).arrayBuffer()))).routes[0];
+  const full = await read({});
+  assert.deepEqual([full.notes, full.quality_rating], ["my secret", 4]);
+  const shared = await read({ personal: false });
+  assert.deepEqual([shared.notes, shared.quality_rating, shared.tags], [null, null, ["forest"]]);
+  assert.equal(svc.library().get(r.id).notes, "my secret"); // the library itself is untouched
+});
+
+test("derived routes keep their link to a parent in the same set", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  await importOne("A.gpx", east(0, 3000));
+  await importOne("B.gpx", east(2000, 3000));
+  const [a, b] = svc.listRoutes("").sort((x, y) => x.id - y.id);
+  const r = svc.library().get(b.id);
+  r.derived_from = [a.id];
+  await svc.library().saveRoutes([r]);
+  const zip = await makeSelection(svc.library(), [b.id, a.id]);
+  const data = await readBackup(new Uint8Array(await zip.arrayBuffer()));
+  const other = await Library.open(new MemoryBackend());
+  await other.saveRoutes([{ name: "x", slug: "x", file_hash: "f", track_index: 0, derived_from: [] }]);
+  const res = await addBackup(other, data);
+  assert.equal(res.added, 2);
+  const child = other.all().find((x) => x.name === b.name);
+  const parent = other.all().find((x) => x.name === a.name);
+  assert.notEqual(parent.id, a.id); // new ids
+  assert.deepEqual(child.derived_from, [parent.id]);
 });
 
 test("routes without a track hash get one from their file", async () => {

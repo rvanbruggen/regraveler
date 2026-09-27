@@ -21,7 +21,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.9.2 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.10.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -58,6 +58,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 - **Select several routes** with the checkboxes in the library (the header box selects all
   shown routes), then:
   - **Download GPX:** one route downloads its original file; several download as `routes.zip`
+  - **Export set…:** a rerouter zip with the selected routes, their details (activity, tags,
+    surface, …, optionally your notes and ratings) and their original GPX files, to add to another library
+    (see *Sharing routes and example sets*)
     with the original files (a multi-track file is included once).
   - **Show on map:** the map (and library) show only the selected routes until you click
     *show all routes* or *Clear*.
@@ -260,6 +263,26 @@ app.cli backup /data/backup.zip`) writes one zip: `library.json` with every rout
 "not duplicates" pair, and every original GPX file as `gpx/<sha256>.gpx`. Restoring it (in the
 page, or `python -m app.cli restore <file>`) replaces the library; route ids are kept. The
 browser version reads and writes the same format.
+
+### Sharing routes and example sets
+
+*Export set…* (select routes in the library first) writes the same zip format with only those
+routes, a name for the set, and no settings. *Library & settings › Add routes from a zip…*
+adds such a set, or a whole backup, to a library **without replacing it**: the routes get new
+ids, routes the library already has (the same track) are skipped, and "derived from" links and
+"not duplicates" decisions between routes in the set are kept. This works in both directions
+between the server and the browser version. *Leave out my notes and quality ratings* (on by
+default) keeps those out of the zip, for a set you share or publish.
+
+**Example sets on the public site:** zips in `web/data/seeds/` are offered to visitors, on the
+welcome screen of an empty library and under *Library & settings › Example routes*. To publish
+one: export a set, put the zip in `web/data/seeds/` (a prefix like `1-` sets the order), run
+
+```bash
+python3 web/tools/build_seeds.py
+```
+
+to rebuild `web/data/seeds/index.json` (the list the page reads), and push.
 
 ## Run as a static site (GitHub Pages)
 
@@ -473,11 +496,13 @@ web/                 the app: one page, runs in the browser (and as a static sit
     surface.js       surface estimate (map matching via BRouter)
     weather.js       ride weather: forecast along the route (Open-Meteo), headwind / tailwind
     places.js        route names from GeoNames places (start town + places visited)
-    zip.js, backup.js  zip files and library backups
+    zip.js, backup.js  zip files, library backups and exported route sets
     worker.js        Web Worker for "routes near each other"
     config.js        settings and the version
   data/places/       GeoNames place tiles
+  data/seeds/        example route sets offered to visitors (+ index.json)
   tools/build_places.py  builds data/places/ from the GeoNames dumps
+  tools/build_seeds.py   builds data/seeds/index.json from the zips there
   tests/             Node tests of the route logic
 app/                 the server (self-hosted version): stores the library, serves web/
   main.py            FastAPI: storage API, backups, /brouter proxy, the page

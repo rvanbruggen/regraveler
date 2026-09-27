@@ -1,7 +1,7 @@
 // rerouter, the static version: the UI of the server version, talking to the in-page service
 // (js/service.js) instead of a JSON API. The library lives in the browser (IndexedDB).
 
-import { makeBackup, readBackup, restoreBackup } from "./backup.js";
+import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from "./backup.js";
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
@@ -332,7 +332,10 @@ function toggleChecked(id, on) {
 function renderSelection() {
   const n = checked.size;
   $("#sel-bar").hidden = n === 0;
-  if (n === 0) toggleTagPanel(false);
+  if (n === 0) {
+    toggleTagPanel(false);
+    toggleExportPanel(false);
+  }
   else if (!$("#tag-panel").hidden) renderTagPanel();
   $("#sel-count").textContent = `${n} selected`;
   const all = $("#sel-all");
@@ -362,6 +365,37 @@ $("#sel-download").addEventListener("click", async () => {
     } else downloadBlob(await svc.exportZip(ids), "routes.zip");
   } catch (err) {
     alert(`Could not download: ${err.message}`);
+  }
+});
+
+// A rerouter zip with the selected routes and their details, to add to another library
+// (or to publish as an example set: web/data/seeds/).
+function toggleExportPanel(open) {
+  $("#export-panel").hidden = !open;
+  $("#sel-export").setAttribute("aria-expanded", String(open));
+  if (open) {
+    toggleTagPanel(false);
+    $("#export-status").textContent = "";
+    $("#export-form").elements.title.focus();
+  }
+}
+
+$("#sel-export").addEventListener("click", () => toggleExportPanel($("#export-panel").hidden));
+
+$("#export-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const ids = [...checked];
+  if (!ids.length) return;
+  const f = e.target.elements;
+  const title = f.title.value.trim();
+  const personal = !f.strip.checked;
+  try {
+    const blob = await makeSelection(svc.library(), ids, { title: title || null, description: f.description.value.trim() || null, personal });
+    downloadBlob(blob, `rerouter-${svc.slugify(title || "routes")}.zip`);
+    $("#export-status").textContent = `${ids.length} route${ids.length === 1 ? "" : "s"} exported` +
+      (personal ? ", with your notes and ratings." : ", without your notes and ratings.");
+  } catch (err) {
+    $("#export-status").textContent = `Error: ${err.message}`;
   }
 });
 
@@ -404,6 +438,8 @@ function toggleTagPanel(open) {
   $("#tag-panel").hidden = !open;
   $("#sel-tags").setAttribute("aria-expanded", String(open));
   if (open) {
+    $("#export-panel").hidden = true;
+    $("#sel-export").setAttribute("aria-expanded", "false");
     renderTagPanel();
     $("#tag-add").focus();
   }
@@ -2545,6 +2581,8 @@ $("#data-restore").addEventListener("change", async (e) => {
     status.textContent = "Reading the backup…";
     const buffer = new Uint8Array(await file.arrayBuffer());
     const data = await readBackup(buffer);
+    // A set of routes (not a whole library) is added rather than restored.
+    if (data.kind === "selection") return await addRoutes(data, status);
     const n = svc.library().all().length;
     const msg = `Restore ${data.routes.length} route${data.routes.length === 1 ? "" : "s"} from this backup` +
       (data.created_at ? ` (made ${new Date(data.created_at).toLocaleString()})` : "") + "?" +
@@ -2559,6 +2597,83 @@ $("#data-restore").addEventListener("change", async (e) => {
     status.textContent = `Error: ${err.message}`;
   }
 });
+
+$("#data-add").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const status = $("#data-status");
+  try {
+    status.textContent = "Reading the zip…";
+    await addRoutes(await readBackup(new Uint8Array(await file.arrayBuffer())), status);
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  }
+});
+
+/** Add the routes of a backup or an exported set to the library (after asking). */
+async function addRoutes(data, status, { ask = true } = {}) {
+  const n = data.routes.length;
+  const what = `${n} route${n === 1 ? "" : "s"}${data.title ? ` ("${data.title}")` : ""}`;
+  if (ask && !confirm(`Add ${what} to ${onServer() ? "the library on the server" : "your library"}?\n\n` +
+    "The routes already in the library stay; routes it already has are skipped.")) return (status.textContent = "");
+  status.textContent = "Adding the routes…";
+  const res = await addBackup(svc.library(), data);
+  await afterLibraryChange();
+  requestPersistence();
+  status.textContent = `Added ${res.added} route${res.added === 1 ? "" : "s"}` +
+    (res.skipped ? ` (${res.skipped} already in the library)` : "") + ".";
+  return res;
+}
+
+// ------------------------------------------------------------------ example routes
+
+// Sets of routes published with the site: data/seeds/index.json lists the zips in data/seeds/
+// (made with "Export set…"; the list is built by tools/build_seeds.py).
+let seeds = [];
+
+async function loadSeeds() {
+  try {
+    const res = await fetch("data/seeds/index.json", { cache: "no-cache" });
+    if (res.ok) seeds = (await res.json()).seeds || [];
+  } catch (_) {
+    seeds = [];
+  }
+  renderSeeds();
+}
+
+function renderSeeds() {
+  $("#welcome-seeds").hidden = !seeds.length;
+  $("#data-seeds").hidden = !seeds.length;
+  for (const box of [$("#welcome-seeds"), $("#data-seeds")]) {
+    const status = box.querySelector(".seed-status");
+    box.querySelector(".seed-list").replaceChildren(...seeds.map((s) =>
+      el("div", { class: "seed" },
+        el("div", {},
+          el("p", {}, el("strong", {}, s.title || s.file)),
+          el("p", { class: "muted small" }, [
+            `${s.routes} route${s.routes === 1 ? "" : "s"}`,
+            s.km ? `${Math.round(s.km)} km` : null,
+            s.description || null,
+          ].filter(Boolean).join(" · "))),
+        el("button", { type: "button", class: "secondary", onclick: (e) => loadSeed(s, e.target, status) }, "Add"))));
+  }
+}
+
+async function loadSeed(seed, button, status) {
+  button.disabled = true;
+  try {
+    status.textContent = `Loading "${seed.title || seed.file}"…`;
+    const res = await fetch(`data/seeds/${encodeURIComponent(seed.file)}`);
+    if (!res.ok) throw new Error(`could not download ${seed.file} (${res.status})`);
+    const data = await readBackup(new Uint8Array(await res.arrayBuffer()));
+    await addRoutes(data, status, { ask: false });
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
 
 $("#data-clear").addEventListener("click", async () => {
   const n = svc.library().all().length;
@@ -2747,6 +2862,7 @@ async function startApp() {
   const view = new URLSearchParams(location.hash.slice(1)).get("view");
   showView(LINKABLE_VIEWS.includes(view) ? view : "library");
   watchSurfaceJob();
+  loadSeeds();
   await loadRoutes();
   // Once, for libraries from before track hashes existed (in the background).
   svc.backfillTrackHashes().catch((err) => console.warn("Track hashes:", err));
