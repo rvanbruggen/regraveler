@@ -12,6 +12,7 @@ import { bboxOf, duplicatePairs, findSimilar, groupPairs, proximityPairs } from 
 import { computeStats } from "./stats.js";
 import * as surface from "./surface.js";
 import { makeZip } from "./zip.js";
+import { sha256 } from "./sha256.js";
 
 export class ServiceError extends Error {
   constructor(message, status = 422) {
@@ -62,10 +63,8 @@ export function normaliseTags(tags) {
 /** Tags given as "a, b" or ["a", "b"]. */
 const splitTags = (v) => (!v ? [] : (typeof v === "string" ? v.split(",") : v.map(String)).filter((t) => t.trim()));
 
-export async function sha256(bytes) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+// SHA-256 via the browser's crypto, or a JavaScript fallback on plain-HTTP pages (see sha256.js).
+export { sha256 };
 
 /**
  * Hash of a track's coordinates rounded to ~1 m, ignoring elevation, time and the file
