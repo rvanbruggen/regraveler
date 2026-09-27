@@ -6,50 +6,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Directory holding the SQLite database.
 DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR / "data")).resolve()
-# Root of the GPX library. Files already inside this folder are referenced in
-# place; uploaded files are copied to GPX_DIR/uploads/. Originals are never modified.
+# Root of the GPX library. Files already inside this folder are referenced in place; files
+# uploaded from the page go to GPX_DIR/uploads/<source>/, routes made in the page (combined,
+# new start point) to GPX_DIR/derived/, restored backups to GPX_DIR/restored/. Originals are
+# never modified or deleted.
 GPX_DIR = Path(os.environ.get("GPX_DIR", BASE_DIR / "gpx")).resolve()
 
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DATA_DIR / 'routes.db'}")
 
-# Start and end within this distance (metres) -> route is a loop.
-LOOP_THRESHOLD_M = float(os.environ.get("LOOP_THRESHOLD_M", 200))
-# Near-duplicate detection: two routes are "very similar" when at least
-# SIMILAR_MIN_OVERLAP of each route lies within SIMILAR_TOLERANCE_M of the other.
-SIMILAR_TOLERANCE_M = float(os.environ.get("SIMILAR_TOLERANCE_M", 50))
-SIMILAR_MIN_OVERLAP = float(os.environ.get("SIMILAR_MIN_OVERLAP", 0.85))
-# Duplicates view: also list "variants", where one route lies (almost) entirely on another.
-VARIANT_MIN_OVERLAP = float(os.environ.get("VARIANT_MIN_OVERLAP", 0.9))
-# Map view: default and maximum distance (metres) for "routes near each other".
-PROXIMITY_DISTANCE_M = float(os.environ.get("PROXIMITY_DISTANCE_M", 100))
-PROXIMITY_MAX_DISTANCE_M = float(os.environ.get("PROXIMITY_MAX_DISTANCE_M", 5000))
+# The page (the whole app: all the route logic runs in the browser).
+WEB_DIR = Path(os.environ.get("WEB_DIR", BASE_DIR / "web")).resolve()
 
-# Combiner (phase 3): BRouter routing service.
+# BRouter, reached by the page through /brouter on this server. Empty: no proxy (the page's
+# settings can still point at another BRouter, such as the public brouter.de).
 BROUTER_URL = os.environ.get("BROUTER_URL", "http://localhost:17777").rstrip("/")
-BROUTER_TIMEOUT_S = float(os.environ.get("BROUTER_TIMEOUT_S", 60))
-# Profiles offered in the UI (must exist in BRouter's profiles2 folder); the first is the default.
-BROUTER_PROFILES = [
-    p.strip() for p in os.environ.get("BROUTER_PROFILES", "gravel,fastbike,hiking-mountain,trekking,mtb,shortest").split(",")
-    if p.strip()
-]
-# Connection points closer than this are joined directly, without asking BRouter.
-DIRECT_JOIN_M = float(os.environ.get("DIRECT_JOIN_M", 25))
+BROUTER_TIMEOUT_S = float(os.environ.get("BROUTER_TIMEOUT_S", 120))
 
-# Surface estimate (phase 4): map matching through BRouter.
-SURFACE_MATCH_PROFILE = os.environ.get("SURFACE_MATCH_PROFILE", "shortest")
-SURFACE_WAYPOINT_SPACING_M = float(os.environ.get("SURFACE_WAYPOINT_SPACING_M", 300))
-# Estimate automatically after uploads and saved combinations.
-SURFACE_AUTO_ESTIMATE = os.environ.get("SURFACE_AUTO_ESTIMATE", "1").lower() not in ("0", "false", "no")
-
-# Route names (generated from the places a route visits; GeoNames data, see app/places.py).
-GEONAMES_COUNTRIES = [
-    c.strip().upper() for c in os.environ.get("GEONAMES_COUNTRIES", "BE,NL,LU,DE,FR").split(",") if c.strip()
-]
-PLACE_NAME_LANGUAGE = os.environ.get("PLACE_NAME_LANGUAGE", "nl")
-# Give newly imported routes a generated name (the original name goes to Notes).
-AUTO_RENAME_ON_IMPORT = os.environ.get("AUTO_RENAME_ON_IMPORT", "1").lower() not in ("0", "false", "no")
-
-# Activity of a route. The first is the default for imports; each maps to the BRouter profile
-# the combiner uses by default for connectors.
-ACTIVITIES = ["gravel", "road", "hiking"]
-ACTIVITY_PROFILES = {"gravel": "gravel", "road": "fastbike", "hiking": "hiking-mountain"}
+# Largest GPX file the page may store (bytes).
+MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", 50_000_000))

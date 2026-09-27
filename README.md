@@ -5,17 +5,28 @@
 
 # rerouter — route manager
 
-A self-hosted web app to manage a personal library of routes (GPX files) for gravel cycling,
-road cycling and hiking: import them, compute stats, tag and rate them, show them on a map, and
-combine two routes into a new one with automatically routed connectors (via a self-hosted
-BRouter). Formerly *regraveler*.
+A web app to manage a personal library of routes (GPX files) for gravel cycling, road cycling
+and hiking: import them, compute stats, tag and rate them, show them on a map, and combine two
+routes into a new one with automatically routed connectors (via BRouter). Formerly *regraveler*.
+
+The whole app is one page (`web/`) that runs in the browser, and it runs two ways:
+
+- **On your own server** (`docker compose up`): the page is served by a small Python server
+  that stores the library (SQLite + your GPX folder) and passes routing requests on to a
+  self-hosted BRouter. Every browser on your network sees the same library.
+- **As a static site** (e.g. GitHub Pages): the same page keeps the library in the browser
+  (IndexedDB) and uses the public BRouter at brouter.de. Nothing to install; one browser is
+  one library.
+
+Both use the same backup format, so a library moves between them in either direction.
 
 **Version:** 0.7.2 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
 
-- **Import** GPX files by drag and drop (many at once) or with a CLI script for a whole folder.
+- **Import** GPX files by drag and drop: many files at once, whole folders or zip files. On a
+  server, the Import screen also offers the GPX files that are already in its `gpx/` folder.
   - Source name, URL and **activity** (gravel, road or hiking; default gravel) per batch, with
     per-file override. If no URL is given, the link inside the GPX file (if any) is used.
   - **Tags** for the whole batch, plus optional extra tags per file (added to the batch tags).
@@ -29,7 +40,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     very similar geometry (≥ 85 % of each route within 50 m of the other) are imported but
     flagged.
   - **Surface:** after an upload, the paved % of the new routes is estimated in the background
-    from OpenStreetMap (see below).
+    from OpenStreetMap (see below). In the browser version this is off by default (it would send
+    many requests to the shared public BRouter server); switch it on under *Library & settings*.
   - **Name:** new routes are named after the places they visit (see *Route names*); the name
     from the file is kept at the top of the notes (`Original name: …`).
 
@@ -51,7 +63,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     (the panel lists the tags on the selection with how many routes have each, e.g. `forest 3/5`).
   - **Estimate surface:** (re)estimates the paved % from OpenStreetMap; progress is shown next
     to the route count.
-  - **Remove:** removes them from the library after one confirmation (GPX files stay on disk).
+  - **Remove:** removes them from the library after one confirmation (on a server the GPX files
+    stay in the `gpx/` folder; in the browser version they are removed with the routes).
 
 ![Library: filters, activity, estimated paved %, ratings and tags; three routes selected](docs/screenshots/library.png)
 
@@ -63,6 +76,7 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   library comes from the estimate (shown as ≈38%) unless you type your own value, which then
   always wins; the panel offers *use the estimate* to switch back, and clearing the field does
   the same. Needs BRouter (see Docker); routes outside the downloaded tiles can't be estimated.
+  The browser version uses the public BRouter at brouter.de, one request at a time.
 
 ![Route panel: stats, the map coloured by surface and the surface breakdown](docs/screenshots/route-panel.png)
 
@@ -132,6 +146,11 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   *Not duplicates* (hides the group). Below that, **variants**: routes that lie (almost)
   entirely on a longer route, such as a short loop inside a long one.
 
+- **Library & settings** (also in the Utilities menu): where the library is stored and how much
+  space it takes, **backup** (one zip with every route, your ratings, tags and notes, and all
+  original GPX files) and **restore**, the BRouter server to use (with a test button), whether
+  new routes are named and their surface estimated automatically, and *Remove everything*.
+
 Original GPX files are never modified.
 
 ![Duplicates: the same routes from two sites, with a suggestion which one to keep](docs/screenshots/duplicates.png)
@@ -153,12 +172,13 @@ Volumes (bind mounts next to `docker-compose.yml`):
 | Host folder | In container | Contents |
 |---|---|---|
 | `./data` | `/data` | `routes.db` (SQLite) |
-| `./gpx` | `/gpx` | The GPX library. Uploaded files are stored in `gpx/uploads/<source>/`, combined routes in `gpx/derived/`. |
+| `./gpx` | `/gpx` | The GPX library. Files already here are referenced in place; uploaded files are stored in `gpx/uploads/<source>/`, combined routes and new start points in `gpx/derived/`, files from a restored backup that weren't here yet in `gpx/restored/`. |
 | `./brouter/segments4` | `/segments4` (brouter) | BRouter routing data tiles (`.rd5`) |
 
-Services: `app` (this app), `brouter` (routing engine, built from the official
-[abrensch/brouter](https://github.com/abrensch/brouter) v1.7.10 source; only reachable by the
-app, not published on the host) and `brouter-segments` (one-off job that downloads missing
+Services: `app` (serves the page, stores the library, and passes `/brouter` requests on to
+BRouter), `brouter` (routing engine, built from the official
+[abrensch/brouter](https://github.com/abrensch/brouter) v1.7.10 source; only reachable through
+the app, not published on the host) and `brouter-segments` (one-off job that downloads missing
 routing data before BRouter starts).
 
 ### BRouter routing data
@@ -191,75 +211,104 @@ docker compose restart brouter
 
 ### Import an existing folder of GPX files
 
-Put the files somewhere under `./gpx` (subfolders are fine; the subfolder name becomes the
-source name), then:
+Put the files somewhere under `./gpx` (subfolders are fine), open the Import screen and click
+*Add them to the list*: it lists every GPX file in the folder that isn't in the library yet.
+Files in a subfolder get the subfolder's name as source name (unless you fill in a source name
+for the batch), and they are referenced where they are, not copied. Doing it again is safe:
+files that are already imported are not offered again. Dropping a folder on the Import screen
+works too; files that aren't in `./gpx` yet are then copied into `gpx/uploads/<source>/`.
+
+### Upgrading from 0.7.x (the Python version)
+
+Up to 0.7.x the route logic ran in Python on the server. Now it runs in the page, and the
+server only stores the library. The first start moves your library to the new storage by
+itself: every route with its id, ratings, tags, notes, surface estimate and "not duplicates"
+decisions, referencing the GPX files where they are. The old tables stay untouched in
+`routes.db`, so the old version still works on the same database. By hand:
+`docker compose run --rm app python -m app.cli migrate`.
+
+GeoNames data is no longer downloaded into `data/geonames/`: the place data ships with the page
+(`web/data/places/`). That folder can be deleted.
+
+### Backups
+
+*Utilities › Library & settings › Download backup* (or `docker compose run --rm app python -m
+app.cli backup /data/backup.zip`) writes one zip: `library.json` with every route, setting and
+"not duplicates" pair, and every original GPX file as `gpx/<sha256>.gpx`. Restoring it (in the
+page, or `python -m app.cli restore <file>`) replaces the library; route ids are kept. The
+browser version reads and writes the same format.
+
+## Run as a static site (GitHub Pages)
+
+The `web/` folder is the whole app. Served by any static web server it keeps the library in the
+browser; it must be served over http(s), not opened as a file.
 
 ```bash
-docker compose run --rm app python -m app.cli import /gpx
+python3 -m http.server 8000 --directory web
 ```
 
-Files already inside the library folder are referenced in place, not copied. Running the
-import again is safe: files that are already imported are skipped.
+On GitHub, `.github/workflows/pages.yml` runs the JavaScript tests and publishes `web/` to
+GitHub Pages on every push to `main` that touches it. Turn it on once under *Settings › Pages ›
+Build and deployment › Source: GitHub Actions*. The app is then at
+`https://<user>.github.io/<repo>/`.
 
-Options:
-
-- `--source-name NAME` — source name for all files (instead of the subfolder name)
-- `--source-url URL` — source URL for all files
-- `--no-source-from-folder` — don't use the subfolder name as source name
-- `--activity gravel|road|hiking` — activity of the imported routes (default `gravel`)
-- `--tags "kempen, favourite"` — tags for all imported routes
-
-A folder outside `./gpx` can also be imported; its files are copied into `gpx/uploads/`.
-
-After changing the stats algorithm, recompute all routes from their GPX files:
-
-```bash
-docker compose run --rm app python -m app.cli recompute
-```
-
-Estimate the surface of all routes that don't have an estimate yet (e.g. after upgrading to
-0.4.0; add `--all` to redo every route, `--overwrite-manual` to also replace paved % values you
-typed yourself):
-
-```bash
-docker compose run --rm app python -m app.cli estimate-surface
-```
+In the browser version everything stays on the device: the library is in the browser's
+IndexedDB (the page asks the browser to keep it), and clearing the site's data or a private
+window wipes it, so download a backup now and then. The only data sent anywhere are the points
+being routed, to the BRouter server (the public one at brouter.de by default, which allows
+requests from any web page; *Library & settings* can point it at your own BRouter, as long as
+that one allows cross-origin requests).
 
 ## Run locally (development)
 
-Python 3.12:
+The server, Python 3.12:
 
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m app.cli import gpx
 .venv/bin/uvicorn app.main:app --reload
 ```
 
 The app then runs at http://localhost:8000 with the database in `./data` and the library in
-`./gpx`. Override with the `DATA_DIR` and `GPX_DIR` environment variables.
+`./gpx`. Override with the `DATA_DIR` and `GPX_DIR` environment variables. The page is served
+from `web/` (`WEB_DIR`), so changes to the page only need a reload of the browser.
 
-The combiner needs a BRouter server at `BROUTER_URL` (default `http://localhost:17777`). Without
-Docker: download a release zip from [BRouter's releases](https://github.com/abrensch/brouter/releases)
+The combiner and the surface estimate need a BRouter server at `BROUTER_URL` (default
+`http://localhost:17777`; the page reaches it through the app's `/brouter`). Without Docker:
+download a release zip from [BRouter's releases](https://github.com/abrensch/brouter/releases)
 (needs Java 17+) and one or more tiles, then run from the unpacked folder:
 
 ```bash
 java -Xmx128M -cp brouter-1.7.10-all.jar btools.server.RouteServer segments4 profiles2 customprofiles 17777 1
 ```
 
-Without BRouter, the combiner still works with *Straight lines (no routing)*.
+Or set `BROUTER_URL=https://brouter.de` to pass requests on to the public server. Without
+BRouter, the combiner still works with *Straight lines (no routing)*.
 
-Run the tests:
+Run the tests: the route logic (stats, stitching, similarity, names, surface, import) is tested
+with Node's built-in test runner (Node 20+, no dependencies), the server with pytest:
+
+```bash
+cd web && npm test
+```
 
 ```bash
 .venv/bin/python -m pytest
 ```
+
+The pytest run includes a check that backups made by the page restore on the server and the
+other way round (it needs Node; skipped without it).
 
 The screenshots in this README are made with `docs/screenshots/take_screenshots.py` (Playwright,
 driving your installed Chrome). Its docstring explains the scratch setup; it's a docs helper,
 not part of the app, so Playwright isn't in the requirements.
 
 ## How the stats are computed
+
+All of this runs in the page (`web/js/`), for both ways of running. The results were checked
+against the Python version (up to 0.7.x) on 77 real routes: identical distance, loop detection
+and generated name for all of them, identical elevation gain for 74 (the other 3 differ by
+1–2 m: elevation data in whole metres sits right at the 1 m hysteresis threshold).
 
 - **Distance:** geodesic (WGS84) distance between consecutive points.
 - **Elevation:** the elevation profile is resampled every 10 m along the route, smoothed with a
@@ -271,9 +320,13 @@ not part of the app, so Playwright isn't in the requirements.
 - **Similarity:** routes are projected to a metric CRS (EPSG:3035, Europe) and compared with a
   bounding-box prefilter, then the share of each route's length lying within 50 m of the other.
 
-- **Routes near each other (map):** a spatial index (STRtree) on the projected routes does the
-  bounding-box prefilter, then the exact line-to-line distance is checked. For each pair the
-  shared stretches are each route's parts within the chosen distance of the other.
+- **Routes near each other (map):** a bounding-box sweep over the projected routes is the
+  prefilter, then the exact line-to-line distance is checked (with a grid index of each route's
+  segments). For each pair the shared stretches are each route's parts within the chosen
+  distance of the other, computed exactly: the area within a distance of a segment is convex,
+  so each segment's covered part is one interval. A stretch ridden twice (out and back) counts
+  twice, as it does in the route's length. It runs in a Web Worker, so the page stays
+  responsive.
 
 - **Change start point:** the loop is cut from the full-resolution GPX points at the point
   nearest to the chosen start and ridden round once, back to that point; the gap between the
@@ -282,8 +335,8 @@ not part of the app, so Playwright isn't in the requirements.
 - **Combiner:** the parts of A and B are cut from the full-resolution points of the original GPX
   files (not the simplified map lines), with interpolated points exactly at the chosen
   points. The stitching works on a list of parts (route + start + end point), so combining more
-  than two routes is a matter of UI; the API (`POST /api/combine/preview` with `parts`) already
-  accepts up to six. Suggestions come from a distance matrix of points sampled every 50 m along both
+  than two routes is a matter of UI; the page's service (`combinePreview` in
+  `web/js/service.js`, with `parts`) already accepts up to six. Suggestions come from a distance matrix of points sampled every 50 m along both
   routes; the second connection of a loop is the closest pair that is at least 2 km (or 15 % of
   the shorter route) away from the first along both routes. The stats of the result are
   computed the same way as for imported routes. Connector elevations come from BRouter (SRTM),
@@ -297,57 +350,76 @@ not part of the app, so Playwright isn't in the requirements.
   street or cycleway is paved, a `grade1` track paved, other tracks and paths unpaved; the panel
   says how many km were guessed this way). paved % = (paved + cobbles) / (paved + cobbles +
   unpaved), and is left empty when more than half of the route is unknown.
-- **Route names:** place data comes from [GeoNames](https://www.geonames.org/) (CC BY 4.0):
-  the country files for `GEONAMES_COUNTRIES` (default `BE,NL,LU,DE,FR`: about 26 MB to download,
-  95 MB on disk) are downloaded
-  on first use into `data/geonames/`. Towns and villages are ranked by population (villages
+- **Route names:** place data comes from [GeoNames](https://www.geonames.org/) (CC BY 4.0) for
+  Belgium, the Netherlands, Luxembourg, Germany and France, built by
+  `web/tools/build_places.py` into 1 × 1 degree tiles in `web/data/places/` (11 MB in all, about
+  150 KB per tile, 40 KB compressed; a route loads only the tiles it passes). Towns and villages are ranked by population (villages
   without one only count if they're widely known); landmarks are named forests, heaths, hills,
-  parks, lakes, castles and abbeys the route passes close to. Names are in `PLACE_NAME_LANGUAGE`
-  (Dutch by default: Zoniënwoud rather than Forêt de Soignes). The start is the nearest real
+  parks, lakes, castles and abbeys the route passes close to. Names are in Dutch where GeoNames
+  has one (Zoniënwoud rather than Forêt de Soignes; `build_places.py --lang` picks another
+  language). The start is the nearest real
   town to the start point; the places are the most notable one in each third of the route.
-  To save space, list only the countries you ride in, e.g. `GEONAMES_COUNTRIES=BE,NL`.
+  Rebuild the tiles with `python3 web/tools/build_places.py` (standard library only; downloads
+  about 150 MB of GeoNames dumps once), e.g. with `--countries` to add a country.
 - **Duplicates:** a hash of each track's coordinates (rounded to ~1 m) finds the same track in
-  different files. The Duplicates utility compares all routes with a spatial index and groups routes
+  different files. The Duplicates utility compares all routes (bounding-box sweep, then the
+  exact shares) and groups routes
   where ≥ 85 % of each lies within 50 m of the other; a route with ≥ 90 % on another is listed
   as a variant. "Ridden the other way" compares positions along both routes.
 
-Settings (environment variables): `LOOP_THRESHOLD_M` (200), `SIMILAR_TOLERANCE_M` (50),
-`SIMILAR_MIN_OVERLAP` (0.85), `VARIANT_MIN_OVERLAP` (0.9), `PROXIMITY_DISTANCE_M` (100, default distance on the map),
-`PROXIMITY_MAX_DISTANCE_M` (5000), `BROUTER_URL` (`http://localhost:17777`; set to
-`http://brouter:17777` in docker-compose), `BROUTER_PROFILES`
-(`gravel,fastbike,hiking-mountain,trekking,mtb,shortest`; offered in the combiner, the first is the
-default when the routes' activities differ), `BROUTER_TIMEOUT_S` (60), `DIRECT_JOIN_M` (25),
-`SURFACE_MATCH_PROFILE` (`shortest`), `SURFACE_WAYPOINT_SPACING_M` (300), `SURFACE_AUTO_ESTIMATE`
-(1; 0 to only estimate on request), `GEONAMES_COUNTRIES` (`BE,NL,LU,DE,FR`), `PLACE_NAME_LANGUAGE`
-(`nl`), `AUTO_RENAME_ON_IMPORT` (1; 0 keeps the names from the files).
+Settings: the thresholds (loop 200 m, similarity 50 m / 85 %, variants 90 %, proximity
+100 m default and 5000 m maximum, direct join 25 m, surface waypoints every 300 m, the BRouter
+profiles) are in `web/js/config.js`. The ones you're likely to change are in the page, under
+*Utilities › Library & settings*: the BRouter server, automatic names and surface estimates,
+and the default distance for routes near each other. They are stored with the library.
+
+The server's environment variables: `DATA_DIR` (`./data`), `GPX_DIR` (`./gpx`), `WEB_DIR`
+(`./web`), `DATABASE_URL` (SQLite in `DATA_DIR`), `BROUTER_URL` (`http://localhost:17777`; set to
+`http://brouter:17777` in docker-compose; empty for no `/brouter`), `BROUTER_TIMEOUT_S` (120),
+`MAX_FILE_BYTES` (50 MB).
 
 ## Adding metadata fields
 
-Add a nullable column to `Route` in `app/models.py`; it is added to an existing database
-automatically on the next start. Then expose it in `RouteSummary`/`RouteUpdate` in
-`app/main.py` and in the edit form (`app/static/index.html`, `app/static/app.js`).
+A route is a JSON document to the server, so a new field needs no server or database change: set
+it in `importGpx` (`web/js/service.js`), allow it in `updateRoute`, and add it to the route panel
+(`web/index.html`, `web/js/app.js`). Routes that don't have it yet read it as empty.
 
 ## Project layout
 
 ```
-app/
-  gpxstats.py    GPX parsing and statistics (pure functions)
-  similarity.py  geometric overlap: near-duplicates, routes near each other
-  importer.py    import of files and folders
-  combiner.py    cutting, direction handling and stitching of combined routes; new start points
-  brouter.py     client for the BRouter HTTP API
-  surface.py     surface estimate (map matching via BRouter) and its background worker
-  places.py      route names from GeoNames places (start town + places visited)
-  models.py      SQLAlchemy model
-  db.py          database setup and automatic column migration
-  main.py        FastAPI app (JSON API + static frontend)
-  cli.py         command line import / recompute
-  static/        single-page frontend (vanilla JS + Leaflet)
+web/                 the app: one page, runs in the browser (and as a static site)
+  index.html, style.css
+  js/
+    app.js           the UI (vanilla JS + Leaflet)
+    service.js       everything the app does: import, filters, combine, duplicates, names, ...
+    db.js            the library in memory, stored through a backend: IndexedDB (browser) ...
+    remote.js        ... or the rerouter server's storage API (self-hosted)
+    gpx.js           GPX reading and writing (a small XML reader, also runs in Node and workers)
+    stats.js         distance, smoothed elevation gain/loss, loop detection, simplified geometry
+    geo.js           EPSG:3035 projection, WGS84 geodesic distance, line helpers, grid index
+    similarity.js    near-duplicates, routes near each other, duplicate groups
+    combiner.js      cutting, direction handling and stitching of combined routes; new start points
+    brouter.js       client for the BRouter HTTP API
+    surface.js       surface estimate (map matching via BRouter)
+    places.js        route names from GeoNames places (start town + places visited)
+    zip.js, backup.js  zip files and library backups
+    worker.js        Web Worker for "routes near each other"
+    config.js        settings and the version
+  data/places/       GeoNames place tiles
+  tools/build_places.py  builds data/places/ from the GeoNames dumps
+  tests/             Node tests of the route logic
+app/                 the server (self-hosted version): stores the library, serves web/
+  main.py            FastAPI: storage API, backups, /brouter proxy, the page
+  store.py           routes (JSON documents), GPX files, pairs, settings, backups
+  legacy.py          one-time move of a 0.7.x library to the new store
+  models.py, db.py   SQLAlchemy models and database setup
+  cli.py             backup / restore / migrate
+tests/               pytest tests of the server
 docs/
-  screenshots/   README screenshots and the script that takes them
+  screenshots/       README screenshots and the script that takes them
 brouter/
   download-segments.sh  downloads BRouter routing data tiles (used by docker-compose)
-tests/           pytest tests
+.github/workflows/pages.yml  publishes web/ to GitHub Pages
 ```
 
 ## Version Tracking
@@ -355,6 +427,8 @@ tests/           pytest tests
 Versions follow `a.b.c` (major / minor / dot) and every release is tagged `v<a.b.c>`.
 The version appears in these places, which must stay in sync:
 
-- `app/__init__.py` — `__version__` (source of truth; served at `/api/version`, shown in the UI header)
+- `app/__init__.py` — `__version__` (source of truth; served at `/api/info`, shown in the header of the self-hosted version)
+- `web/js/config.js` — `VERSION` (shown in the header of the browser version)
+- `web/package.json` — `version`
 - `README.md` — the **Version:** line at the top
 - `CHANGELOG.md` — one row per release
