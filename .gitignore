@@ -10,3 +10,5 @@ __pycache__/
 /brouter/segments4/
 .geonames-cache/
 node_modules/
+# Claude Code local settings (preview server config)
+.claude/
