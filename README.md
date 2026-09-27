@@ -21,7 +21,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.8.3 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.9.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -139,6 +139,21 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   original, so the Duplicates utility doesn't suggest removing one of them.
 
 ![Change start point: the same loop, starting in Duisburg](docs/screenshots/change-start.jpg)
+
+- **Ride weather:** the forecast along a route for the day you ride it. Choose a route (dropdown,
+  click it on the map, or *Weather…* in its detail panel), pick the day in the calendar (today
+  and the next 15 days, each with its weather, top temperature and a bar for the chance of rain;
+  later days can't be picked, as there is no forecast for them yet), and fill in the start
+  time and your average speed (remembered per activity). Every point along the route is read at
+  the moment you pass it, so a morning, afternoon or evening start give different answers. The
+  panel shows the temperature range, the rain expected on the way and its chance, the wind and
+  gusts, how many km you ride into the wind or with it behind you, and the wind in the first
+  and second half. The map colours the route red (headwind), amber (crosswind), green
+  (tailwind) or blue (calm), with wind arrows (pointing where the wind blows to, in km/h; hover
+  for the full forecast at that point and time). A table compares start times from 06:00 to
+  20:00 (click one to use it). When riding the route the other way round is clearly easier on
+  the wind, the panel says so and offers to flip it (⇄ in the table). The forecast comes from
+  [Open-Meteo](https://open-meteo.com/) (free, no key); only about 2 to 21 points along the route are sent.
 
 - **Duplicates:** all groups of near-duplicate routes in the library (e.g. the same route
   downloaded from two sites), with overlap, source, rating and tags per route, "identical
@@ -399,6 +414,21 @@ and generated name for all of them, identical elevation gain for 74 (the other 3
   Rebuild the tiles with `python3 web/tools/build_places.py` (standard library only; downloads
   about 200 MB of GeoNames dumps once), e.g. with `--countries` to add a country (and
   `--languages` for its language).
+- **Ride weather:** points every 5 km along the route (at least start and end, at most 21) get
+  Open-Meteo's hourly forecast (its best model for the place, e.g. high-resolution European
+  models in the first days) for the day and the next one, in one request, cached for 30
+  minutes. Each point is read at the time you pass it at the average speed (no stops, no
+  slowdown on climbs); temperature and wind are interpolated between the hours (wind as a
+  vector), rain is the hour that contains the moment. Between the points, the weather is
+  blended by distance. Every step of the route is compared with the wind direction: within 60°
+  of riding straight into it is a headwind, beyond 120° a tailwind, crosswind in between, and
+  below 5 km/h calm. "Easier the other way round" compares the wind effort of both directions:
+  air drag grows with the square of the air speed, so a headwind costs more than a tailwind of
+  the same strength gives back, and the second half of the ride counts a bit more. It takes a
+  difference of at least 2 km/h. On a loop in a steady wind the two directions are about equally hard
+  (reversing flips both the order and the direction of the wind, so "tailwind out, headwind
+  home" stays that way), so the advice mostly shows for point-to-point routes and for wind
+  that changes during the ride.
 - **Duplicates:** a hash of each track's coordinates (rounded to ~1 m) finds the same track in
   different files. The Duplicates utility compares all routes (bounding-box sweep, then the
   exact shares) and groups routes
@@ -439,6 +469,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     combiner.js      cutting, direction handling and stitching of combined routes; new start points
     brouter.js       client for the BRouter HTTP API
     surface.js       surface estimate (map matching via BRouter)
+    weather.js       ride weather: forecast along the route (Open-Meteo), headwind / tailwind
     places.js        route names from GeoNames places (start town + places visited)
     zip.js, backup.js  zip files and library backups
     worker.js        Web Worker for "routes near each other"

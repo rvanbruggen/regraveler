@@ -7,6 +7,7 @@ import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBR
 import { Library } from "./db.js";
 import { RemoteBackend, detectServer } from "./remote.js";
 import * as svc from "./service.js";
+import * as weather from "./weather.js";
 import { readZip } from "./zip.js";
 
 // ------------------------------------------------------------------ helpers
@@ -87,7 +88,7 @@ function fillActivitySelects(activities) {
 let currentView = "library";
 
 // Views reached through the Utilities menu.
-const UTILITIES = ["combine", "restart", "duplicates", "data"];
+const UTILITIES = ["combine", "restart", "weather", "duplicates", "data"];
 // Views a link (URL hash) can open.
 const LINKABLE_VIEWS = ["library", "map", "import", ...UTILITIES];
 
@@ -104,6 +105,7 @@ function showView(name) {
   if (name === "map") showOverview();
   if (name === "combine") showCombine();
   if (name === "restart") showRestart();
+  if (name === "weather") showWeather();
   if (name === "duplicates") loadDuplicates();
   if (name === "data") showData();
   updateHash();
@@ -180,6 +182,10 @@ function updateHash() {
     if (cb.mode === "open") p.set("open", "1");
   }
   if (currentView === "restart" && rs.id) p.set("route", rs.id);
+  if (currentView === "weather" && wx.id) {
+    p.set("route", wx.id);
+    if (wx.date) p.set("date", wx.date);
+  }
   history.replaceState(null, "", p.toString() ? `#${p}` : location.pathname);
 }
 
@@ -1872,6 +1878,407 @@ $("#d-restart").addEventListener("click", async () => {
   if (rs.id !== id) await setRestartRoute(id);
 });
 
+// ------------------------------------------------------------------ ride weather
+
+// The forecast along a route for a ride on a chosen day (js/weather.js does the sums). The
+// calendar shows the daily forecast at the middle of the route for the days Open-Meteo covers;
+// picking a day fetches the hourly forecast at points along the route.
+
+const WIND_COLORS = { head: "#d62f4b", cross: "#e0a000", tail: "#2e7d32", calm: "#2f6fd6" };
+const WIND_LABELS = { head: "Headwind", cross: "Crosswind", tail: "Tailwind", calm: "Calm" };
+const WX_CACHE_MS = 30 * 60 * 1000; // forecasts are updated every hour or so
+
+const wx = {
+  map: null, loaded: false, loading: null, initial: null,
+  routes: [], byId: new Map(),
+  id: null, route: null, samples: null,
+  daily: null, // {days, utcOffset, at (ms), routeId}
+  date: null, hourly: null, // {samples, utcOffset, at, key}
+  cache: new Map(), // "routeId|date" -> hourly, "daily|routeId" -> daily
+  token: 0,
+};
+const wxEl = {
+  route: $("#wx-route"), cal: $("#wx-cal"), time: $("#wx-time"), speed: $("#wx-speed"), reverse: $("#wx-reverse"),
+  status: $("#wx-status"), advice: $("#wx-advice"), stats: $("#wx-stats"), legend: $("#wx-legend"),
+  times: $("#wx-times"), npoints: $("#wx-npoints"),
+};
+
+/** A symbol for a WMO weather code (as Open-Meteo gives them). */
+function weatherSymbol(code) {
+  if (code == null) return "";
+  if (code === 0) return "☀️";
+  if (code <= 2) return "🌤️";
+  if (code === 3) return "☁️";
+  if (code === 45 || code === 48) return "🌫️";
+  if (code >= 95) return "⛈️";
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "❄️";
+  if (code >= 80) return "🌦️";
+  if (code >= 61) return "🌧️";
+  if (code >= 51) return "🌦️";
+  return "";
+}
+
+const fmtTemp = (t) => (t == null ? "–" : `${Math.round(t)} °C`);
+const fmtHours = (h) => {
+  const min = Math.round(h * 60);
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")}`;
+};
+/** "headwind 12 km/h", "tailwind 5 km/h" or "hardly any wind" for an average headwind component. */
+const fmtHead = (h) => (Math.abs(h) < 2 ? "hardly any wind" : h > 0 ? `headwind ${Math.round(h)} km/h` : `tailwind ${Math.round(-h)} km/h`);
+
+// The average speed is remembered per activity (in this browser).
+const speedKey = (activity) => `rerouter.weatherSpeed.${activity || "gravel"}`;
+function rememberedSpeed(activity) {
+  try {
+    const v = Number(localStorage.getItem(speedKey(activity)));
+    if (v > 0) return v;
+  } catch { /* storage not available: use the default */ }
+  return config.WEATHER_SPEEDS[activity] ?? config.WEATHER_SPEEDS.gravel;
+}
+function rememberSpeed(activity, v) {
+  try { localStorage.setItem(speedKey(activity), String(v)); } catch { /* not important */ }
+}
+
+function showWeather() {
+  if (!wx.map) {
+    const m = L.map("weather-map", { renderer: L.canvas({ tolerance: 6 }) }).setView([50.9, 4.5], 9);
+    osmTiles().addTo(m);
+    wx.bgLayer = L.layerGroup().addTo(m);
+    wx.routeLayer = L.layerGroup().addTo(m);
+    wx.markerLayer = L.layerGroup().addTo(m);
+    wx.map = m;
+    const p = new URLSearchParams(location.hash.slice(1));
+    wx.initial = { id: Number(p.get("route")) || null, date: p.get("date") };
+  }
+  setTimeout(() => wx.map.invalidateSize(), 0);
+  if (!wx.loaded) wx.loading = loadWeatherRoutes();
+  return wx.loading;
+}
+
+async function loadWeatherRoutes() {
+  wx.loaded = true;
+  try {
+    wx.routes = svc.mapRoutes("", 15);
+  } catch (err) {
+    wxEl.status.textContent = `Error loading routes: ${err.message}`;
+    wx.loaded = false;
+    return;
+  }
+  wx.byId = new Map(wx.routes.map((r) => [r.id, r]));
+  const sorted = [...wx.routes].sort((x, y) => x.name.localeCompare(y.name));
+  wxEl.route.replaceChildren(
+    el("option", { value: "" }, sorted.length ? "— choose a route —" : "no routes in the library"),
+    ...sorted.map((r) => el("option", { value: r.id }, `${r.name} (${fmt.km(r.distance_km)})`))
+  );
+  wx.bgLayer.clearLayers();
+  for (const r of wx.routes) {
+    L.polyline(r.geometry, { color: "#777", weight: 2, opacity: 0.35 })
+      .bindTooltip(r.name, { sticky: true })
+      .on("click", () => { if (r.id !== wx.id) setWeatherRoute(r.id); })
+      .addTo(wx.bgLayer);
+  }
+  const initial = wx.initial;
+  wx.initial = null;
+  if (initial?.id && wx.byId.has(initial.id)) return setWeatherRoute(initial.id, initial.date);
+  if (wx.id && !wx.byId.has(wx.id)) return setWeatherRoute(null); // removed meanwhile
+  wxEl.route.value = wx.id ?? "";
+  if (!wx.id) {
+    if (wx.routes.length) wx.map.fitBounds(L.featureGroup(wx.bgLayer.getLayers()).getBounds(), { padding: [20, 20] });
+    wxEl.status.textContent = wx.routes.length ? "Choose a route (or click one on the map)." : "";
+  }
+}
+
+async function setWeatherRoute(id, date = null) {
+  wx.id = id || null;
+  wx.route = null;
+  wx.samples = null;
+  wx.daily = null;
+  wx.hourly = null;
+  wx.date = date || wx.date;
+  wxEl.reverse.checked = false;
+  wxEl.route.value = wx.id ?? "";
+  const token = ++wx.token;
+  renderWeather();
+  if (!wx.id) {
+    wxEl.cal.hidden = true;
+    wxEl.status.textContent = "Choose a route (or click one on the map).";
+    updateHash();
+    return;
+  }
+  const r = svc.library().get(id);
+  if (!r) {
+    wxEl.status.textContent = "Route not found.";
+    return;
+  }
+  wx.route = r;
+  wx.samples = weather.samplePoints(r.geometry);
+  wxEl.npoints.textContent = wx.samples.length;
+  wxEl.speed.value = rememberedSpeed(r.activity);
+  wx.map.invalidateSize(); // the view may just have been shown
+  wx.map.fitBounds([[r.min_lat, r.min_lon], [r.max_lat, r.max_lon]], { padding: [30, 30] });
+  renderWeather();
+  updateHash();
+  wxEl.status.textContent = "Getting the forecast…";
+  try {
+    wx.daily = await cachedDaily(r.id, wx.samples[Math.floor(wx.samples.length / 2)]);
+  } catch (err) {
+    if (token !== wx.token) return;
+    wxEl.cal.hidden = true;
+    wxEl.status.textContent = `No forecast: ${err.message}.`;
+    return;
+  }
+  if (token !== wx.token) return; // another route was chosen meanwhile
+  const win = forecastDays();
+  if (wx.date && !win.some((d) => d.date === wx.date && d.tmax != null)) {
+    wxEl.status.textContent = `There is no forecast for ${fmtDay(wx.date)} (forecasts go up to 16 days ahead): pick a day in the calendar.`;
+    wx.date = null;
+    renderCalendar();
+    updateHash();
+    return;
+  }
+  renderCalendar();
+  if (wx.date) return selectWeatherDate(wx.date);
+  wxEl.status.textContent = "Pick the day of your ride in the calendar.";
+}
+
+async function cachedDaily(routeId, point) {
+  const key = `daily|${routeId}`;
+  const hit = wx.cache.get(key);
+  if (hit && Date.now() - hit.at < WX_CACHE_MS) return hit;
+  const res = { ...(await weather.fetchDaily(config.OPEN_METEO_URL, point)), at: Date.now() };
+  wx.cache.set(key, res);
+  return res;
+}
+
+async function cachedHourly(routeId, date) {
+  const key = `${routeId}|${date}`;
+  const hit = wx.cache.get(key);
+  if (hit && Date.now() - hit.at < WX_CACHE_MS) return hit;
+  // The day itself and the next (evening rides end after midnight), within the forecast.
+  const last = forecastDays().filter((d) => d.tmax != null).at(-1).date;
+  const end = weather.addDays(date, 1) > last ? last : weather.addDays(date, 1);
+  const samples = wx.samples.map((s) => ({ ...s }));
+  const res = { ...(await weather.fetchHourly(config.OPEN_METEO_URL, samples, date, end)), at: Date.now(), key };
+  wx.cache.set(key, res);
+  return res;
+}
+
+/** The forecast days, from today at the route. */
+const forecastDays = () => wx.daily?.days ?? [];
+
+const fmtDay = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+
+/** The calendar: whole weeks (Monday first) around the forecast days; other days can't be picked. */
+function renderCalendar() {
+  const days = forecastDays();
+  if (!days.length) return;
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const first = days[0].date, last = days.at(-1).date;
+  const weekday = (date) => (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7; // Monday 0
+  const from = weather.addDays(first, -weekday(first));
+  const to = weather.addDays(last, 6 - weekday(last));
+  const month = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(undefined, { month: "long", timeZone: "UTC" });
+  const months = month(first) === month(last) ? month(first) : `${month(first)} – ${month(last)}`;
+  const cells = [];
+  for (let date = from; date <= to; date = weather.addDays(date, 1)) {
+    const d = byDate.get(date);
+    const dayNum = Number(date.slice(8));
+    if (!d || d.tmax == null) {
+      const why = date < first ? "That day is past."
+        : d ? "No forecast for this day yet." : "Forecasts go up to 16 days ahead; this day is further away.";
+      cells.push(el("button", { type: "button", class: "wx-day off", disabled: true, title: why }, el("span", { class: "n" }, dayNum)));
+      continue;
+    }
+    const title = `${fmtDay(date)}: ${Math.round(d.tmin)}–${Math.round(d.tmax)} °C, rain ${d.rain.toFixed(1)} mm` +
+      `${d.prob != null ? ` (${d.prob}% chance)` : ""}, wind up to ${Math.round(d.wind)} km/h from ${weather.compass(d.dir)}`;
+    const prob = d.prob ?? (d.rain > 0.2 ? 50 : 0);
+    cells.push(el("button", {
+      type: "button", class: `wx-day${date === wx.date ? " active" : ""}${date === first ? " today" : ""}`, title,
+      style: `--rain:${Math.min(100, prob)}%`,
+      onclick: () => selectWeatherDate(date),
+    }, el("span", { class: "n" }, dayNum), el("span", { class: "sym" }, weatherSymbol(d.code)), el("span", { class: "t" }, `${Math.round(d.tmax)}°`)));
+  }
+  wxEl.cal.replaceChildren(
+    el("div", { class: "wx-cal-head" }, el("strong", {}, months),
+      el("span", { class: "muted small" }, "blue bar: chance of rain")),
+    el("div", { class: "wx-grid" },
+      ...["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((n) => el("span", { class: "wx-wd" }, n)),
+      ...cells),
+    el("p", { class: "muted small" }, "Forecasts reach 16 days ahead, so later days can't be picked yet."),
+  );
+  wxEl.cal.hidden = false;
+}
+
+async function selectWeatherDate(date) {
+  if (!wx.route) return;
+  wx.date = date;
+  wx.hourly = null;
+  renderCalendar();
+  updateHash();
+  const token = ++wx.token;
+  wxEl.status.textContent = `Getting the forecast for ${fmtDay(date)}…`;
+  renderWeather();
+  let hourly;
+  try {
+    hourly = await cachedHourly(wx.route.id, date);
+  } catch (err) {
+    if (token !== wx.token) return;
+    wxEl.status.textContent = `No forecast: ${err.message}.`;
+    return;
+  }
+  if (token !== wx.token) return;
+  wx.hourly = hourly;
+  renderWeather();
+}
+
+/** The ride for the chosen day at `time` ("09:00"), in the chosen direction (or the other). */
+function weatherRide(time = wxEl.time.value || "09:00", reverse = wxEl.reverse.checked) {
+  const speed = Number(wxEl.speed.value);
+  if (!(speed > 0) || !wx.hourly) return null;
+  return weather.rideWeather({
+    line: wx.route.geometry, samples: wx.hourly.samples, speed, reverse,
+    start: weather.localToUnix(wx.date, time, wx.hourly.utcOffset),
+  });
+}
+
+function renderWeather() {
+  wx.routeLayer.clearLayers();
+  wx.markerLayer.clearLayers();
+  wx.bgLayer.eachLayer((l) => l.setStyle({ opacity: wx.route ? 0.15 : 0.35 }));
+  const r = wx.route;
+  const ride = r && wx.hourly ? weatherRide() : null;
+  for (const e of [wxEl.stats, wxEl.legend, wxEl.times, wxEl.advice]) e.hidden = !ride;
+  if (!r) return;
+  if (!ride) {
+    L.polyline(r.geometry, { color: COLOR_A, weight: 4, opacity: 0.8, interactive: false }).addTo(wx.routeLayer);
+    return;
+  }
+  const s = ride.summary, off = wx.hourly.utcOffset;
+  const time = (t) => weather.unixToLocalTime(t, off);
+
+  // The route, coloured by the wind: a white casing so the colours read on any background.
+  const path = wxEl.reverse.checked ? [...r.geometry].reverse() : r.geometry;
+  L.polyline(path, { color: "#fff", weight: 9, opacity: 0.9, interactive: false }).addTo(wx.routeLayer);
+  for (const st of ride.stretches) {
+    L.polyline(st.line, { color: WIND_COLORS[st.effect], weight: 5, opacity: 0.95 })
+      .bindTooltip(`${WIND_LABELS[st.effect]}${st.effect === "calm" ? "" : `: ${fmtHead(st.head)}`} · ${(st.m / 1000).toFixed(1)} km`, { sticky: true })
+      .addTo(wx.routeLayer);
+  }
+  // Riding direction: small chevrons between the weather points.
+  const pts = ride.points;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const mid = [(a.lat + b.lat) / 2, (a.lon + b.lon) / 2];
+    const deg = weather.bearing([a.lat, a.lon], [b.lat, b.lon]);
+    L.marker(mid, {
+      interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "wx-dir", html: `<span style="transform:rotate(${deg}deg)">▲</span>`, iconSize: [12, 12] }),
+    }).addTo(wx.markerLayer);
+  }
+  // Wind arrows at the weather points: pointing where the wind blows to.
+  for (const p of pts) {
+    if (!p.w) continue;
+    const w = p.w;
+    const html = `<svg viewBox="0 0 24 24" style="transform:rotate(${(w.dir + 180) % 360}deg)"><path d="M12 1 L19 21 L12 16 L5 21 Z"/></svg><b>${Math.round(w.speed)}</b>`;
+    const tip = `km ${(p.m / 1000).toFixed(1)} at ${time(p.time)}: ${fmtTemp(w.temp)}, ` +
+      `${w.rain > 0.05 ? `rain ${w.rain.toFixed(1)} mm/h` : "dry"}${w.prob != null ? ` (${Math.round(w.prob)}% chance)` : ""}, ` +
+      `wind ${Math.round(w.speed)} km/h from ${weather.compass(w.dir)}, gusts ${Math.round(w.gust ?? 0)} km/h ${weatherSymbol(w.code)}`;
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: "wx-wind", html, iconSize: [26, 26], iconAnchor: [13, 13] }) })
+      .bindTooltip(tip).addTo(wx.markerLayer);
+  }
+  const start = path[0], end = path.at(-1);
+  L.marker(start, { zIndexOffset: 1000, icon: L.divIcon({ className: "cb-start", html: "Start", iconSize: [42, 20], iconAnchor: [21, 26] }) })
+    .bindTooltip(`Start at ${time(s.start)}`).addTo(wx.markerLayer);
+  if (!r.is_loop) {
+    L.marker(end, { icon: L.divIcon({ className: "cb-start wx-finish", html: "Finish", iconSize: [42, 20], iconAnchor: [21, 26] }) })
+      .bindTooltip(`Finish at ${time(s.end)}`).addTo(wx.markerLayer);
+  }
+
+  // The numbers.
+  const share = (k) => `${Math.round(s.share[k] * 100)}%`;
+  const rain = s.rainMm < 0.1 ? (s.rainProb >= 30 ? "probably dry" : "dry") : `${s.rainMm.toFixed(1)} mm`;
+  const stats = [
+    ["Ride", `${time(s.start)} → ${time(s.end)}`],
+    ["Duration", fmtHours(s.hours)],
+    ["Temperature", s.tempMin == null ? "–" : `${Math.round(s.tempMin)}–${Math.round(s.tempMax)} °C`],
+    ["Rain on the way", rain],
+    ["Chance of rain", s.rainProb == null ? "–" : `up to ${Math.round(s.rainProb)}%`],
+    ["Wind", s.windMax == null ? "–" : `${Math.round(s.windMax)} km/h ${weather.compass(s.windDir)}`],
+    ["Gusts", s.gustMax == null ? "–" : `up to ${Math.round(s.gustMax)} km/h`],
+    ["Into the wind", `${s.headKm.toFixed(1)} km (${share("head")})`],
+    ["Wind behind you", `${s.tailKm.toFixed(1)} km (${share("tail")})`],
+    ["First half", fmtHead(s.firstHalfHead)],
+    ["Second half", fmtHead(s.secondHalfHead)],
+  ];
+  wxEl.stats.replaceChildren(...stats.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+
+  wxEl.status.textContent = s.complete
+    ? `${fmtDay(wx.date)}, starting at ${time(s.start)} at ${Number(wxEl.speed.value)} km/h.`
+    : "The end of this ride is past the end of the forecast: the numbers only cover the part with a forecast.";
+
+  // Would the other way round be easier?
+  const other = weatherRide(undefined, !wxEl.reverse.checked);
+  const better = other && weather.reverseAdvice(ride, other);
+  wxEl.advice.hidden = !better;
+  if (better) {
+    const where = r.is_loop ? "" : " (starting at the other end)";
+    wxEl.advice.replaceChildren(
+      el("strong", {}, `Easier the other way round${where}. `),
+      `${better.headKm.toFixed(1)} km into the wind instead of ${s.headKm.toFixed(1)} km; ` +
+        `second half: ${fmtHead(better.secondHalfHead)} instead of ${fmtHead(s.secondHalfHead)}. `,
+      el("button", { type: "button", class: "secondary", onclick: () => { wxEl.reverse.checked = !wxEl.reverse.checked; renderWeather(); } },
+        wxEl.reverse.checked ? "Ride it the original way" : "Ride it the other way"),
+    );
+  }
+  renderStartTimes();
+}
+
+/** The same ride at other start times: morning, midday, afternoon, evening. */
+function renderStartTimes() {
+  const current = wxEl.time.value;
+  const off = wx.hourly.utcOffset;
+  const rows = [];
+  for (const t of weather.startTimes(6, 20, 2)) {
+    const ride = weatherRide(t);
+    if (!ride || !ride.summary.complete) continue;
+    const s = ride.summary;
+    const other = weatherRide(t, !wxEl.reverse.checked);
+    const flip = other && weather.reverseAdvice(ride, other);
+    const rain = s.rainMm < 0.1 ? `${Math.round(s.rainProb ?? 0)}%` : `${s.rainMm.toFixed(1)} mm`;
+    rows.push(el("tr", {
+      class: t === current ? "active" : null,
+      title: `${t} → ${weather.unixToLocalTime(s.end, off)}${flip ? " · easier the other way round" : ""}`,
+      onclick: () => { wxEl.time.value = t; renderWeather(); },
+    },
+    el("td", {}, t),
+    el("td", {}, s.tempMin == null ? "–" : `${Math.round(s.tempMin)}–${Math.round(s.tempMax)}`),
+    el("td", {}, rain),
+    el("td", {}, `${s.headKm.toFixed(0)} km${flip ? " ⇄" : ""}`)));
+  }
+  $("tbody", wxEl.times).replaceChildren(...rows);
+  wxEl.times.hidden = !rows.length;
+}
+
+wxEl.route.addEventListener("change", () => setWeatherRoute(Number(wxEl.route.value) || null));
+wxEl.time.addEventListener("change", () => wx.hourly && renderWeather());
+wxEl.speed.addEventListener("change", () => {
+  const v = Number(wxEl.speed.value);
+  if (!(v > 0)) {
+    wxEl.status.textContent = "Fill in your average speed (km/h).";
+    return;
+  }
+  if (wx.route) rememberSpeed(wx.route.activity, v);
+  if (wx.hourly) renderWeather();
+});
+wxEl.reverse.addEventListener("change", () => wx.hourly && renderWeather());
+
+$("#d-weather").addEventListener("click", async () => {
+  const id = selectedId;
+  showView("weather");
+  await wx.loading;
+  if (wx.id !== id) await setWeatherRoute(id);
+});
+
 // ------------------------------------------------------------------ duplicates
 
 let dupData = null;
@@ -2221,7 +2628,8 @@ function renderServerMode(info) {
     "the original GPX files in its gpx/ folder, which is never modified. GPX files already in that folder can be " +
     "added from the Import screen.";
   $("#welcome-restore").textContent = "Restore a backup";
-  $("footer").textContent = "rerouter on your own server. Maps © OpenStreetMap contributors · routing by BRouter · place names by GeoNames";
+  $("footer").textContent = "rerouter on your own server. Maps © OpenStreetMap contributors · routing by BRouter · " +
+    "place names by GeoNames · weather by Open-Meteo";
 }
 
 /**

@@ -28,6 +28,7 @@ The page picks its storage at start-up (`GET api/info` answers → server). Both
 | Browser storage | IndexedDB (`web/js/db.js`) |
 | Server | Python 3.12, FastAPI, SQLAlchemy + SQLite (route documents as JSON), `app/` |
 | Routing | BRouter, self-hosted as a separate container (proxied at `/brouter`), or the public brouter.de for the static version |
+| Weather | Open-Meteo forecast API (free, no key, CORS), called from the page (`web/js/weather.js`) |
 | Place names | GeoNames tiles in `web/data/places/`, built by `web/tools/build_places.py` |
 | Tests | Node's built-in test runner for `web/js` (`cd web && npm test`); pytest for the server |
 | Deployment | docker-compose.yml with `app` and `brouter` services; volumes for `data/` (db) and `gpx/` (files). GitHub Pages workflow for `web/` |

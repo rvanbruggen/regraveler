@@ -25,6 +25,7 @@
       <div class="menu-list" id="utilities-menu" role="menu" hidden>
         <button type="button" role="menuitem" data-view="combine">Combine routes<small>Join two routes with routed connectors</small></button>
         <button type="button" role="menuitem" data-view="restart">Change start point<small>Start a loop somewhere else on the loop</small></button>
+        <button type="button" role="menuitem" data-view="weather">Ride weather<small>Rain, temperature and wind along a route on the day you ride</small></button>
         <button type="button" role="menuitem" data-view="duplicates">Duplicates<small>Find and clean up (near-)duplicate routes</small></button>
         <button type="button" role="menuitem" data-view="data">Library &amp; settings<small>Back up, restore, storage and routing server</small></button>
       </div>
@@ -78,7 +79,8 @@
         filters, finding routes that overlap, and combining two routes into a new one.</p>
       <p id="welcome-where">Everything you add is stored <strong>in this browser only</strong>, on this device. Nothing is
         uploaded. The connector routing and the surface estimate ask a BRouter server for directions
-        (the public one at brouter.de by default); only the points being routed are sent.</p>
+        (the public one at brouter.de by default); only the points being routed are sent. The ride weather
+        asks Open-Meteo for the forecast at a few points along the route.</p>
       <p id="welcome-keep" class="browser-only">Your library stays when you refresh the page (even a hard refresh) or close
         the browser, but not when you clear this site's data or use a private window. So download a backup now and then
         (<em>Utilities › Library &amp; settings</em>).</p>
@@ -234,6 +236,39 @@
     </div>
   </section>
 
+  <!-- Ride weather (utility) -->
+  <section id="view-weather" class="view" hidden>
+    <div class="map-layout">
+      <div class="map-side">
+        <p class="muted small">The forecast along a route for the day and time you ride it: each point is read at
+          the moment you pass it, and the route is coloured by how the wind hits you.</p>
+        <label>Route <select id="wx-route"></select></label>
+        <div id="wx-cal" class="wx-cal" hidden></div>
+        <div class="wx-row">
+          <label>Start time <input type="time" id="wx-time" value="09:00" step="900"></label>
+          <label>Average speed (km/h) <input type="number" id="wx-speed" min="1" max="60" step="0.5"></label>
+        </div>
+        <label class="check"><input type="checkbox" id="wx-reverse"> Ride it the other way round</label>
+        <p id="wx-status" class="muted small"></p>
+        <div id="wx-advice" class="wx-advice" hidden></div>
+        <dl id="wx-stats" class="stats wx-stats" hidden></dl>
+        <div id="wx-legend" class="wx-legend small" hidden>
+          <span><i class="head"></i>headwind</span><span><i class="cross"></i>crosswind</span>
+          <span><i class="tail"></i>tailwind</span><span><i class="calm"></i>calm</span>
+          <span class="muted">Arrows: where the wind blows to, km/h.</span>
+        </div>
+        <div id="wx-times" hidden>
+          <h3 class="wx-h">Other start times that day</h3>
+          <table class="wx-times"><thead><tr><th>Start</th><th>°C</th><th>Rain</th><th>Into the wind</th></tr></thead><tbody></tbody></table>
+        </div>
+        <p class="muted small">Weather by <a class="link" href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
+          (CC BY 4.0); only <span id="wx-npoints">a few</span> points along the route are sent to it. Times assume a
+          steady average speed, without stops.</p>
+      </div>
+      <div id="weather-map"></div>
+    </div>
+  </section>
+
   <!-- Rename (opened from the library) -->
   <section id="view-rename" class="view" hidden>
     <p class="muted">Proposed names: the start town, then up to three places the route visits, in riding
@@ -369,7 +404,8 @@
   rerouter runs entirely in your browser; your routes never leave this device.
   Maps © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors ·
   routing by <a href="https://brouter.de/" target="_blank" rel="noopener">BRouter</a> ·
-  place names by <a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a>
+  place names by <a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a> ·
+  weather by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
 </footer>
 
 <!-- Route detail panel -->
@@ -403,6 +439,7 @@
       <button type="button" id="d-showmap" class="secondary">Show on map</button>
       <button type="button" id="d-combine" class="secondary">Combine…</button>
       <button type="button" id="d-restart" class="secondary" title="Start this loop somewhere else" hidden>Change start…</button>
+      <button type="button" id="d-weather" class="secondary" title="The weather along this route on the day you ride it">Weather…</button>
       <button type="button" id="d-delete" class="danger">Remove</button>
       <span id="d-status" class="muted"></span>
     </div>

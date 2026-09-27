@@ -1,7 +1,7 @@
 // Settings. The defaults below can be changed by the user in Utilities > Settings (stored
 // with the library); `applySettings` copies those over the defaults at start-up.
 
-export const VERSION = "0.8.3";
+export const VERSION = "0.9.0";
 
 export const config = {
   // "browser": the library lives in this browser (a static host such as GitHub Pages);
@@ -37,6 +37,11 @@ export const config = {
   SURFACE_AUTO_ESTIMATE: false,
   // Pause between BRouter requests of the surface estimate on the shared public server.
   SURFACE_REQUEST_PAUSE_MS: 1000,
+
+  // Ride weather: the forecast service (Open-Meteo, free, no key), and the average speed
+  // (km/h) offered for each activity until the user fills in their own.
+  OPEN_METEO_URL: "https://api.open-meteo.com",
+  WEATHER_SPEEDS: { gravel: 20, road: 25, hiking: 4.5 },
 
   // Route names from the places a route visits (GeoNames data in data/places/).
   AUTO_RENAME_ON_IMPORT: true,
