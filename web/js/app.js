@@ -54,6 +54,9 @@ const fmt = {
 
 // The library lives in this browser, or in the rerouter server that serves this page.
 const onServer = () => config.MODE === "server";
+// Safari (not the Chromium or Firefox browsers that also say "Safari" in their user agent)
+// deletes a site's storage after 7 days of use without visiting the site.
+const isSafari = () => /safari/i.test(navigator.userAgent) && !/chrome|chromium|crios|fxios|edg|opr|android/i.test(navigator.userAgent);
 /** What happens to the GPX files of removed routes. */
 const filesFate = (n) => onServer()
   ? `${n === 1 ? "Its GPX file stays" : "Their GPX files stay"} in the server's GPX folder.`
@@ -2050,9 +2053,12 @@ function renderWelcome() {
   $("#welcome").hidden = !empty;
   $(".table-head").hidden = empty;
   $("#view-library .table-wrap").hidden = empty;
+  $("#welcome-safari").hidden = onServer() || !isSafari();
   const last = svc.library().settings.last_backup_at;
   const note = $("#backup-note");
-  const stale = !last || Date.now() - new Date(last).getTime() > 30 * 86400e3;
+  // Safari may delete the library after a week without a visit: remind sooner there.
+  const days = isSafari() ? 7 : 30;
+  const stale = !last || Date.now() - new Date(last).getTime() > days * 86400e3;
   // On a server the data is in its own folders (back those up as you do your server).
   note.hidden = empty || !stale || onServer();
   note.replaceChildren(
@@ -2077,6 +2083,8 @@ async function showData() {
   const km = routes.reduce((s, r) => s + r.distance_km, 0);
   $("#data-count").textContent = `${routes.length} route${routes.length === 1 ? "" : "s"}, ${Math.round(km)} km`;
   const mb = (b) => `${(b / 1e6).toFixed(b < 1e7 ? 1 : 0)} MB`;
+  $$(".site-host").forEach((e) => (e.textContent = location.host || "this site"));
+  $("#data-where-note").hidden = !onServer();
   if (onServer()) {
     $("#data-where").textContent = "Your library lives on the rerouter server that serves this page";
     $("#data-where-note").textContent = "The routes are in its database (the data/ folder) and the original GPX files in its gpx/ folder. " +
@@ -2207,6 +2215,8 @@ $("#settings-test").addEventListener("click", async () => {
 
 function renderServerMode(info) {
   $("#version").textContent = `v${info.version || VERSION}`;
+  // The notes about browser storage don't apply on a server.
+  $$(".browser-only").forEach((e) => (e.hidden = true));
   $("#welcome-where").textContent = "The routes are stored on this rerouter server: its database in data/ and " +
     "the original GPX files in its gpx/ folder, which is never modified. GPX files already in that folder can be " +
     "added from the Import screen.";

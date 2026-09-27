@@ -16,11 +16,12 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
   self-hosted BRouter. Every browser on your network sees the same library.
 - **As a static site** (e.g. GitHub Pages): the same page keeps the library in the browser
   (IndexedDB) and uses the public BRouter at brouter.de. Nothing to install; one browser is
-  one library. **Try it: <https://rvanbruggen.github.io/rerouter/>**
+  one library. **Try it: <https://rvanbruggen.github.io/rerouter/>** (and read
+  [Your data in the browser version](#your-data-in-the-browser-version)).
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.8.1 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.8.2 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -258,12 +259,37 @@ GitHub Pages on every push to `main` that touches it: this repository's version 
 Build and deployment › Source: GitHub Actions*; the app is then at
 `https://<user>.github.io/<repo>/`.
 
-In the browser version everything stays on the device: the library is in the browser's
-IndexedDB (the page asks the browser to keep it), and clearing the site's data or a private
-window wipes it, so download a backup now and then. The only data sent anywhere are the points
-being routed, to the BRouter server (the public one at brouter.de by default, which allows
-requests from any web page; *Library & settings* can point it at your own BRouter, as long as
-that one allows cross-origin requests).
+### Your data in the browser version
+
+Everything stays on the device: the routes and the original GPX files are in the browser's own
+database (IndexedDB), for this browser and this site address only. Nothing is uploaded. The
+only data sent anywhere are the points being routed, to the BRouter server (the public one at
+brouter.de by default, which allows requests from any web page; *Library & settings* can point
+it at your own BRouter, as long as that one allows cross-origin requests).
+
+**Safe:** refreshing the page (a hard refresh, Ctrl+Shift+R, too: it only reloads the page's
+files), closing the tab or the browser, restarting the computer, and new versions of rerouter.
+
+**Gone, or out of reach:**
+
+- **Clearing the site's data:** "Cookies and other site data" in the browser's *Clear
+  browsing data*, for all time or for this site.
+- **Private or incognito windows:** everything goes when the window closes.
+- **Safari** (Mac, iPhone, iPad) deletes a site's data after 7 days of using Safari without
+  visiting that site. In Safari the app warns about this on the welcome screen and reminds you
+  of a backup after 7 days instead of 30.
+- **Low disk space:** browsers may remove site data to free up space. After the first import
+  the app asks the browser to keep its storage (*Library & settings* shows whether it agreed):
+  Chrome and Edge usually agree without asking, Firefox asks you, Safari promises nothing.
+- **Another browser, browser profile or device** has its own, separate (empty) library.
+- The storage belongs to the site's address, and all GitHub Pages projects of one account share
+  one address (e.g. `rvanbruggen.github.io`): clearing the site data of that address clears it
+  for all of them.
+
+**So:** download a backup now and then (*Utilities › Library & settings › Download backup*) and
+keep it outside the browser, e.g. in a cloud folder. The library reminds you when the last
+backup is more than 30 days old. A backup restores the library after a wipe, and moves it to
+another browser, another device or a rerouter server.
 
 ## Run locally (development)
 

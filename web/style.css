@@ -292,3 +292,9 @@ footer a { color: var(--muted); }
 #starting { display: none; margin: 0 0 12px; }
 body.starting #starting { display: block; visibility: visible; }
 body.starting main > :not(#starting), body.starting nav, body.starting footer, body.starting #version { visibility: hidden; }
+
+/* Notes about browser storage (browser version only) */
+.warn-box { padding: 8px 12px; border-radius: 6px; background: #fff8e6; border: 1px solid #e8cf8a; }
+#data-risks p { margin: 6px 0; }
+#data-risks ul { margin: 4px 0 8px; padding-left: 18px; }
+#data-risks li { margin: 2px 0; }

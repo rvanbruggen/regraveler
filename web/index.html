@@ -79,6 +79,12 @@
       <p id="welcome-where">Everything you add is stored <strong>in this browser only</strong>, on this device. Nothing is
         uploaded. The connector routing and the surface estimate ask a BRouter server for directions
         (the public one at brouter.de by default); only the points being routed are sent.</p>
+      <p id="welcome-keep" class="browser-only">Your library stays when you refresh the page (even a hard refresh) or close
+        the browser, but not when you clear this site's data or use a private window. So download a backup now and then
+        (<em>Utilities › Library &amp; settings</em>).</p>
+      <p id="welcome-safari" class="warn-box" hidden><strong>You're using Safari.</strong> Safari deletes the data of a
+        website after 7 days of using Safari without visiting that site, so in Safari your library only lasts while you
+        use rerouter at least once a week. Keep a backup, or use another browser (Firefox, Chrome, Edge) for rerouter.</p>
       <p><button type="button" id="welcome-import">Import GPX files</button>
         <button type="button" id="welcome-restore" class="secondary">Restore a backup</button></p>
     </div>
@@ -300,8 +306,23 @@
         <p><span id="data-where">Your library lives in this browser's storage on this device</span>: <span id="data-count"></span>.
           <span id="data-usage" class="muted"></span></p>
         <p id="data-persist" class="small"></p>
-        <p id="data-where-note" class="muted small">Clearing this site's data, or a private window, wipes it. Back up now and then,
-          and use a backup to move the library to another browser or device.</p>
+        <p id="data-where-note" class="muted small" hidden></p>
+        <div id="data-risks" class="small browser-only">
+          <p><strong>Safe:</strong> refreshing the page (a hard refresh too), closing the tab or the browser, restarting
+            the computer, and new versions of rerouter.</p>
+          <p><strong>Gone, or out of reach:</strong></p>
+          <ul>
+            <li>when you clear this site's data ("cookies and other site data" when clearing browsing data);</li>
+            <li>in a private or incognito window: everything goes when the window closes;</li>
+            <li>in <strong>Safari</strong> (Mac, iPhone, iPad): after 7 days of using Safari without opening rerouter;</li>
+            <li>when the disk is nearly full and the browser frees up space (unless it agreed to keep it, see above);</li>
+            <li>in another browser, browser profile or device: each has its own, separate library.</li>
+          </ul>
+          <p>The library belongs to the address <strong><span class="site-host"></span></strong>: clearing the site data
+            of that address clears it, also for other pages on the same address.</p>
+          <p><strong>So:</strong> download a backup now and then, and keep it outside the browser (e.g. in a cloud
+            folder). A backup also moves the library to another browser or device.</p>
+        </div>
       </div>
       <div class="panel">
         <h3>Backup</h3>
