@@ -5,9 +5,11 @@
 
 # rerouter — route manager
 
-A web app to manage a personal library of routes (GPX files) for gravel cycling, road cycling,
-mountain biking and hiking: import them, compute stats, tag and rate them, show them on a map, and combine two
-routes into a new one with automatically routed connectors (via BRouter). Formerly *regraveler*.
+A web app to manage a personal library of routes for gravel cycling, road cycling, mountain
+biking and hiking: import them (GPX, TCX, FIT, or from a link), find them again (filters,
+collections, areas, regions), see them on a map with the places along them, combine them into
+new routes with automatically routed connectors (via BRouter), check the weather for the day
+you ride, share them with a link, and plan a day out with the train. Formerly *regraveler*.
 
 The whole app is one page (`web/`) that runs in the browser, and it runs two ways:
 
@@ -16,15 +18,42 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
   self-hosted BRouter. Every browser on your network sees the same library.
 - **As a static site** (e.g. GitHub Pages): the same page keeps the library in the browser
   (IndexedDB) and uses the public BRouter at brouter.de. Nothing to install; one browser is
-  one library. **Try it: <https://rvanbruggen.github.io/rerouter/>** (and read
+  one library. **Try it: <https://rerouter.eu/>** (and read
   [Your data in the browser version](#your-data-in-the-browser-version)).
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.25.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, import from a link, duplicates).** See [CLAUDE.md](CLAUDE.md) for
-the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
+**Version:** 1.0.0 · **Status:** stable. What was planned and built is in
+[docs/ROADMAP.md](docs/ROADMAP.md) (and the original brief in [CLAUDE.md](CLAUDE.md)); the version
+history in [CHANGELOG.md](CHANGELOG.md).
 
 ## What it does
+
+At a glance:
+
+- **Import** GPX, TCX and FIT files (also zipped folders, and a whole Strava export), or a
+  route from a link (RideWithGPS, Komoot, Strava, any GPX file online). Stats, a descriptive
+  name and the surface (paved / unpaved, from OpenStreetMap) are worked out for you; recorded
+  rides of routes you have are logged on them.
+- **A library** with a filter bar and a **Browse** panel: collections (nested), smart
+  collections (saved filters), your own areas, regions (Vlaanderen › Antwerpen, …), activity,
+  source and type.
+- **A route's panel:** map, stats, elevation profile, surface, the places along it, its
+  collections, and a **share link**.
+- **The map** of all (filtered) routes, with map styles, a grey map, your places and areas,
+  and the routes that come near each other.
+- **Places:** cafés, water, toilets, stations, frituren, … from Google My Maps, CSV files,
+  waypoints or OpenStreetMap, on every map and along every route.
+- **Utilities:** combine two routes into a new one, start a loop somewhere else, the weather
+  along a route, search for places (and ride past them), and **train rides**: a day out with
+  the train, with your routes as the riding part.
+- **Sharing:** a link with the route in it, route sets (zips) to add to another library,
+  example routes and example places on the public site.
+
+Original route files (GPX, TCX, FIT) are never modified: combinations, new starts and routes
+with places are new files.
+
+### Importing routes
 
 - **Import** route files by drag and drop: many files at once, whole folders or zip files. On a
   server, the Import screen also offers the route files that are already in its `gpx/` folder.
@@ -60,11 +89,33 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ![Import: batch source, activity and tags, with per-file overrides](docs/screenshots/import.png)
 
+- **Import from a link:** paste a link and rerouter fetches the route, shows its name and
+  distance, and pre-fills the source (the service or site + the link), the activity and the
+  notes (the route's description). The route is then imported like a GPX file: named by your
+  naming setting (the original name goes into the notes), and checked for duplicates.
+  - **RideWithGPS** routes and rides (`ridewithgps.com/routes/…`, `/trips/…`), if public.
+  - **Komoot** tours (`komoot.com/tour/…`, any language), if public, or private ones shared
+    with you by a link with a `share_token` in it. Komoot's "gravel ride" becomes Gravel.
+  - For both, their surface figure can be used as the paved % (it then counts as yours),
+    instead of rerouter's own estimate. Both let any website read their public route data,
+    so this works in the browser version too.
+  - **Strava** links are recognised, but Strava only hands out a route's GPX to someone signed
+    in to Strava: rerouter gives you the export link, you download the GPX (signed in), choose
+    the file, and it is imported with the Strava link as its source.
+  - **Any other link to a GPX file** is fetched and imported unchanged, if it is a GPX file.
+    In the browser version that only works when the site lets other websites read its files
+    (many don't; then download the file and use the Import screen). A rerouter server fetches
+    such files itself, only from public internet addresses (never from your own network), at
+    most 20 MB, and only GPX files.
+
+### The library
+
 - **Library:** sortable table with a filter bar (search, distance, elevation gain, paved %,
   quality, tags) and the **Browse** panel beside it for activity, source, type (loop or point
   to point), collections, areas and regions; what is chosen in Browse shows as chips in the
   filter bar (× removes one, *Clear* all). The Map has the same filter bar, with *Highlight routes near
   each other* right under it, and in its side panel the route count and the Browse panel. Filters are kept in the URL.
+
 - **Browse (catalog):** beside the library table (on a phone behind *Browse*), a tree to find
   routes by group; a click filters the table and the map (a chip in the filter bar shows a
   collection or area, × to show all routes again), and each entry shows its number of routes.
@@ -88,17 +139,19 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   Collections and areas are in backups, and *Export set* takes along the collections of the
   chosen routes (with their parent collections) and the areas they start in; adding the set
   merges them (same name in the same place: the same collection).
+
 - **Activity:** every route is a gravel, road, mountain biking or hiking route (routes from
   before 0.6.0 start as gravel). Change it in the route panel, or for a selection with *Set
   activity…*. The activity also picks the combiner's routing profile (gravel → `gravel`,
   road → `fastbike`, mountain biking → `mtb`, hiking → `hiking-mountain`) and the default speed
   for the ride weather (20, 25, 15 and 4.5 km/h).
+
 - **Select several routes** with the checkboxes in the library (the header box selects all
   shown routes), then:
   - **Download GPX:** one route downloads its original file; several download as `routes.zip`
   - **Export set…:** a rerouter zip with the selected routes, their details (activity, tags,
     surface, …, optionally your notes and ratings) and their original GPX files, to add to another library
-    (see *Sharing routes and example sets*)
+    (see [Sharing and example sets](#sharing-and-example-sets))
     with the original files (a multi-track file is included once).
   - **Show on map:** the map (and library) show only the selected routes until you click
     *show all routes* or *Clear*.
@@ -111,13 +164,26 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ![Library: filters, activity, estimated paved %, ratings and tags; three routes selected](docs/screenshots/library.png)
 
+- **Duplicates:** all groups of near-duplicate routes in the library (e.g. the same route
+  downloaded from two sites), with overlap, source, rating and tags per route, "identical
+  track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
+  most of your own ratings, tags and notes, then the oldest). *Remove ticked*, *Show on map*, or
+  *Not duplicates* (hides the group). Below that, **variants**: routes that lie (almost)
+  entirely on a longer route, such as a short loop inside a long one.
+
+![Duplicates: the same routes from two sites, with a suggestion which one to keep](docs/screenshots/duplicates.png)
+
+### A route's panel
+
 - **Route details:** map, stats, edit metadata (name, quality 1–5, paved %, tags, notes,
   source), list of similar/overlapping routes, download of the original GPX, remove from library.
+
 - **Elevation profile:** the route panel shows the elevation along the route (the same smoothed
   profile the elevation gain is computed from), with climbs coloured by gradient (3–6 %, 6–9 %,
   9 % and steeper, measured per 100 m). Hover the chart to see the km, elevation and gradient
   there and a marker on the map; hover the route on the map to see that point on the chart.
   Files without elevation show no chart.
+
 - **Surface from OpenStreetMap:** each route's surface is estimated as *paved*, *cobbles*
   (sett/cobblestones, counted as paved), *unpaved* and *unknown*. The route panel shows the
   breakdown as a bar, colours the map by surface, and has *Estimate again*. The paved % in the
@@ -137,9 +203,14 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ![Rename: the original names next to the proposed ones](docs/screenshots/rename.png)
 
+- **Share…** makes a link to the route: see [Sharing](#sharing-and-example-sets) below.
+
+### The map
+
 - **Map:** all routes that match the filters (the same filter bar as the library) drawn as
   coloured lines on an OpenStreetMap map. Hover for the name, click a route to open its details
   (the side list then shows only the routes near it). "Show on map" in the route panel jumps there.
+
 - **Map styles:** every map has a layer button (top right) to switch between OpenStreetMap,
   CyclOSM (cycling, shows unpaved roads), OpenTopoMap (contour lines), the Belgian NGI topo map
   and Esri satellite, with the signposted hiking and cycling routes of Waymarked Trails as
@@ -147,6 +218,19 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   remembered in this browser. **Grey map** (in the same layer button) shows the base map in grey, so
   the coloured routes, places and overlays stand out; it is set per map (grey at first on the
   overview Map, in colour on the others, such as a route's panel) and remembered. The list is `MAP_STYLES` / `MAP_OVERLAYS` in `web/js/config.js`.
+
+- **Routes near each other:** tick *Highlight routes near each other* and set a distance
+  (default 100 m). Routes that overlap or come within that distance of another route stay
+  coloured, the rest fade out. Shared stretches are drawn in yellow, and for near misses a
+  dashed line marks the closest points. The side list shows every pair (shared km, % of each
+  route, or the gap in metres); click a pair to zoom to it.
+- The filters, the active view and the proximity setting are kept in the URL, so a bookmark
+  brings back the same screen.
+
+![Map: routes near each other highlighted, shared stretches in yellow](docs/screenshots/map.jpg)
+
+### Places
+
 - **Places (POIs):** cafés, water taps, stations, photo spots, … on every map (layer button ›
   *Places*) and listed along each route in its panel ("Places along this route": the km where
   you pass it and how far off the route, within 200 m). The **Places** tab:
@@ -189,16 +273,10 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   - **Sets:** *Export set…* includes the places along the chosen routes (with their lists and
     your own categories; *Include the places along these routes*), and adding a set adds its
     places (lists with the same name merged, places already there skipped).
-- **Routes near each other:** tick *Highlight routes near each other* and set a distance
-  (default 100 m). Routes that overlap or come within that distance of another route stay
-  coloured, the rest fade out. Shared stretches are drawn in yellow, and for near misses a
-  dashed line marks the closest points. The side list shows every pair (shared km, % of each
-  route, or the gap in metres); click a pair to zoom to it.
-- The filters, the active view and the proximity setting are kept in the URL, so a bookmark
-  brings back the same screen.
-**Utilities** (the *Utilities* menu in the header) are the operations on routes:
 
-![Map: routes near each other highlighted, shared stretches in yellow](docs/screenshots/map.jpg)
+### Utilities
+
+The *Utilities* menu in the header has the operations on routes:
 
 - **Combine** two routes into a new one by picking the part of each route you want to ride:
   1. Pick route A and B (dropdowns, click them on the map, "Combine…" in a route's
@@ -248,6 +326,21 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ![Change start point: the same loop, starting in Duisburg](docs/screenshots/change-start.jpg)
 
+- **Ride weather:** the forecast along a route for the day you ride it. Choose a route (dropdown,
+  click it on the map, or *Weather…* in its detail panel), pick the day in the calendar (today
+  and the next 15 days, each with its weather, top temperature and a bar for the chance of rain;
+  later days can't be picked, as there is no forecast for them yet), and fill in the start
+  time and your average speed (remembered per activity). Every point along the route is read at
+  the moment you pass it, so a morning, afternoon or evening start give different answers. The
+  panel shows the temperature range, the rain expected on the way and its chance, the wind and
+  gusts, how many km you ride into the wind or with it behind you, and the wind in the first
+  and second half. The map colours the route red (headwind), amber (crosswind), green
+  (tailwind) or blue (calm), with wind arrows (pointing where the wind blows to, in km/h; hover
+  for the full forecast at that point and time). A table compares start times from 06:00 to
+  20:00 (click one to use it). When riding the route the other way round is clearly easier on
+  the wind, the panel says so and offers to flip it (⇄ in the table). The forecast comes from
+  [Open-Meteo](https://open-meteo.com/) (free, no key); only about 2 to 21 points along the route are sent.
+
 - **Search for places** (Utilities menu, or *Places…* in a route's panel): the places along a
   route, from **your places** and/or **OpenStreetMap**, within a distance you choose (100 m to
   2 km) and of the kinds you tick (kinds marked * exist only among your own places). They are
@@ -286,145 +379,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   route, day and time; *Save the riding part as a route* makes it one route from station to
   station (connectors by BRouter; tag *train*), or *Download GPX*. A bike on a train needs a
   ticket of its own, and not every train or station suits a bike: check before you go.
-- **Ride weather:** the forecast along a route for the day you ride it. Choose a route (dropdown,
-  click it on the map, or *Weather…* in its detail panel), pick the day in the calendar (today
-  and the next 15 days, each with its weather, top temperature and a bar for the chance of rain;
-  later days can't be picked, as there is no forecast for them yet), and fill in the start
-  time and your average speed (remembered per activity). Every point along the route is read at
-  the moment you pass it, so a morning, afternoon or evening start give different answers. The
-  panel shows the temperature range, the rain expected on the way and its chance, the wind and
-  gusts, how many km you ride into the wind or with it behind you, and the wind in the first
-  and second half. The map colours the route red (headwind), amber (crosswind), green
-  (tailwind) or blue (calm), with wind arrows (pointing where the wind blows to, in km/h; hover
-  for the full forecast at that point and time). A table compares start times from 06:00 to
-  20:00 (click one to use it). When riding the route the other way round is clearly easier on
-  the wind, the panel says so and offers to flip it (⇄ in the table). The forecast comes from
-  [Open-Meteo](https://open-meteo.com/) (free, no key); only about 2 to 21 points along the route are sent.
 
-- **Import from a link:** paste a link and rerouter fetches the route, shows its name and
-  distance, and pre-fills the source (the service or site + the link), the activity and the
-  notes (the route's description). The route is then imported like a GPX file: named by your
-  naming setting (the original name goes into the notes), and checked for duplicates.
-  - **RideWithGPS** routes and rides (`ridewithgps.com/routes/…`, `/trips/…`), if public.
-  - **Komoot** tours (`komoot.com/tour/…`, any language), if public, or private ones shared
-    with you by a link with a `share_token` in it. Komoot's "gravel ride" becomes Gravel.
-  - For both, their surface figure can be used as the paved % (it then counts as yours),
-    instead of rerouter's own estimate. Both let any website read their public route data,
-    so this works in the browser version too.
-  - **Strava** links are recognised, but Strava only hands out a route's GPX to someone signed
-    in to Strava: rerouter gives you the export link, you download the GPX (signed in), choose
-    the file, and it is imported with the Strava link as its source.
-  - **Any other link to a GPX file** is fetched and imported unchanged, if it is a GPX file.
-    In the browser version that only works when the site lets other websites read its files
-    (many don't; then download the file and use the Import screen). A rerouter server fetches
-    such files itself, only from public internet addresses (never from your own network), at
-    most 20 MB, and only GPX files.
-
-- **Duplicates:** all groups of near-duplicate routes in the library (e.g. the same route
-  downloaded from two sites), with overlap, source, rating and tags per route, "identical
-  track" and "ridden the other way" hints, and a suggestion which one to keep (the one with the
-  most of your own ratings, tags and notes, then the oldest). *Remove ticked*, *Show on map*, or
-  *Not duplicates* (hides the group). Below that, **variants**: routes that lie (almost)
-  entirely on a longer route, such as a short loop inside a long one.
-
-- **Library & settings** (also in the Utilities menu): where the library is stored and how much
-  space it takes, **backup** (one zip with every route, your ratings, tags and notes, and all
-  original GPX files) and **restore**, the BRouter server to use (with a test button), whether
-  new routes are named and their surface estimated automatically, and *Remove everything*.
-
-Original route files (GPX, TCX, FIT) are never modified.
-
-![Duplicates: the same routes from two sites, with a suggestion which one to keep](docs/screenshots/duplicates.png)
-
-## Run with Docker
-
-```bash
-docker compose up -d --build
-```
-
-Open http://localhost:8082 (or `http://<server>:8082`).
-
-The first start downloads BRouter's routing data for Belgium and its surroundings
-(~640 MB, see [BRouter routing data](#brouter-routing-data)) and builds BRouter from source, so
-it takes a few minutes. Later starts are quick.
-
-Volumes (bind mounts next to `docker-compose.yml`):
-
-| Host folder | In container | Contents |
-|---|---|---|
-| `./data` | `/data` | `routes.db` (SQLite) |
-| `./gpx` | `/gpx` | The GPX library. Files already here are referenced in place; uploaded files are stored in `gpx/uploads/<source>/`, combined routes and new start points in `gpx/derived/`, files from a restored backup that weren't here yet in `gpx/restored/`. |
-| `./brouter/segments4` | `/segments4` (brouter) | BRouter routing data tiles (`.rd5`) |
-
-Services: `app` (serves the page, stores the library, passes `/brouter` requests on to
-BRouter, and fetches GPX files for *Import from a link* when a site won't let the page do it), `brouter` (routing engine, built from the official
-[abrensch/brouter](https://github.com/abrensch/brouter) v1.7.10 source; only reachable through
-the app, not published on the host) and `brouter-segments` (one-off job that downloads missing
-routing data before BRouter starts).
-
-### BRouter routing data
-
-BRouter needs routing data tiles from [brouter.de/brouter/segments4](https://brouter.de/brouter/segments4/):
-5×5 degree files named after their south-west corner. The default set covers Belgium and the
-neighbouring areas:
-
-| Tile | Covers | Size (approx.) |
-|---|---|---|
-| `E0_N50` | 0–5° E, 50–55° N: Flanders, Brussels, west of the Netherlands | 80 MB |
-| `E5_N50` | 5–10° E, 50–55° N: Limburg, east of the Netherlands, western Germany | 180 MB |
-| `E0_N45` | 0–5° E, 45–50° N: south of Wallonia, northern France | 130 MB |
-| `E5_N45` | 5–10° E, 45–50° N: Luxembourg, the Ardennes south of 50° N | 250 MB |
-
-To use other tiles, set `BROUTER_TILES` (space separated) in a `.env` file next to
-`docker-compose.yml`, e.g. `BROUTER_TILES=E0_N50 E5_N50`, and run `docker compose up -d`.
-If a connector falls outside the downloaded tiles, the combiner says which tile is missing.
-
-The tiles are rebuilt weekly from OpenStreetMap. To refresh them (only changed tiles are
-downloaded), then restart BRouter:
-
-```bash
-docker compose run --rm brouter-segments update
-```
-
-```bash
-docker compose restart brouter
-```
-
-### Import an existing folder of GPX files
-
-Put the files somewhere under `./gpx` (subfolders are fine), open the Import screen and click
-*Add them to the list*: it lists every GPX file in the folder that isn't in the library yet.
-Files in a subfolder get the subfolder's name as source name (unless you fill in a source name
-for the batch), and they are referenced where they are, not copied. Doing it again is safe:
-files that are already imported are not offered again, and neither are files that were skipped
-(the same track as a route already in the library, or not a usable GPX file) or that you
-dismissed with *Ignore them*. That goes by content, so every copy of such a file is ignored;
-the files themselves stay in the folder, and *offer them again* brings them back. Dropping a folder on the Import screen
-works too; files that aren't in `./gpx` yet are then copied into `gpx/uploads/<source>/`.
-
-### Upgrading from 0.7.x (the Python version)
-
-Up to 0.7.x the route logic ran in Python on the server. Now it runs in the page, and the
-server only stores the library. The first start moves your library to the new storage by
-itself: every route with its id, ratings, tags, notes, surface estimate and "not duplicates"
-decisions, referencing the GPX files where they are. Routes from early versions without a
-track hash get one from their GPX file the first time the page opens, so duplicates are
-recognised. The old tables stay untouched in
-`routes.db`, so the old version still works on the same database. By hand:
-`docker compose run --rm app python -m app.cli migrate`.
-
-GeoNames data is no longer downloaded into `data/geonames/`: the place data ships with the page
-(`web/data/places/`). That folder can be deleted.
-
-### Backups
-
-*Utilities › Library & settings › Download backup* (or `docker compose run --rm app python -m
-app.cli backup /data/backup.zip`) writes one zip: `library.json` with every route, setting and
-"not duplicates" pair, and every original GPX file as `gpx/<sha256>.gpx`. Restoring it (in the
-page, or `python -m app.cli restore <file>`) replaces the library; route ids are kept. The
-browser version reads and writes the same format.
-
-### Sharing routes and example sets
+### Sharing and example sets
 
 **Share link:** *Share…* in a route's panel makes a link to a page that shows the route (map,
 stats, surface, elevation profile) with *Download GPX* and *Add to my library* (source *shared
@@ -481,6 +437,104 @@ python3 web/tools/build_place_sets.py
 to rebuild `web/data/place-sets/index.json` (`{file, title, category, count}` per set), and
 push. The section is hidden when the index is missing or empty.
 
+### Library & settings
+
+- **Library & settings** (also in the Utilities menu): where the library is stored and how much
+  space it takes, **backup** (one zip with every route, your ratings, tags and notes, places,
+  collections and areas, and all original route files) and **restore**, *Add routes from a
+  zip…* and the example routes, the BRouter server to use (with a test button), whether new
+  routes are named and their surface estimated automatically, your **home** (for share links
+  and train rides), and *Remove everything*.
+
+## Run with Docker
+
+```bash
+docker compose up -d --build
+```
+
+Open http://localhost:8082 (or `http://<server>:8082`).
+
+The first start downloads BRouter's routing data for Belgium and its surroundings
+(~640 MB, see [BRouter routing data](#brouter-routing-data)) and builds BRouter from source, so
+it takes a few minutes. Later starts are quick.
+
+Volumes (bind mounts next to `docker-compose.yml`):
+
+| Host folder | In container | Contents |
+|---|---|---|
+| `./data` | `/data` | `routes.db` (SQLite) |
+| `./gpx` | `/gpx` | The route files (GPX, TCX, FIT). Files already here are referenced in place; uploaded files are stored in `gpx/uploads/<source>/`, combined routes, new start points, routes with places and train rides in `gpx/derived/`, files from a restored backup that weren't here yet in `gpx/restored/`. |
+| `./brouter/segments4` | `/segments4` (brouter) | BRouter routing data tiles (`.rd5`) |
+
+Services: `app` (serves the page, stores the library, passes `/brouter` requests on to
+BRouter, fetches GPX files for *Import from a link* when a site won't let the page do it, and asks OpenStreetMap for places), `brouter` (routing engine, built from the official
+[abrensch/brouter](https://github.com/abrensch/brouter) v1.7.10 source; only reachable through
+the app, not published on the host) and `brouter-segments` (one-off job that downloads missing
+routing data before BRouter starts).
+
+### BRouter routing data
+
+BRouter needs routing data tiles from [brouter.de/brouter/segments4](https://brouter.de/brouter/segments4/):
+5×5 degree files named after their south-west corner. The default set covers Belgium and the
+neighbouring areas:
+
+| Tile | Covers | Size (approx.) |
+|---|---|---|
+| `E0_N50` | 0–5° E, 50–55° N: Flanders, Brussels, west of the Netherlands | 80 MB |
+| `E5_N50` | 5–10° E, 50–55° N: Limburg, east of the Netherlands, western Germany | 180 MB |
+| `E0_N45` | 0–5° E, 45–50° N: south of Wallonia, northern France | 130 MB |
+| `E5_N45` | 5–10° E, 45–50° N: Luxembourg, the Ardennes south of 50° N | 250 MB |
+
+To use other tiles, set `BROUTER_TILES` (space separated) in a `.env` file next to
+`docker-compose.yml`, e.g. `BROUTER_TILES=E0_N50 E5_N50`, and run `docker compose up -d`.
+If a connector falls outside the downloaded tiles, the combiner says which tile is missing.
+
+The tiles are rebuilt weekly from OpenStreetMap. To refresh them (only changed tiles are
+downloaded), then restart BRouter:
+
+```bash
+docker compose run --rm brouter-segments update
+```
+
+```bash
+docker compose restart brouter
+```
+
+### Import an existing folder of route files
+
+Put the files somewhere under `./gpx` (subfolders are fine), open the Import screen and click
+*Add them to the list*: it lists every route file (GPX, TCX, FIT) in the folder that isn't in the library yet.
+Files in a subfolder get the subfolder's name as source name (unless you fill in a source name
+for the batch), and they are referenced where they are, not copied. Doing it again is safe:
+files that are already imported are not offered again, and neither are files that were skipped
+(the same track as a route already in the library, or not a usable GPX file) or that you
+dismissed with *Ignore them*. That goes by content, so every copy of such a file is ignored;
+the files themselves stay in the folder, and *offer them again* brings them back. Dropping a folder on the Import screen
+works too; files that aren't in `./gpx` yet are then copied into `gpx/uploads/<source>/`.
+
+### Upgrading from 0.7.x (the Python version)
+
+Up to 0.7.x the route logic ran in Python on the server. Now it runs in the page, and the
+server only stores the library. The first start moves your library to the new storage by
+itself: every route with its id, ratings, tags, notes, surface estimate and "not duplicates"
+decisions, referencing the GPX files where they are. Routes from early versions without a
+track hash get one from their GPX file the first time the page opens, so duplicates are
+recognised. The old tables stay untouched in
+`routes.db`, so the old version still works on the same database. By hand:
+`docker compose run --rm app python -m app.cli migrate`.
+
+GeoNames data is no longer downloaded into `data/geonames/`: the place data ships with the page
+(`web/data/places/`). That folder can be deleted.
+
+### Backups
+
+*Utilities › Library & settings › Download backup* (or `docker compose run --rm app python -m
+app.cli backup /data/backup.zip`) writes one zip: `library.json` with every route, setting and
+"not duplicates" pair and document (places and their lists, collections, smart collections,
+areas), and every original route file as `gpx/<sha256>.<gpx|tcx|fit>`. Restoring it (in the
+page, or `python -m app.cli restore <file>`) replaces the library; route ids are kept. The
+browser version reads and writes the same format.
+
 ## Run as a static site (GitHub Pages)
 
 The `web/` folder is the whole app. Served by any static web server it keeps the library in the
@@ -492,7 +546,8 @@ python3 -m http.server 8000 --directory web
 
 On GitHub, `.github/workflows/pages.yml` runs the JavaScript tests and publishes `web/` to
 GitHub Pages on every push to `main` that touches it: this repository's version is live at
-<https://rvanbruggen.github.io/rerouter/>. In a fork, turn it on once under *Settings › Pages ›
+<https://rerouter.eu/> (a custom domain for <https://rvanbruggen.github.io/rerouter/>, which
+redirects there). In a fork, turn it on once under *Settings › Pages ›
 Build and deployment › Source: GitHub Actions*; the app is then at
 `https://<user>.github.io/<repo>/`.
 
@@ -520,7 +575,7 @@ files), closing the tab or the browser, restarting the computer, and new version
   Chrome and Edge usually agree without asking, Firefox asks you, Safari promises nothing.
 - **Another browser, browser profile or device** has its own, separate (empty) library.
 - The storage belongs to the site's address, and all GitHub Pages projects of one account share
-  one address (e.g. `rvanbruggen.github.io`): clearing the site data of that address clears it
+  one address (e.g. `rerouter.eu`): clearing the site data of that address clears it
   for all of them.
 
 **So:** download a backup now and then (*Utilities › Library & settings › Download backup*) and
@@ -669,13 +724,17 @@ Settings: the thresholds (loop 200 m, similarity 50 m / 85 %, variants 90 %, pro
 100 m default and 5000 m maximum, direct join 25 m, surface waypoints every 300 m, the BRouter
 profiles) are in `web/js/config.js`. The ones you're likely to change are in the page, under
 *Utilities › Library & settings*: the BRouter server, automatic names and surface estimates,
-and the default distance for routes near each other. They are stored with the library.
+the default distance for routes near each other, and your home (with its privacy zone). The
+place categories and the kinds of places looked up on OpenStreetMap are set on the *Places*
+tab. All are stored with the library (and in backups).
 
 The server's environment variables: `DATA_DIR` (`./data`), `GPX_DIR` (`./gpx`), `WEB_DIR`
 (`./web`), `DATABASE_URL` (SQLite in `DATA_DIR`), `BROUTER_URL` (`http://localhost:17777`; set to
 `http://brouter:17777` in docker-compose; empty for no `/brouter`), `BROUTER_TIMEOUT_S` (120),
 `MAX_FILE_BYTES` (50 MB), `LINK_FETCH_TIMEOUT_S` (20) and `LINK_FETCH_MAX_BYTES` (20 MB) for GPX
-files the server fetches for *Import from a link*.
+files the server fetches for *Import from a link*, and `OVERPASS_URLS` (overpass-api.de,
+overpass.private.coffee, maps.mail.ru), `OVERPASS_TIMEOUT_S` (40) and `OVERPASS_CACHE_S` (one
+day) for the places from OpenStreetMap it asks for the page.
 
 ## Adding metadata fields
 
@@ -712,6 +771,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     weather.js       ride weather: forecast along the route (Open-Meteo), headwind / tailwind
     places.js        route names from GeoNames places (start town + places visited)
     zip.js, backup.js  zip files, library backups and exported route sets
+    sha256.js        SHA-256 for file hashes where the browser has no crypto.subtle (plain HTTP)
     worker.js        Web Worker for "routes near each other"
     config.js        settings and the version
   data/places/       GeoNames place tiles, admin.json (region and province names)
