@@ -308,6 +308,9 @@ td.est { color: var(--muted); }
   border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
 .seed p { margin: 2px 0; }
 .seed button { flex: none; }
+/* On the Import screen: two columns, so the drop zone stays close. */
+#welcome { max-width: 960px; }
+#welcome .seed-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 
 footer { padding: 12px 16px 20px; font-size: 12px; color: var(--muted); text-align: center; }
 footer a { color: var(--muted); }

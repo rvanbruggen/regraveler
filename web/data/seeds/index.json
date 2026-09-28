@@ -43,6 +43,26 @@
       ]
     },
     {
+      "file": "rerouter-mybrevet-cc-randonneurs-be.zip",
+      "title": "MyBrevet.cc - randonneurs.be",
+      "description": "Permanent BRMs in Belgium",
+      "routes": 14,
+      "km": 2821.5,
+      "activities": [
+        "road"
+      ]
+    },
+    {
+      "file": "rerouter-mybrevet-cc-randonneurs-nl.zip",
+      "title": "MyBrevet.cc - randonneurs.nl",
+      "description": "Permanent BRMs in the Netherlands",
+      "routes": 5,
+      "km": 1004.0,
+      "activities": [
+        "road"
+      ]
+    },
+    {
       "file": "rerouter-rixroutes.zip",
       "title": "RixRoutes",
       "description": "Seed files for RixRoutes",

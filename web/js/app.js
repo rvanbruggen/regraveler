@@ -107,7 +107,7 @@ function showView(name) {
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import screen and the utilities.
   const noFilters = ["import", "rename", "places", "shared", "about", ...UTILITIES].includes(name);
-  $("#filters").hidden = noFilters;
+  $("#filters").hidden = noFilters || libraryEmpty();
   updateIdsNote();
   if (noFilters) closeDetail();
   // The Browse panel: beside the library table, or at the top of the Map's side panel.
@@ -4871,9 +4871,20 @@ $("#sel-rename").addEventListener("click", () => openRename([...checked]));
 
 // ------------------------------------------------------------------ welcome, backups, settings
 
+/** No routes yet (or no library at all): nothing to filter. */
+function libraryEmpty() {
+  try {
+    return svc.library().all().length === 0;
+  } catch (_) {
+    return true;
+  }
+}
+
 function renderWelcome() {
-  const empty = svc.library().all().length === 0;
+  const empty = libraryEmpty();
+  if (["library", "map"].includes(currentView)) $("#filters").hidden = empty;
   $("#welcome").hidden = !empty;
+  $("#library-empty").hidden = !empty;
   $(".table-head").hidden = empty;
   $("#view-library .table-wrap").hidden = empty;
   $("#welcome-safari").hidden = onServer() || !isSafari();
@@ -4889,7 +4900,6 @@ function renderWelcome() {
     el("a", { class: "link", onclick: () => showView("data") }, "Download a backup"),
     " to keep them safe, or to move them to another device.");
 }
-$("#welcome-import").addEventListener("click", () => showView("import"));
 $("#welcome-restore").addEventListener("click", () => showView("data"));
 
 /** Ask the browser to keep our storage when space runs low (not evicted automatically). */
@@ -5049,6 +5059,8 @@ async function loadSeed(seed, button, status) {
     if (!res.ok) throw new Error(`could not download ${seed.file} (${res.status})`);
     const data = await readBackup(new Uint8Array(await res.arrayBuffer()));
     await addRoutes(data, status, { ask: false });
+    // From the welcome box on the Import screen: show the routes that were just added.
+    if (status.closest("#welcome")) showView("library");
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   } finally {
@@ -5126,7 +5138,6 @@ function renderServerMode(info) {
   $("#welcome-where").textContent = "The routes are stored on this rerouter server: its database in data/ and " +
     "the original GPX files in its gpx/ folder, which is never modified. GPX files already in that folder can be " +
     "added from the Import screen.";
-  $("#welcome-restore").textContent = "Restore a backup";
   $("footer").textContent = "rerouter on your own server. Maps © OpenStreetMap contributors · routing by BRouter · " +
     "place names by GeoNames · weather by Open-Meteo";
 }
@@ -5230,8 +5241,8 @@ async function startApp() {
     lib = await Library.open();
   } catch (err) {
     $("#count").textContent = "";
-    $("#welcome").hidden = false;
-    $("#welcome").replaceChildren(el("h2", {}, "This browser does not let rerouter store data"),
+    $("#library-empty").hidden = false;
+    $("#library-empty").replaceChildren(el("h2", {}, "This browser does not let rerouter store data"),
       el("p", {}, `rerouter keeps your routes in the browser's storage (IndexedDB), which is not available here (${err.message}). ` +
         "Private windows and some privacy settings block it; try a normal window."));
     // A shared route can still be shown (without "Add to my library").
@@ -5247,7 +5258,9 @@ async function startApp() {
   await loadFacets();
   const view = new URLSearchParams(location.hash.slice(1)).get("view");
   sharedPacked = shareFromHash();
-  showView(sharedPacked ? "shared" : LINKABLE_VIEWS.includes(view) ? view : "library");
+  // An empty library starts on the Import screen (own files, a backup or an example set).
+  const home = svc.library().all().length ? "library" : "import";
+  showView(sharedPacked ? "shared" : LINKABLE_VIEWS.includes(view) ? view : home);
   watchSurfaceJob();
   loadSeeds();
   loadPlaceSets();

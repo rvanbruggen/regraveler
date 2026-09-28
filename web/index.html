@@ -82,28 +82,9 @@
 
   <!-- Library -->
   <section id="view-library" class="view">
-    <div id="welcome" class="welcome" hidden>
-      <h2>Your route library, in your browser</h2>
-      <p>rerouter keeps a library of GPX routes for gravel, road and mountain biking, and hiking: stats, a map,
-        filters, finding routes that overlap, and combining two routes into a new one.</p>
-      <p id="welcome-where">Everything you add is stored <strong>in this browser only</strong>, on this device. Nothing is
-        uploaded. The connector routing and the surface estimate ask a BRouter server for directions
-        (the public one at brouter.de by default); only the points being routed are sent. The ride weather
-        asks Open-Meteo for the forecast at a few points along the route.</p>
-      <p id="welcome-keep" class="browser-only">Your library stays when you refresh the page (even a hard refresh) or close
-        the browser, but not when you clear this site's data or use a private window. So download a backup now and then
-        (<em>Utilities › Library &amp; settings</em>).</p>
-      <p id="welcome-safari" class="warn-box" hidden><strong>You're using Safari.</strong> Safari deletes the data of a
-        website after 7 days of using Safari without visiting that site, so in Safari your library only lasts while you
-        use rerouter at least once a week. Keep a backup, or use another browser (Firefox, Chrome, Edge) for rerouter.</p>
-      <p><button type="button" id="welcome-import">Import GPX files</button>
-        <button type="button" id="welcome-restore" class="secondary">Restore a backup</button></p>
-      <div id="welcome-seeds" hidden>
-        <p><strong>Just looking around?</strong> Load a set of example routes to try the map, the weather and
-          combining routes right away. You can remove them again at any time.</p>
-        <div class="seed-list"></div>
-        <p class="seed-status small"></p>
-      </div>
+    <div id="library-empty" class="welcome" hidden>
+      <p>Your library is still empty. <a class="link" data-goto="import">Go to Import</a> to add your own route files,
+        restore a backup, or load one of the example sets.</p>
     </div>
     <p id="backup-note" class="backup-note" hidden></p>
     <aside id="catalog" class="catalog" hidden></aside>
@@ -274,8 +255,8 @@
       <li><strong>Import your routes</strong> (<a class="link" data-goto="import">Import</a>): drop GPX, TCX or FIT
         files, whole folders or zip files, and set their source, activity and tags. Or paste a link to a route on
         RideWithGPS, Komoot or Strava (<a class="link" data-goto="link">Utilities › Import from a link</a>). Just
-        looking around? Add a set of example routes under <a class="link" data-goto="data">Library &amp;
-        settings</a>. rerouter works out the distance, the climbing, a name after the places the route visits and,
+        looking around? Add a set of example routes on the Import screen (while your library is empty) or under
+        <a class="link" data-goto="data">Library &amp; settings</a>. rerouter works out the distance, the climbing, a name after the places the route visits and,
         if you like, how much of it is paved.</li>
       <li><strong>Manage your library</strong> (<a class="link" data-goto="library">Library</a>): filter the table
         (distance, climbing, paved, quality, tags) and use <em>Browse</em> on the left for activity, source,
@@ -631,6 +612,29 @@
 
   <!-- Import -->
   <section id="view-import" class="view" hidden>
+    <div id="welcome" class="welcome" hidden>
+      <h2>Your route library, in your browser</h2>
+      <p>rerouter keeps a library of GPX routes for gravel, road and mountain biking, and hiking: stats, a map,
+        filters, finding routes that overlap, and combining two routes into a new one.</p>
+      <p id="welcome-where">Everything you add is stored <strong>in this browser only</strong>, on this device. Nothing is
+        uploaded. The connector routing and the surface estimate ask a BRouter server for directions
+        (the public one at brouter.de by default); only the points being routed are sent. The ride weather
+        asks Open-Meteo for the forecast at a few points along the route.</p>
+      <p id="welcome-keep" class="browser-only">Your library stays when you refresh the page (even a hard refresh) or close
+        the browser, but not when you clear this site's data or use a private window. So download a backup now and then
+        (<em>Utilities › Library &amp; settings</em>).</p>
+      <p id="welcome-safari" class="warn-box" hidden><strong>You're using Safari.</strong> Safari deletes the data of a
+        website after 7 days of using Safari without visiting that site, so in Safari your library only lasts while you
+        use rerouter at least once a week. Keep a backup, or use another browser (Firefox, Chrome, Edge) for rerouter.</p>
+      <p><strong>Start with your own routes:</strong> drop route files (GPX, TCX, FIT) in the box below, or
+        <a class="link" id="welcome-restore">restore a backup</a>.</p>
+      <div id="welcome-seeds" hidden>
+        <p><strong>No route files of your own?</strong> Load one of these sets of example routes to try the map, the weather and
+          combining routes right away. You can remove them again at any time.</p>
+        <div class="seed-list"></div>
+        <p class="seed-status small"></p>
+      </div>
+    </div>
     <div class="batch">
       <label>Source name (whole batch) <input type="text" id="batch-source-name" list="source-list" placeholder="e.g. gravelroutedatabase.be"></label>
       <label>Source URL (whole batch) <input type="url" id="batch-source-url" placeholder="https://…"></label>

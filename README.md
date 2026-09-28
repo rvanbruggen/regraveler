@@ -415,7 +415,8 @@ between the server and the browser version. *Leave out my notes and quality rati
 default) keeps those out of the zip, for a set you share or publish.
 
 **Example sets on the public site:** zips in `web/data/seeds/` are offered to visitors, on the
-welcome screen of an empty library and under *Library & settings › Example routes*. To publish
+Import screen while the library is empty (an empty library starts there, and the Library tab
+links to it) and under *Library & settings › Example routes*. To publish
 one: export a set, put the zip in `web/data/seeds/` (a prefix like `1-` sets the order), run
 
 ```bash
@@ -577,7 +578,7 @@ files), closing the tab or the browser, restarting the computer, and new version
   browsing data*, for all time or for this site.
 - **Private or incognito windows:** everything goes when the window closes.
 - **Safari** (Mac, iPhone, iPad) deletes a site's data after 7 days of using Safari without
-  visiting that site. In Safari the app warns about this on the welcome screen and reminds you
+  visiting that site. In Safari the app warns about this on the Import screen (while the library is empty) and reminds you
   of a backup after 7 days instead of 30.
 - **Low disk space:** browsers may remove site data to free up space. After the first import
   the app asks the browser to keep its storage (*Library & settings* shows whether it agreed):
