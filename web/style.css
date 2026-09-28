@@ -429,3 +429,4 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .chip { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 12px; padding: 1px 8px; font-size: 12px; cursor: pointer; }
 .chip:hover { border-color: var(--accent); }
 .places-along .osm-pick { width: auto; margin: 0 6px 0 0; vertical-align: middle; }
+.osm-range { width: auto; padding: 1px 4px; font-size: 12px; }

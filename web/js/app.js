@@ -1075,17 +1075,29 @@ let osmShownFor = null; // the route whose OpenStreetMap places are in its panel
 const osmSelected = new Set(); // osm ids ticked in the route panel
 let osmKeepTarget = ""; // where "Keep selected" puts them: "" (From OpenStreetMap), a list id, or "new"
 let osmKeepMessage = "";
+const OSM_RANGE_KEY = "rerouter.osmRange";
+const fmtRange = (m) => (m >= 1000 ? `${m / 1000} km` : `${m} m`);
+
+/** How far from the route to look on OpenStreetMap (remembered in this browser). */
+function osmRange() {
+  let m = NaN;
+  try {
+    m = Number(localStorage.getItem(OSM_RANGE_KEY));
+  } catch { /* no storage */ }
+  return config.OSM_ROUTE_RANGES_M.includes(m) ? m : config.PLACES_NEAR_ROUTE_M;
+}
 
 /** "Also look on OpenStreetMap" in the route panel (again after a change: then from the cache). */
 async function osmAlongRoute(r) {
   const link = $("#d-osm-link"), status = $("#d-osm-status");
   if (!link || !status) return;
   link.hidden = true;
-  status.textContent = " asking OpenStreetMap… (this can take half a minute)";
+  const range = osmRange();
+  status.textContent = ` asking OpenStreetMap for places within ${fmtRange(range)}… (this can take half a minute)`;
   osmShownFor = r.id;
   let along;
   try {
-    along = await svc.osmAlongRoute(r.id, osmOpts());
+    along = await svc.osmAlongRoute(r.id, osmOpts(), range);
   } catch (err) {
     if (selectedId === r.id) {
       status.textContent = ` ${err.message}`;
@@ -1095,11 +1107,13 @@ async function osmAlongRoute(r) {
     }
     return;
   }
-  if (selectedId !== r.id) return;
+  if (selectedId !== r.id || range !== osmRange()) return; // another route, or a newer range
   const cats = svc.placeCategories();
   status.textContent = along.length
-    ? ` ${along.length} more on OpenStreetMap (rings on the map): tick the ones to keep, above the list.`
-    : " nothing more on OpenStreetMap along this route.";
+    ? ` ${along.length} more on OpenStreetMap within ${fmtRange(range)} (rings on the map): tick the ones to keep, above the list.`
+    : ` nothing more on OpenStreetMap within ${fmtRange(range)} of this route.`;
+  // Without the OpenStreetMap places of an earlier (other) range.
+  for (const li of $$("#d-places li[data-kind=osm]")) li.remove();
   const entry = layeredMaps.find((x) => x.map === ensureMap());
   drawOsm(entry, along.map((a) => a.place));
   const found = new Set(along.map((a) => a.place.osm_id));
@@ -1249,7 +1263,17 @@ async function offerRouteWaypoints(r) {
   $("#d-osm-tools")?.remove();
   const osmLink = el("a", { class: "link", id: "d-osm-link", title: `Look for ${svc.osmCategories().length} kinds of places (see the Places tab)` }, "Also look on OpenStreetMap");
   osmLink.addEventListener("click", () => osmAlongRoute(r));
-  more.append(osmLink, el("span", { id: "d-osm-status", class: "muted" }));
+  const range = el("select", {
+    class: "osm-range", "aria-label": "How far from the route",
+    title: "How far from the route to look (further: slower, and more places)",
+    onchange: (e) => {
+      try {
+        localStorage.setItem(OSM_RANGE_KEY, e.target.value);
+      } catch { /* only for now */ }
+      if (osmShownFor === r.id) osmAlongRoute(r); // search again at the new range
+    },
+  }, config.OSM_ROUTE_RANGES_M.map((m) => el("option", { value: m, selected: m === osmRange() }, fmtRange(m))));
+  more.append(osmLink, el("span", { class: "muted" }, " within "), range, el("span", { id: "d-osm-status", class: "muted" }));
   const wps = await svc.routeWaypoints(r);
   if (selectedId !== r.id || !wps.length) return;
   more.append(" · ", el("a", {

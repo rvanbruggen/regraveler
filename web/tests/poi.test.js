@@ -348,3 +348,27 @@ test("OpenStreetMap places next to one you kept are still offered, unless the sa
   // The kept toilet is gone; the shelter 7 m away stays; the second toilet 7 m away is taken for the same one.
   assert.deepEqual(after.map((a) => a.place.osm_id), ["node/2"]);
 });
+
+test("OpenStreetMap places along a route within a range of your choice", async () => {
+  const start = [51.0, 4.4];
+  const pts = linePoints({ start, lengthM: 5000, stepM: 100, ele: () => 10 });
+  const { routes: [r] } = await svc.importGpx(gpxXml([["t", pts]]), "Route.gpx");
+  const place = (id, north) => {
+    const [lat, lon] = offset(...start, north, 2500);
+    return { type: "node", id, lat, lon, tags: { amenity: "drinking_water", name: `at ${north} m` } };
+  };
+  const answer = { elements: [place(1, 150), place(2, 450), place(3, 900), place(4, 3000)] };
+  const queries = [];
+  const fetchFn = async (url, init) => {
+    queries.push(decodeURIComponent(init.body.slice(5)));
+    return { ok: true, status: 200, json: async () => answer };
+  };
+  const names = async (range) => (await svc.osmAlongRoute(r.id, { fetchFn }, range)).map((a) => a.place.name);
+  assert.deepEqual(await names(), ["at 150 m"]); // 200 m by default
+  assert.deepEqual(await names(500), ["at 150 m", "at 450 m"]);
+  assert.deepEqual(await names(1000), ["at 150 m", "at 450 m", "at 900 m"]);
+  // A wider range asks for wider boxes: 1050 m to spare instead of 250 m.
+  const south = (q) => Number(/\(([\d.]+),/.exec(q)[1]);
+  assert.ok(south(queries[0]) - south(queries[2]) > 0.006);
+  await assert.rejects(svc.osmAlongRoute(r.id, { fetchFn }, 10000), /5 km/);
+});

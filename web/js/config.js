@@ -19,6 +19,9 @@ export const config = {
   RIDE_MATCH_MIN_COVERED: 0.8,
   // Places (POIs) within this distance of a route are listed in its panel as "along the route".
   PLACES_NEAR_ROUTE_M: 200,
+  // How far from a route to look for places on OpenStreetMap (a choice in the route panel,
+  // remembered in the browser); the default is PLACES_NEAR_ROUTE_M.
+  OSM_ROUTE_RANGES_M: [100, 200, 500, 1000, 2000],
   // Overpass API servers for places from OpenStreetMap, tried in turn (they are often busy).
   // On a rerouter server the page asks the server (api/overpass), which caches the answers.
   OVERPASS_URLS: [

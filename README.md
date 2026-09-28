@@ -141,7 +141,10 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     not its turn instructions) can be imported as places: drop the file on the Places tab, or
     *Add the N waypoints in its file to your places…* in a route's panel.
   - **From OpenStreetMap:** *Also look on OpenStreetMap* in a route's panel lists the places
-    mapped on OpenStreetMap along the route (drawn as rings), and **OSM places here** on the Map
+    mapped on OpenStreetMap along the route (drawn as rings), within the distance chosen next
+    to it (100 m, 200 m, 500 m, 1 km or 2 km; 200 m to start with, remembered in the browser;
+    changing it searches again; further takes longer and finds more: on a 295 km route 58
+    places within 200 m, 157 within 1 km in 16 s). Your own places along a route stay at 200 m. and **OSM places here** on the Map
     looks in the part of the map you see (zoomed in). Which kinds to look for is set on the
     Places tab (default: water, toilets, bike repair, stations, shelters, viewpoints; bus
     shelters are left out). They are not stored until you keep them: along a route, tick the

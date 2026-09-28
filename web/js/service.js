@@ -1318,13 +1318,15 @@ function notMine(found) {
 }
 
 /**
- * OpenStreetMap places along a route (the categories of osmCategories): [{place, km, off_m}]
- * like placesAlongRoute. `opts` for osm.runQuery (proxyUrl on a server). Slow: seconds.
+ * OpenStreetMap places within `rangeM` metres of a route (the categories of osmCategories):
+ * [{place, km, off_m}] like placesAlongRoute. `opts` for osm.runQuery (proxyUrl on a server).
+ * Slow: seconds, more for a wider range (bigger boxes to search).
  */
-export async function osmAlongRoute(id, opts = {}) {
+export async function osmAlongRoute(id, opts = {}, rangeM = config.PLACES_NEAR_ROUTE_M) {
   const r = getRoute(id);
-  const found = await osm.placesAroundRoute(r.geometry, osmCategories(), osmLabels(), config.PLACES_NEAR_ROUTE_M + 50, opts);
-  return poi.placesAlong(r.geometry, r.distance_km, notMine(found), config.PLACES_NEAR_ROUTE_M);
+  if (!(rangeM > 0 && rangeM <= 5000)) throw new ServiceError("Look for places within 5 km of the route at most");
+  const found = await osm.placesAroundRoute(r.geometry, osmCategories(), osmLabels(), rangeM + 50, opts);
+  return poi.placesAlong(r.geometry, r.distance_km, notMine(found), rangeM);
 }
 
 /** OpenStreetMap places in a map area [south, west, north, east]. */
