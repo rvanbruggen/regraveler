@@ -12,3 +12,5 @@ __pycache__/
 node_modules/
 # Claude Code local settings (preview server config)
 .claude/
+# Claude Code project brief (kept local, not published)
+CLAUDE.md

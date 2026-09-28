@@ -24,7 +24,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 Both use the same backup format, so a library moves between them in either direction.
 
 **Version:** 1.2.0 · **Status:** stable. What was planned and built is in
-[docs/ROADMAP.md](docs/ROADMAP.md) (and the original brief in [CLAUDE.md](CLAUDE.md)); the version
+[docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
 ## What it does
