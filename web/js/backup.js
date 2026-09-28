@@ -33,6 +33,7 @@ export async function makeBackup(library) {
     routes: dump.routes,
     ignored: dump.ignored,
     settings: dump.settings,
+    docs: dump.docs,
     files,
   };
   return makeZip([
@@ -93,7 +94,7 @@ export async function readBackup(buffer) {
     return { hash: f.hash, name: f.name, data };
   });
   return {
-    routes: manifest.routes, ignored: manifest.ignored || [], settings: manifest.settings || {}, files,
+    routes: manifest.routes, ignored: manifest.ignored || [], settings: manifest.settings || {}, docs: manifest.docs || [], files,
     created_at: manifest.created_at, kind: manifest.kind || "library", title: manifest.title || null, description: manifest.description || null,
   };
 }

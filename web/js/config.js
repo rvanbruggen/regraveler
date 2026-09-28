@@ -17,6 +17,8 @@ export const config = {
   // A recorded ride (FIT/TCX activity) counts as a ride of a library route when it covers at
   // least this share of the route (within SIMILAR_TOLERANCE_M).
   RIDE_MATCH_MIN_COVERED: 0.8,
+  // Places (POIs) within this distance of a route are listed in its panel as "along the route".
+  PLACES_NEAR_ROUTE_M: 200,
   // Duplicates view: also list "variants", where one route lies (almost) entirely on another.
   VARIANT_MIN_OVERLAP: 0.9,
   // Map view: default and maximum distance (metres) for "routes near each other".

@@ -57,21 +57,23 @@ export class RemoteBackend {
     return res.status === 204 ? null : res.json();
   }
 
-  /** Routes, "not duplicates" pairs and settings in one request (see Library.reload). */
+  /** Routes, "not duplicates" pairs, settings and documents in one request (see Library.reload). */
   async loadAll() {
     const lib = await this.request("api/library");
     return [
       lib.routes,
       lib.ignored.map((key) => ({ key })),
       Object.entries(lib.settings).map(([key, value]) => ({ key, value })),
+      lib.docs || [],
     ];
   }
 
   async all(store) {
-    const [routes, ignored, settings] = await this.loadAll();
+    const [routes, ignored, settings, docs] = await this.loadAll();
     if (store === "routes") return routes;
     if (store === "ignored") return ignored;
     if (store === "settings") return settings;
+    if (store === "docs") return docs;
     throw new Error("The files are not listed from the server; download a backup instead");
   }
 
@@ -109,12 +111,17 @@ export class RemoteBackend {
       await this.request("api/settings", { method: "PUT", json: { settings: Object.fromEntries(records.map((r) => [r.key, r.value])) } });
       return records.map((r) => r.key);
     }
+    if (store === "docs") {
+      await this.request("api/docs", { method: "PUT", json: { docs: records } });
+      return records.map((r) => r.key);
+    }
     throw new Error(`Unknown store ${store}`);
   }
 
   async delete(store, keys) {
     if (store === "routes") await this.request("api/routes/delete", { method: "POST", json: { ids: keys } });
     else if (store === "ignored") await this.request("api/ignored/delete", { method: "POST", json: { keys } });
+    else if (store === "docs") await this.request("api/docs/delete", { method: "POST", json: { keys } });
     // Files: the server keeps the originals in its GPX folder, whatever happens to the routes.
   }
 

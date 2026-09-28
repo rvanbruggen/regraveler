@@ -19,6 +19,7 @@
   <nav>
     <button class="tab active" data-view="library">Library</button>
     <button class="tab" data-view="map">Map</button>
+    <button class="tab" data-view="places">Places</button>
     <button class="tab" data-view="import">Import</button>
     <div class="menu" id="utilities">
       <button type="button" class="tab menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="utilities-menu">Utilities ▾</button>
@@ -178,6 +179,43 @@
         <ul id="prox-list"></ul>
       </div>
       <div id="overview-map"></div>
+    </div>
+  </section>
+
+  <!-- Places (POIs) -->
+  <section id="view-places" class="view" hidden>
+    <p class="muted small">Cafés, water taps, stations, photo spots, …: shown on every map (layer button, top right ›
+      <em>Places</em>) and listed along each route in its panel. Import them from Google My Maps (the map as KML/KMZ,
+      or a layer as CSV) or any CSV file with lat and lon columns, or add them one by one with <strong>＋</strong> on the
+      Map.</p>
+    <div id="places-drop" class="dropzone-small">
+      Drop a KML, KMZ or CSV file here, or
+      <label class="link">choose a file<input type="file" id="places-file" accept=".kml,.kmz,.csv" hidden></label>
+      <span id="places-status" class="muted small"></span>
+    </div>
+    <div id="places-preview" class="panel" hidden></div>
+    <div class="places-grid">
+      <div>
+        <h3>Lists</h3>
+        <table id="places-lists"></table>
+        <h3>Categories</h3>
+        <table id="places-cats"></table>
+        <form id="places-cat-form" class="actions">
+          <input name="symbol" placeholder="📍" maxlength="4" class="symbol-input" title="A symbol (an emoji) for the map">
+          <input name="label" placeholder="new category" required>
+          <input name="color" type="color" value="#ad1457" title="Colour">
+          <button type="submit" class="secondary">Add category</button>
+        </form>
+      </div>
+      <div>
+        <h3>Places <span id="places-count" class="muted small"></span></h3>
+        <div class="actions">
+          <input type="search" id="places-q" placeholder="search name or notes">
+          <select id="places-cat-filter"></select>
+          <select id="places-list-filter"></select>
+        </div>
+        <div class="table-wrap"><table id="places-table"></table></div>
+      </div>
     </div>
   </section>
 
@@ -538,6 +576,8 @@
   <p id="d-rides" class="small" hidden></p>
   <p id="d-derived" class="small" hidden></p>
   <p id="d-file" class="muted small"></p>
+  <h3>Places along this route</h3>
+  <ul id="d-places" class="muted places-along"><li>…</li></ul>
   <h3>Similar / overlapping routes</h3>
   <ul id="d-similar" class="muted"><li>…</li></ul>
 </aside>

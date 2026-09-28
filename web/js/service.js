@@ -8,6 +8,7 @@ import { config } from "./config.js";
 import { round, simplifyLatLon } from "./geo.js";
 import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
+import * as poi from "./poi.js";
 import { bboxOf, duplicatePairs, findSimilar, groupPairs, proximityPairs } from "./similarity.js";
 import { buildProfile } from "./profile.js";
 import { computeStats } from "./stats.js";
@@ -1107,4 +1108,155 @@ export async function renameApply(items) {
   }
   await lib.saveRoutes(changed);
   return { renamed: changed.length };
+}
+
+// ------------------------------------------------------------------ places (POIs)
+// Documents in the library (db.js): "poi" {id, name, lat, lon, category, list_id, notes, url,
+// source} and "poi_list" {id, name, source, visible}. Categories are a setting.
+
+const MARKS_LIST = "marks"; // the list places added on the map go into
+
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+/** The place categories: the saved ones, plus built-in ones added in a later version. */
+export function placeCategories() {
+  const saved = Array.isArray(lib.settings.POI_CATEGORIES) ? lib.settings.POI_CATEGORIES : [];
+  const ids = new Set(saved.map((c) => c.id));
+  return [...saved, ...poi.DEFAULT_CATEGORIES.filter((c) => !ids.has(c.id)).map((c) => ({ ...c }))];
+}
+
+async function saveCategories(categories) {
+  await lib.setSetting("POI_CATEGORIES", categories);
+}
+
+/** Add a category (or change one: same id). Returns it. */
+export async function saveCategory({ id = null, label, symbol = null, color = null }) {
+  label = String(label || "").trim();
+  if (!label) throw new ServiceError("A category needs a name");
+  const cats = placeCategories();
+  let c = id && cats.find((x) => x.id === id);
+  if (c) {
+    c.label = label;
+    if (symbol) c.symbol = symbol;
+    if (color) c.color = color;
+  } else {
+    const same = cats.find((x) => x.label.toLowerCase() === label.toLowerCase());
+    if (same) return same;
+    let base = poi.categoryId(label), newId = base, n = 2;
+    while (cats.some((x) => x.id === newId)) newId = `${base}-${n++}`;
+    const custom = cats.filter((x) => !poi.DEFAULT_CATEGORIES.some((d) => d.id === x.id)).length;
+    c = { id: newId, label, symbol: symbol || "📍", color: color || poi.EXTRA_COLORS[custom % poi.EXTRA_COLORS.length], words: [label] };
+    cats.push(c);
+  }
+  await saveCategories(cats);
+  return c;
+}
+
+/** Remove a category of your own that no place uses (the built-in ones stay). */
+export async function deleteCategory(id) {
+  if (poi.DEFAULT_CATEGORIES.some((c) => c.id === id)) throw new ServiceError("Built-in categories can't be removed");
+  if (lib.docsOf("poi").some((p) => p.category === id)) throw new ServiceError("Places still use this category");
+  await saveCategories(placeCategories().filter((c) => c.id !== id));
+}
+
+export const placeLists = () => lib.docsOf("poi_list").sort(byName);
+export const allPlaces = () => lib.docsOf("poi").sort(byName);
+export const place = (id) => lib.getDoc("poi", id);
+
+/** Places of the lists that are shown on the maps. */
+export function visiblePlaces() {
+  const hidden = new Set(lib.docsOf("poi_list").filter((l) => l.visible === false).map((l) => l.id));
+  return lib.docsOf("poi").filter((p) => !hidden.has(p.list_id));
+}
+
+async function ensureList(name, { id = null, source = null } = {}) {
+  const lists = lib.docsOf("poi_list");
+  const found = id ? lists.find((l) => l.id === id) : lists.find((l) => l.name.toLowerCase() === name.toLowerCase());
+  if (found) return found;
+  const [list] = await lib.saveDocs([{ kind: "poi_list", id, name, source, visible: true, created_at: new Date().toISOString() }]);
+  return list;
+}
+
+/**
+ * Import places read by poi.readPlacesFile. `layers`: per layer of `parsed`, {include,
+ * category}: "suggested" (per place: its icon or the layer name; else a new category named
+ * after the layer), "new" (a new category named after the layer) or a category id. Places
+ * already in the list (same name within 25 m) are skipped. Returns {list, added, duplicates}.
+ */
+export async function importPlaces(parsed, { listName = null, source = null, layers = [] } = {}) {
+  const list = await ensureList(String(listName || parsed.name || source || "Places").trim(), { source });
+  const existing = lib.docsOf("poi").filter((p) => p.list_id === list.id);
+  const docs = [];
+  let duplicates = 0;
+  for (const [i, layer] of parsed.layers.entries()) {
+    const choice = layers[i] || { include: true, category: "suggested" };
+    if (!choice.include) continue;
+    let layerCategory = null; // made once per layer, when needed
+    const newCategory = async () => (layerCategory ??= (await saveCategory({ label: layer.name })).id);
+    for (const p of layer.places) {
+      if (poi.isDuplicatePlace(p, [...existing, ...docs])) {
+        duplicates++;
+        continue;
+      }
+      let category = choice.category;
+      if (category === "suggested") category = poi.suggestCategory(p, layer.name, placeCategories()) || (await newCategory());
+      else if (category === "new") category = await newCategory();
+      docs.push({
+        kind: "poi", name: p.name, lat: p.lat, lon: p.lon, category,
+        list_id: list.id, notes: p.description || null, url: p.url || null, source: source || null,
+      });
+    }
+  }
+  for (let i = 0; i < docs.length; i += 200) await lib.saveDocs(docs.slice(i, i + 200));
+  return { list, added: docs.length, duplicates };
+}
+
+/** A place added on the map (goes into "My marks" unless a list is given). */
+export async function addPlace({ lat, lon, name = "New place", category = "other", notes = null, url = null, list_id = null }) {
+  if (!(Number.isFinite(lat) && Number.isFinite(lon))) throw new ServiceError("A place needs a position");
+  const list = list_id ? lib.getDoc("poi_list", list_id) : await ensureList("My marks", { id: MARKS_LIST });
+  if (!list) throw new ServiceError("No such place list");
+  const [p] = await lib.saveDocs([{ kind: "poi", name, lat, lon, category, list_id: list.id, notes, url, source: null }]);
+  return p;
+}
+
+export async function updatePlace(id, changes) {
+  const p = place(id);
+  if (!p) throw new ServiceError("Place not found", 404);
+  for (const k of ["name", "category", "notes", "url", "lat", "lon", "list_id"]) {
+    if (!(k in changes)) continue;
+    let v = changes[k];
+    if (typeof v === "string") v = v.trim() || null;
+    if (k === "name" && !v) continue;
+    p[k] = v;
+  }
+  await lib.saveDocs([p]);
+  return p;
+}
+
+export async function deletePlaces(ids) {
+  return lib.deleteDocs(ids.map((id) => place(id)).filter(Boolean));
+}
+
+/** Remove a list with all its places. */
+export async function deletePlaceList(id) {
+  const list = lib.getDoc("poi_list", id);
+  if (!list) return 0;
+  const n = await lib.deleteDocs(lib.docsOf("poi").filter((p) => p.list_id === id));
+  await lib.deleteDocs([list]);
+  return n;
+}
+
+export async function setPlaceListVisible(id, visible) {
+  const list = lib.getDoc("poi_list", id);
+  if (!list) throw new ServiceError("No such place list", 404);
+  list.visible = !!visible;
+  await lib.saveDocs([list]);
+  return list;
+}
+
+/** Places near a route (of the lists that are shown): [{place, km, off_m}] in riding order. */
+export function placesAlongRoute(id, maxM = config.PLACES_NEAR_ROUTE_M) {
+  const r = getRoute(id);
+  return poi.placesAlong(r.geometry, r.distance_km, visiblePlaces(), maxM);
 }

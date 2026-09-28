@@ -19,7 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from . import __version__, config
-from .models import IgnoredFile, IgnoredPair, RouteDoc, Setting, StoredFile
+from .models import Doc, IgnoredFile, IgnoredPair, RouteDoc, Setting, StoredFile
 
 BACKUP_FORMAT = "rerouter-backup"
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -53,6 +53,7 @@ def library(session: Session) -> dict:
         "routes": [route_out(d) for d in session.scalars(select(RouteDoc).order_by(RouteDoc.id))],
         "ignored": [p.key for p in session.scalars(select(IgnoredPair))],
         "settings": {s.key: s.value for s in session.scalars(select(Setting))},
+        "docs": [d.data for d in session.scalars(select(Doc).order_by(Doc.key))],
     }
 
 
@@ -328,9 +329,36 @@ def put_settings(session: Session, settings: dict) -> None:
     session.commit()
 
 
+DOC_KEY_RE = re.compile(r"^[a-z_]{1,40}:[\w.-]{1,150}$")
+
+
+def put_docs(session: Session, docs: list[dict]) -> int:
+    """Save documents ({kind, id, ...}) under "<kind>:<id>" (replacing what was there)."""
+    for d in docs:
+        if not isinstance(d, dict):
+            raise StoreError("A document must be an object")
+        key = f"{d.get('kind')}:{d.get('id')}"
+        if not DOC_KEY_RE.match(key):
+            raise StoreError(f"Not a valid document kind and id: {key!r}")
+        data = {**d, "key": key}
+        doc = session.get(Doc, key)
+        if doc is None:
+            session.add(Doc(key=key, kind=d["kind"], data=data))
+        else:
+            doc.data = data
+    session.commit()
+    return len(docs)
+
+
+def delete_docs(session: Session, keys: list[str]) -> int:
+    n = session.execute(delete(Doc).where(Doc.key.in_([str(k) for k in keys]))).rowcount
+    session.commit()
+    return n
+
+
 def clear(session: Session) -> None:
-    """Remove every route, pair and setting (and forget the files; they stay on disk)."""
-    for model in (RouteDoc, IgnoredPair, Setting, StoredFile, IgnoredFile):
+    """Remove every route, pair, setting and document (and forget the files; they stay on disk)."""
+    for model in (RouteDoc, IgnoredPair, Setting, Doc, StoredFile, IgnoredFile):
         session.execute(delete(model))
     session.commit()
 
@@ -384,6 +412,7 @@ def read_backup(data: bytes) -> dict:
         "routes": manifest.get("routes", []),
         "ignored": manifest.get("ignored", []),
         "settings": manifest.get("settings", {}),
+        "docs": [d for d in manifest.get("docs", []) if isinstance(d, dict)],
         "files": files,
     }
 
@@ -399,4 +428,5 @@ def restore(session: Session, data: bytes) -> dict:
     put_routes(session, routes)
     put_ignored(session, backup["ignored"])
     put_settings(session, backup["settings"])
+    put_docs(session, backup["docs"])
     return {"routes": len(routes), "files": len(backup["files"])}

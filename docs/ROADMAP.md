@@ -243,6 +243,16 @@ the along-route computation with km marks.
 
 ---
 
+**Built (2026-09-28):** G2 (the `docs` store: IndexedDB v2, `library_docs` on the
+server, `docs` in backups); `poi.js`; KML/KMZ + both CSV forms with the per-layer preview
+(checked on Rik's real files: 8 layers of *Central Antwerp*, the 88 *Kroegtijgers*, the
+unquoted comma); the Places tab; markers on every map with a popup editor; ＋ Place;
+"Places along this route". A built-in **Frituur** category was added. **Next for this item:**
+GPX waypoints (and FIT/TCX course points), the OpenStreetMap overlay (Overpass, cached,
+mirrors), routing a connector via a mark in the combiner, places in *Export set*.
+
+---
+
 ## 4. Catalog
 
 **What:** a browse tree to the left of the library table (hidden on a phone behind a button):

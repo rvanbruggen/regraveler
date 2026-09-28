@@ -60,3 +60,14 @@ class Setting(Base):
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[object] = mapped_column(JSON, nullable=True)
+
+
+class Doc(Base):
+    """Another kind of document the page keeps (places and their lists, …): key "<kind>:<id>",
+    the rest is whatever the page gives it."""
+
+    __tablename__ = "library_docs"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    data: Mapped[dict] = mapped_column(JSON)

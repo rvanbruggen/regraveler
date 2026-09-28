@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 import zipfile
 
 import pytest
@@ -30,7 +31,7 @@ def route(data, name="Route", **extra):
 def test_info_tells_the_page_it_is_on_a_server(client):
     info = client.get("/api/info").json()
     assert info["app"] == "rerouter" and info["mode"] == "server"
-    assert client.get("/api/library").json() == {"routes": [], "ignored": [], "settings": {}}
+    assert client.get("/api/library").json() == {"routes": [], "ignored": [], "settings": {}, "docs": []}
 
 
 def test_the_page_is_served(client):
@@ -129,7 +130,7 @@ def test_settings_and_clear(client, library):
     client.put("/api/settings", json={"settings": {"BROUTER_URL": "http://y"}})
     assert client.get("/api/library").json()["settings"] == {"BROUTER_URL": "http://y", "AUTO_RENAME_ON_IMPORT": False}
     client.post("/api/library/clear")
-    assert client.get("/api/library").json() == {"routes": [], "ignored": [], "settings": {}}
+    assert client.get("/api/library").json() == {"routes": [], "ignored": [], "settings": {}, "docs": []}
     assert (library / path).exists()
 
 
@@ -258,3 +259,29 @@ def test_tcx_and_fit_originals_keep_their_format(client, library):
     paths = [f["path"] for f in client.get("/api/disk-files").json()["files"]]
     assert "rides/Evening.fit" in paths
     assert client.get("/api/disk-files/content", params={"path": "rides/Evening.fit"}).content == fit + b"x"
+
+
+def test_documents_are_stored_cleared_and_backed_up(client):
+    poi = {"kind": "poi", "id": "k1a2b3", "name": "Café De Kat", "lat": 51.22, "lon": 4.40, "list_id": "l1"}
+    lst = {"kind": "poi_list", "id": "l1", "name": "Kroegtijgers"}
+    assert client.put("/api/docs", json={"docs": [poi, lst]}).json() == {"saved": 2}
+    docs = client.get("/api/library").json()["docs"]
+    assert {d["key"] for d in docs} == {"poi:k1a2b3", "poi_list:l1"}
+    assert next(d for d in docs if d["kind"] == "poi")["name"] == "Café De Kat"
+    # Saving again replaces the document.
+    client.put("/api/docs", json={"docs": [{**poi, "name": "Café De Kat - Antwerpen"}]})
+    assert next(d for d in client.get("/api/library").json()["docs"] if d["kind"] == "poi")["name"] == "Café De Kat - Antwerpen"
+    # Bad kinds or ids are refused.
+    assert client.put("/api/docs", json={"docs": [{"kind": "poi", "id": "../x"}]}).status_code == 422
+    assert client.put("/api/docs", json={"docs": [{"id": "x"}]}).status_code == 422
+
+    backup = client.get("/api/backup").content
+    manifest = json.loads(zipfile.ZipFile(io.BytesIO(backup)).read("library.json"))
+    assert len(manifest["docs"]) == 2
+    client.post("/api/library/clear")
+    assert client.get("/api/library").json()["docs"] == []
+    assert client.post("/api/restore", content=backup).status_code == 200
+    assert len(client.get("/api/library").json()["docs"]) == 2
+
+    assert client.post("/api/docs/delete", json={"keys": ["poi:k1a2b3"]}).json() == {"deleted": 1}
+    assert [d["key"] for d in client.get("/api/library").json()["docs"]] == ["poi_list:l1"]

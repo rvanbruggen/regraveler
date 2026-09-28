@@ -1,0 +1,324 @@
+// Places (points of interest): cafés, water, stations, photo spots, … Pure functions: reading
+// place lists from Google My Maps (KML/KMZ and CSV exports) and other CSV files, suggesting a
+// category, and finding the places along a route. Stored as documents (db.js) by service.js.
+
+import { closestOnSegment, cumulative, lineToMetric, toMetric } from "./geo.js";
+import { child, children, GpxError, parseXml, textOf } from "./gpx.js";
+import { readZip } from "./zip.js";
+
+export class PlacesError extends GpxError {}
+
+/**
+ * Built-in categories; imports and the user can add more (kept in the POI_CATEGORIES
+ * setting). `words`: what a layer or icon name has in it for the category to be suggested
+ * (Dutch, English, French; matched on word starts).
+ */
+export const DEFAULT_CATEGORIES = [
+  { id: "water", label: "Drinking water", symbol: "💧", color: "#1a73e8", words: ["water", "drinking", "drinkwater", "fontein", "fountain", "kraantje", "bron", "source", "fontaine"] },
+  { id: "toilet", label: "Toilet", symbol: "🚻", color: "#6d4c41", words: ["toilet", "wc", "restroom", "sanitair", "toilette"] },
+  { id: "cafe", label: "Café / bar", symbol: "☕", color: "#8e24aa", words: ["café", "cafe", "bar", "bars", "pub", "kroeg", "beer", "bier", "coffee", "koffie", "estaminet", "brasserie", "tavern", "taverne", "herberg"] },
+  { id: "food", label: "Restaurant / food", symbol: "🍴", color: "#e65100", words: ["restaurant", "food", "eten", "snack", "bakery", "bakker", "boulangerie", "pizza", "lunch", "fork"] },
+  { id: "frituur", label: "Frituur", symbol: "🍟", color: "#f9a825", words: ["frituur", "frit", "frites", "friet", "friterie", "fritkot", "frietkot", "snackbar"] },
+  { id: "bike", label: "Bike shop / repair", symbol: "🔧", color: "#2e7d32", words: ["bike", "bikes", "fiets", "bicycle", "velo", "vélo", "repair", "herstel", "cycling"] },
+  { id: "station", label: "Train station", symbol: "🚉", color: "#37474f", words: ["station", "train", "trein", "gare", "railway", "spoor"] },
+  { id: "sight", label: "Sight / museum", symbol: "🏛", color: "#c62828", words: ["museum", "musea", "sight", "sights", "bezienswaardig", "monument", "church", "kerk", "castle", "kasteel", "attraction", "landmark", "places to see"] },
+  { id: "photo", label: "Photo spot", symbol: "📷", color: "#00838f", words: ["photo", "foto", "view", "uitzicht", "viewpoint", "panorama", "camera"] },
+  { id: "shelter", label: "Shelter / picnic", symbol: "⛺", color: "#558b2f", words: ["shelter", "picnic", "picknick", "schuil", "bench"] },
+  { id: "lodging", label: "Hotel / lodging", symbol: "🛏", color: "#3949ab", words: ["hotel", "hotels", "b&b", "lodging", "camping", "hostel", "overnachten", "bed"] },
+  { id: "parking", label: "Parking", symbol: "🅿", color: "#546e7a", words: ["parking", "parkeren"] },
+  { id: "other", label: "Other", symbol: "📍", color: "#757575", words: [] },
+];
+
+// Colours for categories made from an import (a new layer name), in turn.
+export const EXTRA_COLORS = ["#ad1457", "#6a1b9a", "#00695c", "#9e9d24", "#ef6c00", "#4e342e", "#283593", "#0277bd"];
+
+const norm = (s) => String(s || "").toLowerCase().normalize("NFC");
+
+/** The category whose words appear in `text` (a layer name, an icon file name), or null. */
+export function matchCategory(text, categories = DEFAULT_CATEGORIES) {
+  const t = ` ${norm(text).replace(/[^\p{L}\p{N}&]+/gu, " ")} `;
+  for (const c of categories) {
+    for (const w of c.words || []) {
+      const word = norm(w).replace(/[^\p{L}\p{N}&]+/gu, " ").trim();
+      // Word starts: "kroegtijgers" matches "kroeg", "rebar" doesn't match "bar".
+      if (word && t.includes(` ${word}`)) return c.id;
+    }
+  }
+  return null;
+}
+
+/** A category id for a new category called `label`. */
+export function categoryId(label) {
+  const id = norm(label).normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return id.slice(0, 30) || "category";
+}
+
+// ------------------------------------------------------------------ KML / KMZ
+
+const stripHtml = (s) =>
+  s == null ? null : s.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim() || null;
+
+/** "lon,lat[,alt]" -> [lat, lon] or null. */
+function kmlPoint(text) {
+  const [lon, lat] = String(text || "").trim().split(/[\s]+/)[0].split(",").map(Number);
+  return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? [lat, lon] : null;
+}
+
+/**
+ * Read a KML document: {name, layers: [{name, places: [{name, description, lat, lon, icon}]}],
+ * skipped} with one layer per folder (places outside folders go in a layer named after the
+ * document). Only points are places; lines and areas are counted in `skipped`.
+ */
+export function parseKml(text) {
+  if (typeof text !== "string") text = new TextDecoder("utf-8").decode(text);
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  const kml = child(parseXml(text), "kml");
+  if (!kml) throw new PlacesError("Not a KML file (no <kml> element)");
+  const doc = child(kml, "document") || kml;
+  const docName = textOf(doc, "name");
+
+  // Icon of each style; a StyleMap points to the style of its "normal" state.
+  const icons = new Map(), maps = new Map();
+  const walkStyles = (node) => {
+    for (const s of children(node, "style")) {
+      const icon = child(child(s, "iconstyle") || { children: [] }, "icon");
+      icons.set(s.attrs.id, icon ? textOf(icon, "href") : null);
+    }
+    for (const m of children(node, "stylemap")) {
+      const normal = children(m, "pair").find((p) => textOf(p, "key") === "normal");
+      if (normal) maps.set(m.attrs.id, (textOf(normal, "styleurl") || "").replace(/^#/, ""));
+    }
+    for (const f of children(node, "folder")) walkStyles(f);
+  };
+  walkStyles(doc);
+  const iconOf = (styleUrl) => {
+    let id = (styleUrl || "").replace(/^#/, "");
+    if (maps.has(id)) id = maps.get(id);
+    return icons.get(id) ?? (id || null);
+  };
+
+  const layers = [];
+  let skipped = 0;
+  const placesIn = (node) => {
+    const out = [];
+    for (const pm of children(node, "placemark")) {
+      const point = child(pm, "point");
+      const ll = point && kmlPoint(textOf(point, "coordinates"));
+      if (!ll) {
+        skipped++;
+        continue;
+      }
+      out.push({
+        name: textOf(pm, "name") || "Unnamed place",
+        description: stripHtml(textOf(pm, "description")),
+        lat: ll[0],
+        lon: ll[1],
+        icon: iconOf(textOf(pm, "styleurl")),
+      });
+    }
+    return out;
+  };
+  const top = placesIn(doc);
+  if (top.length) layers.push({ name: docName || "Places", places: top });
+  const walkFolders = (node, prefix) => {
+    for (const f of children(node, "folder")) {
+      const name = [prefix, textOf(f, "name") || "Folder"].filter(Boolean).join(" / ");
+      const places = placesIn(f);
+      if (places.length) layers.push({ name, places });
+      walkFolders(f, name);
+    }
+  };
+  walkFolders(doc, null);
+  if (!layers.length) throw new PlacesError("No places (points) in this file");
+  return { name: docName, layers, skipped };
+}
+
+/** Read a KMZ file (a zip with a KML document inside). */
+export async function parseKmz(bytes) {
+  const entries = await readZip(bytes);
+  const kml = entries.find((e) => e.name.toLowerCase() === "doc.kml") || entries.find((e) => /\.kml$/i.test(e.name));
+  if (!kml) throw new PlacesError("No KML document in this KMZ file");
+  return parseKml(kml.data);
+}
+
+// ------------------------------------------------------------------ CSV
+
+/** Split CSV text into rows of fields (quotes, doubled quotes, newlines in quotes). */
+export function parseCsv(text, sep = null) {
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  if (!sep) {
+    const first = text.slice(0, text.search(/\r?\n|$/));
+    const count = (c) => first.split(c).length - 1;
+    sep = count(";") > count(",") ? ";" : count("\t") > count(",") ? "\t" : ",";
+  }
+  const rows = [];
+  let row = [], field = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"' && field === "") quoted = true;
+    else if (c === sep) {
+      row.push(field);
+      field = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field);
+      if (row.some((f) => f.trim() !== "")) rows.push(row);
+      row = [];
+      field = "";
+    } else field += c;
+  }
+  row.push(field);
+  if (row.some((f) => f.trim() !== "")) rows.push(row);
+  return { rows, sep };
+}
+
+const HEADERS = {
+  name: ["name", "naam", "nom", "title", "titel", "place", "plaats"],
+  lat: ["lat", "latitude", "breedte", "breedtegraad", "y"],
+  lon: ["lon", "lng", "long", "longitude", "lengte", "lengtegraad", "x"],
+  latlon: ["latlon", "lat,lon", "lat lon", "coordinates", "coördinaten", "coordinaten", "location", "locatie", "gps"],
+  wkt: ["wkt", "geometry", "geometrie"],
+  category: ["category", "categorie", "type", "soort", "kind", "catégorie"],
+  notes: ["notes", "note", "description", "beschrijving", "omschrijving", "notities", "opmerking", "desc"],
+  url: ["url", "link", "website", "web", "photos", "foto's", "album"],
+};
+
+const num = (s, decimalComma) => {
+  s = String(s ?? "").trim();
+  if (decimalComma) s = s.replace(",", ".");
+  return s === "" ? NaN : Number(s);
+};
+
+/**
+ * Read places from CSV: a Google My Maps layer export (WKT "POINT (lon lat)", name,
+ * description) or any table with name and lat/lon (or "lat, lon" in one column) columns,
+ * optionally category/type, notes/description and url/link. `filename` gives the list and
+ * layer names ("Map name - Layer.csv" from My Maps). Returns the same shape as parseKml.
+ */
+export function parsePlacesCsv(text, filename = "places.csv") {
+  if (typeof text !== "string") text = new TextDecoder("utf-8").decode(text);
+  const { rows, sep } = parseCsv(text);
+  if (rows.length < 2) throw new PlacesError("No places in this CSV file (it needs a header row and at least one place)");
+  const header = rows[0].map((h) => norm(h).trim());
+  const col = (key) => header.findIndex((h) => HEADERS[key].includes(h));
+  const c = Object.fromEntries(Object.keys(HEADERS).map((k) => [k, col(k)]));
+  if (c.name < 0) c.name = header.findIndex((h, i) => !Object.values(c).includes(i)); // first unknown column
+  if (c.wkt < 0 && c.latlon < 0 && (c.lat < 0 || c.lon < 0)) {
+    throw new PlacesError("No coordinates found: the CSV needs lat and lon columns (or WKT, or one \"lat, lon\" column)");
+  }
+  const decimalComma = sep === ";";
+  const places = [];
+  let skipped = 0;
+  for (const raw of rows.slice(1)) {
+    let r = raw;
+    // An unquoted comma inside a name (My Maps writes `Poppemieke, Café`): too many fields.
+    // Join the extra ones back into the name column.
+    if (r.length > header.length && c.name >= 0) {
+      const extra = r.length - header.length;
+      r = [...r.slice(0, c.name), r.slice(c.name, c.name + extra + 1).join(sep), ...r.slice(c.name + extra + 1)];
+    }
+    let lat = NaN, lon = NaN;
+    if (c.wkt >= 0) {
+      const m = /POINT\s*Z?\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)/i.exec(r[c.wkt] || "");
+      if (m) [lon, lat] = [Number(m[1]), Number(m[2])];
+    } else if (c.latlon >= 0) {
+      const parts = String(r[c.latlon] || "").split(/[;,\s]+/).filter(Boolean);
+      [lat, lon] = [Number(parts[0]), Number(parts[1])];
+    } else {
+      lat = num(r[c.lat], decimalComma);
+      lon = num(r[c.lon], decimalComma);
+    }
+    if (!(Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180)) {
+      skipped++;
+      continue;
+    }
+    const text = (k) => (c[k] >= 0 ? String(r[c[k]] ?? "").trim() || null : null);
+    places.push({
+      name: text("name") || "Unnamed place", description: text("notes"), url: text("url"),
+      category: text("category"), lat, lon, icon: null,
+    });
+  }
+  if (!places.length) throw new PlacesError("No places with valid coordinates in this CSV file");
+  // "Kroegtijgers en Fritleeuwen- Fritleeuwen.csv" (My Maps): map name, then layer name.
+  const stem = filename.replace(/\.csv$/i, "");
+  const m = /^(.*\S)\s*-\s+(\S.*)$/.exec(stem);
+  return { name: m ? m[1] : stem, layers: [{ name: m ? m[2] : stem, places }], skipped };
+}
+
+/** Read a places file by its name: .kml, .kmz or .csv. */
+export async function readPlacesFile(bytes, filename) {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".kmz")) return parseKmz(bytes);
+  if (lower.endsWith(".kml")) return parseKml(bytes);
+  if (lower.endsWith(".csv") || lower.endsWith(".txt")) return parsePlacesCsv(bytes, filename);
+  throw new PlacesError("Places can be imported from KML, KMZ (Google My Maps) or CSV files");
+}
+
+export const isPlacesFileName = (name) => /\.(kml|kmz|csv)$/i.test(name);
+
+/**
+ * Suggested category for one place of a layer: its own category column (CSV), its icon, the
+ * layer's name; null when nothing matches (the page then offers a new category named after
+ * the layer).
+ */
+export function suggestCategory(place, layerName, categories = DEFAULT_CATEGORIES) {
+  if (place.category) {
+    const byLabel = categories.find((c) => norm(c.label) === norm(place.category) || c.id === norm(place.category));
+    if (byLabel) return byLabel.id;
+    const m = matchCategory(place.category, categories);
+    if (m) return m;
+  }
+  const iconName = place.icon ? place.icon.split("/").pop().replace(/\.\w+$/, "").replace(/[-_]/g, " ") : "";
+  return matchCategory(iconName, categories) || matchCategory(layerName, categories);
+}
+
+// ------------------------------------------------------------------ along a route
+
+/**
+ * Places within `maxM` metres of a route: [{place, km, off_m}] in riding order. `km` is
+ * where along the route it is (scaled to the route's own distance), `off_m` how far from
+ * the route. A place passed twice (out and back) is listed once, where it is nearest.
+ */
+export function placesAlong(geometry, distanceKm, places, maxM = 200) {
+  if (!geometry || geometry.length < 2 || !places.length) return [];
+  const xy = lineToMetric(geometry);
+  const cum = cumulative(xy);
+  const total = cum[cum.length - 1] || 1;
+  const scale = (distanceKm * 1000) / total;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of xy) {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  const out = [];
+  for (const place of places) {
+    const [px, py] = toMetric(place.lat, place.lon);
+    if (px < minX - maxM || px > maxX + maxM || py < minY - maxM || py > maxY + maxM) continue;
+    let best = Infinity, at = 0;
+    for (let i = 0; i < xy.length - 1; i++) {
+      const c = closestOnSegment(px, py, xy[i][0], xy[i][1], xy[i + 1][0], xy[i + 1][1]);
+      if (c.d < best) {
+        best = c.d;
+        at = cum[i] + c.t * (cum[i + 1] - cum[i]);
+      }
+    }
+    if (best <= maxM) out.push({ place, km: Math.round((at * scale) / 100) / 10, off_m: Math.round(best) });
+  }
+  return out.sort((a, b) => a.km - b.km);
+}
+
+/** Is there already a place with this name within `withinM` metres (for re-imports)? */
+export function isDuplicatePlace(p, existing, withinM = 25) {
+  const [x, y] = toMetric(p.lat, p.lon);
+  return existing.some((e) => {
+    if (norm(e.name).trim() !== norm(p.name).trim()) return false;
+    const [ex, ey] = toMetric(e.lat, e.lon);
+    return Math.hypot(ex - x, ey - y) <= withinM;
+  });
+}

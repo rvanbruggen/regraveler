@@ -119,6 +119,22 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   and Esri satellite, with the signposted hiking and cycling routes of Waymarked Trails as
   optional overlays. All are free and need no key; the choice applies to every map and is
   remembered in this browser. The list is `MAP_STYLES` / `MAP_OVERLAYS` in `web/js/config.js`.
+- **Places (POIs):** cafés, water taps, stations, photo spots, … on every map (layer button ›
+  *Places*) and listed along each route in its panel ("Places along this route": the km where
+  you pass it and how far off the route, within 200 m). The **Places** tab:
+  - **Import** a Google My Maps map (*Export to KML/KMZ*: each layer is offered with a suggested
+    category, from the layer's name or its icon, e.g. a Transport layer split into stations and
+    parkings) or a layer's CSV export, or any CSV file with name and lat/lon columns (`;` and
+    decimal commas work; optional category/type, notes and link columns). Pick a category per
+    layer or let a layer become a new category; a layer of one place that is nothing known
+    (often a home address) is left out unless you tick it. Importing the same file again adds
+    only new places.
+  - **Lists** (one per imported map, plus *My marks*): show or hide a whole list, or remove it.
+  - **Categories:** built-in ones (drinking water, toilet, café / bar, restaurant, frituur,
+    bike shop, train station, sight, photo spot, shelter, hotel, parking, other) and your own;
+    change the symbol, name and colour.
+  - **＋ Place** on the Map: click it, then on the map, and fill in the name, category, notes
+    and a link (a photo album, a website). Click a place on any map to see or edit it.
 - **Routes near each other:** tick *Highlight routes near each other* and set a distance
   (default 100 m). Routes that overlap or come within that distance of another route stay
   coloured, the rest fade out. Shared stretches are drawn in yellow, and for near misses a
@@ -540,6 +556,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     service.js       everything the app does: import, filters, combine, duplicates, names, ...
     db.js            the library in memory, stored through a backend: IndexedDB (browser) ...
     remote.js        ... or the rerouter server's storage API (self-hosted)
+    poi.js           places: KML/KMZ and CSV reading, category suggestions, places along a route
     gpx.js           GPX reading and writing (a small XML reader, also runs in Node and workers)
     tcx.js, fit.js   TCX and FIT reading (own FIT decoder: byte orders, developer fields, compressed timestamps)
     trackfile.js     any route file: recognises GPX / TCX / FIT from the content, unpacks .gz

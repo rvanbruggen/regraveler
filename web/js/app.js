@@ -5,6 +5,7 @@ import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from 
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
+import { isPlacesFileName, readPlacesFile, suggestCategory } from "./poi.js";
 import { drawProfile, nearestIndex } from "./profile.js";
 import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
@@ -33,6 +34,9 @@ function el(tag, attrs = {}, ...children) {
   }
   return node;
 }
+
+/** Replace a node's children, skipping null / false ones (el() does that for its own children). */
+const setChildren = (node, ...kids) => node.replaceChildren(...kids.flat().filter((c) => c !== null && c !== undefined && c !== false));
 
 /** Let the browser paint (a status line) before a long computation starts. */
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
@@ -93,7 +97,7 @@ let currentView = "library";
 // Views reached through the Utilities menu.
 const UTILITIES = ["combine", "restart", "weather", "link", "duplicates", "data"];
 // Views a link (URL hash) can open.
-const LINKABLE_VIEWS = ["library", "map", "import", ...UTILITIES];
+const LINKABLE_VIEWS = ["library", "map", "places", "import", ...UTILITIES];
 
 function showView(name) {
   currentView = name;
@@ -101,7 +105,7 @@ function showView(name) {
   $("#utilities .menu-button").classList.toggle("active", UTILITIES.includes(name));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import screen and the utilities.
-  const noFilters = ["import", "rename", ...UTILITIES].includes(name);
+  const noFilters = ["import", "rename", "places", ...UTILITIES].includes(name);
   $("#filters").hidden = noFilters;
   updateIdsNote();
   if (noFilters) closeDetail();
@@ -111,6 +115,7 @@ function showView(name) {
   if (name === "weather") showWeather();
   if (name === "duplicates") loadDuplicates();
   if (name === "data") showData();
+  if (name === "places") renderPlaces();
   updateHash();
 }
 $$("nav [data-view]").forEach((b) =>
@@ -266,6 +271,9 @@ async function refresh() {
   const jobs = [loadRoutes()];
   if (currentView === "map") jobs.push((overview.loading = loadMap()));
   await Promise.all(jobs);
+  // The library may have been reloaded (restore, clear, a set added): its places too.
+  for (const e of layeredMaps) drawPlaces(e);
+  if (currentView === "places") renderPlaces();
 }
 
 async function loadRoutes() {
@@ -596,7 +604,16 @@ function addMapLayers(map) {
   for (const def of config.MAP_STYLES) entry.styles[def.name] = tileLayer(def);
   for (const def of config.MAP_OVERLAYS) entry.overlays[def.name] = tileLayer(def);
   applyMapChoice(entry, readMapChoice());
-  L.control.layers(entry.styles, entry.overlays, { position: "topright" }).addTo(map);
+  const control = L.control.layers(entry.styles, entry.overlays, { position: "topright" }).addTo(map);
+  // Your places (POIs), on every map; shown or hidden on all maps at once.
+  entry.places = L.layerGroup();
+  control.addOverlay(entry.places, "Places");
+  if (placesShown()) entry.places.addTo(map);
+  drawPlaces(entry);
+  map.on("overlayadd overlayremove", (e) => {
+    if (e.layer !== entry.places || entry.applying) return;
+    setPlacesShown(e.type === "overlayadd");
+  });
   const changed = () => {
     if (entry.applying) return;
     const choice = {
@@ -700,6 +717,7 @@ async function openDetail(id) {
   drawDetailMap(r, true);
 
   loadProfile(r);
+  loadPlacesAlong(r);
   loadSimilar(r.id);
 }
 
@@ -842,6 +860,414 @@ function onDetailMapMove(e) {
   });
 }
 
+// ------------------------------------------------------------------ places (POIs)
+
+const PLACES_HIDDEN_KEY = "rerouter.hidePlaces";
+const OTHER_CATEGORY = { id: "other", label: "Other", symbol: "📍", color: "#757575" };
+
+function placesShown() {
+  try {
+    return localStorage.getItem(PLACES_HIDDEN_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
+function setPlacesShown(on) {
+  try {
+    if (on) localStorage.removeItem(PLACES_HIDDEN_KEY);
+    else localStorage.setItem(PLACES_HIDDEN_KEY, "1");
+  } catch { /* private window: only for this page */ }
+  for (const e of layeredMaps) {
+    if (!e.places || e.map.hasLayer(e.places) === on) continue;
+    e.applying = true;
+    if (on) e.places.addTo(e.map);
+    else e.places.remove();
+    e.applying = false;
+  }
+}
+
+const categoryOf = (id, cats = svc.placeCategories()) => cats.find((c) => c.id === id) || OTHER_CATEGORY;
+const safeUrl = (u) => (u && /^https?:\/\//i.test(u) ? u : null);
+const placeSymbol = (cat) => el("span", { class: "poi-sym", style: `background:${cat.color}` }, cat.symbol);
+
+let editPlaceNext = null; // a place just added on the map opens in its editor
+
+function drawPlaces(entry) {
+  if (!entry.places) return;
+  entry.places.clearLayers();
+  if (!svc.library()) return;
+  const cats = svc.placeCategories();
+  for (const p of svc.visiblePlaces()) {
+    const cat = categoryOf(p.category, cats);
+    const icon = L.divIcon({
+      className: "poi-icon", html: el("span", { style: `background:${cat.color}` }, cat.symbol),
+      iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -11],
+    });
+    const marker = L.marker([p.lat, p.lon], { icon, title: p.name, riseOnHover: true });
+    marker.placeId = p.id;
+    marker.bindPopup(() => placePopup(p.id, marker));
+    entry.places.addLayer(marker);
+  }
+}
+
+/** Redraw the places everywhere after a change. */
+function refreshPlaces() {
+  for (const e of layeredMaps) drawPlaces(e);
+  if (currentView === "places") renderPlaces();
+  if (detailRoute && !detail.hidden) loadPlacesAlong(detailRoute);
+}
+
+/** The popup of a place: what it is, and an editor. */
+function placePopup(id, marker) {
+  const box = el("div", { class: "poi-popup" });
+  // Buttons here replace the popup's content while they are clicked; the click must not reach
+  // the map, which would take it (no longer inside the popup) for a click on the map and close it.
+  const inPopup = (fn) => (e) => { e.stopPropagation(); fn(); };
+  const p = svc.place(id);
+  if (!p) return el("div", {}, "This place was removed.");
+  const show = () => {
+    const cat = categoryOf(p.category);
+    const list = svc.library().getDoc("poi_list", p.list_id);
+    const url = safeUrl(p.url);
+    setChildren(box, 
+      el("strong", {}, p.name),
+      el("div", { class: "small muted" }, placeSymbol(cat), ` ${cat.label}`, list ? ` · ${list.name}` : ""),
+      p.notes ? el("div", { class: "small", style: "white-space:pre-line;margin-top:4px" }, p.notes) : null,
+      url ? el("div", { class: "small" }, el("a", { href: url, target: "_blank", rel: "noopener" }, "link ↗")) : null,
+      el("div", { class: "actions" }, el("button", { type: "button", class: "secondary", onclick: inPopup(edit) }, "Edit")),
+    );
+  };
+  const edit = () => {
+    const cats = svc.placeCategories();
+    const form = el("form", {},
+      el("input", { name: "name", value: p.name, required: true, "aria-label": "Name" }),
+      el("select", { name: "category", "aria-label": "Category" },
+        cats.map((c) => el("option", { value: c.id, selected: c.id === p.category }, `${c.symbol} ${c.label}`))),
+      el("textarea", { name: "notes", rows: 3, placeholder: "notes" }, p.notes || ""),
+      el("input", { name: "url", type: "url", value: p.url || "", placeholder: "link (photo album, website)" }),
+      el("div", { class: "actions" },
+        el("button", { type: "submit" }, "Save"),
+        el("button", { type: "button", class: "secondary", onclick: inPopup(show) }, "Cancel"),
+        el("button", {
+          type: "button", class: "danger",
+          onclick: async () => {
+            if (!confirm(`Remove the place "${p.name}"?`)) return;
+            marker.closePopup();
+            await svc.deletePlaces([p.id]);
+            refreshPlaces();
+          },
+        }, "Remove")));
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = form.elements;
+      await svc.updatePlace(p.id, { name: f.name.value, category: f.category.value, notes: f.notes.value, url: f.url.value });
+      marker.closePopup();
+      refreshPlaces();
+    });
+    setChildren(box, form);
+    setTimeout(() => form.elements.name.select(), 0);
+  };
+  if (editPlaceNext === id) {
+    editPlaceNext = null;
+    edit();
+  } else show();
+  return box;
+}
+
+// Adding a place: the ＋ Place button on the map, then a click where it is.
+let addingPlace = null; // {map, button, handler}
+
+function addPlaceControl(map) {
+  const Control = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const b = el("button", { type: "button", class: "poi-add", title: "Add a place: click this, then on the map" }, "＋ Place");
+      L.DomEvent.disableClickPropagation(b);
+      b.addEventListener("click", () => (addingPlace ? stopAddingPlace() : startAddingPlace(map, b)));
+      return b;
+    },
+  });
+  new Control().addTo(map);
+}
+
+function startAddingPlace(map, button) {
+  const handler = async (e) => {
+    stopAddingPlace();
+    const p = await svc.addPlace({ lat: e.latlng.lat, lon: e.latlng.lng });
+    setPlacesShown(true);
+    editPlaceNext = p.id;
+    refreshPlaces();
+    const entry = layeredMaps.find((x) => x.map === map);
+    entry?.places.eachLayer((m) => m.placeId === p.id && m.openPopup());
+  };
+  addingPlace = { map, button, handler };
+  button.classList.add("active");
+  button.textContent = "Click on the map… (Esc)";
+  map.getContainer().classList.add("adding-place");
+  map.on("click", handler);
+}
+
+function stopAddingPlace() {
+  if (!addingPlace) return;
+  const { map, button, handler } = addingPlace;
+  addingPlace = null;
+  map.off("click", handler);
+  button.classList.remove("active");
+  button.textContent = "＋ Place";
+  map.getContainer().classList.remove("adding-place");
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") stopAddingPlace(); });
+
+/** The places along the route in the route panel. */
+function loadPlacesAlong(r) {
+  const ul = $("#d-places");
+  let along = [];
+  try {
+    along = svc.placesAlongRoute(r.id);
+  } catch (err) {
+    setChildren(ul, el("li", {}, `error: ${err.message}`));
+    return;
+  }
+  const cats = svc.placeCategories();
+  setChildren(ul, 
+    ...(along.length
+      ? along.map(({ place: p, km, off_m }) =>
+          el("li", {},
+            el("a", {
+              title: "Show on the map",
+              onclick: () => {
+                const m = ensureMap();
+                m.setView([p.lat, p.lon], Math.max(m.getZoom(), 15));
+                layeredMaps.find((x) => x.map === m)?.places.eachLayer((mk) => mk.placeId === p.id && mk.openPopup());
+              },
+            }, `km ${km.toFixed(1)} · `, placeSymbol(categoryOf(p.category, cats)), ` ${p.name}`),
+            off_m > 30 ? el("span", { class: "small" }, ` (${off_m} m from the route)`) : null))
+      : [el("li", {}, svc.allPlaces().length
+          ? `none within ${config.PLACES_NEAR_ROUTE_M} m`
+          : "none yet (import or add places on the Places tab)")])
+  );
+}
+
+// ---- the Places screen
+
+let placesImport = null; // {parsed, filename} while the import preview is shown
+
+async function openPlacesFile(file) {
+  const status = $("#places-status");
+  status.textContent = `reading ${file.name}…`;
+  try {
+    const parsed = await readPlacesFile(new Uint8Array(await file.arrayBuffer()), file.name);
+    placesImport = { parsed, filename: file.name };
+    status.textContent = "";
+    renderPlacesPreview();
+  } catch (err) {
+    status.textContent = `${file.name}: ${err.message}`;
+  }
+}
+
+function renderPlacesPreview() {
+  const box = $("#places-preview");
+  if (!placesImport) {
+    box.hidden = true;
+    setChildren(box, );
+    return;
+  }
+  const { parsed, filename } = placesImport;
+  const cats = svc.placeCategories();
+  const total = parsed.layers.reduce((n, l) => n + l.places.length, 0);
+  const rows = parsed.layers.map((layer) => {
+    const sugg = {};
+    for (const p of layer.places) {
+      const id = suggestCategory(p, layer.name, cats);
+      const label = id ? categoryOf(id, cats).label : `new: ${layer.name}`;
+      sugg[label] = (sugg[label] || 0) + 1;
+    }
+    const summary = Object.entries(sugg).map(([k, n]) => (Object.keys(sugg).length > 1 ? `${n} ${k}` : k)).join(", ");
+    // A layer of one place that is nothing we know (often a home address): left out unless ticked.
+    const lonely = layer.places.length === 1 && !suggestCategory(layer.places[0], layer.name, cats);
+    return {
+      include: el("input", { type: "checkbox", checked: !lonely }),
+      category: el("select", {},
+        el("option", { value: "suggested" }, `suggested: ${summary}`),
+        el("option", { value: "new" }, `new category “${layer.name}”`),
+        cats.map((c) => el("option", { value: c.id }, `${c.symbol} ${c.label}`))),
+      layer, lonely,
+    };
+  });
+  const listName = el("input", { value: parsed.name || filename.replace(/\.\w+$/, ""), required: true });
+  box.hidden = false;
+  setChildren(box, 
+    el("h3", {}, `${filename}: ${total} place${total === 1 ? "" : "s"} in ${parsed.layers.length} layer${parsed.layers.length === 1 ? "" : "s"}`),
+    parsed.skipped ? el("p", { class: "small muted" }, `${parsed.skipped} line(s), area(s) or rows without coordinates left out: only points are places.`) : null,
+    el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "Import"), el("th", {}, "Layer"), el("th", {}, "Places"), el("th", {}, "Category"))),
+      el("tbody", {}, rows.map((r) => el("tr", {},
+        el("td", {}, r.include),
+        el("td", {}, r.layer.name, r.lonely ? el("div", { class: "small muted" }, "one place, no known category (a home address?): left out unless you tick it") : null),
+        el("td", {}, String(r.layer.places.length)),
+        el("td", {}, r.category))))),
+    el("div", { class: "actions" },
+      el("label", {}, "Into the list ", listName),
+      el("button", {
+        type: "button",
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            const res = await svc.importPlaces(parsed, {
+              listName: listName.value, source: filename,
+              layers: rows.map((r) => ({ include: r.include.checked, category: r.category.value })),
+            });
+            $("#places-status").textContent = `Added ${res.added} place${res.added === 1 ? "" : "s"} to “${res.list.name}”` +
+              (res.duplicates ? ` (${res.duplicates} already there)` : "") + ".";
+            placesImport = null;
+            renderPlacesPreview();
+            refreshPlaces();
+          } catch (err) {
+            $("#places-status").textContent = `error: ${err.message}`;
+            e.target.disabled = false;
+          }
+        },
+      }, "Import"),
+      el("button", { type: "button", class: "secondary", onclick: () => { placesImport = null; renderPlacesPreview(); } }, "Cancel")),
+  );
+}
+
+function renderPlaces() {
+  if (!svc.library()) return;
+  const cats = svc.placeCategories();
+  const lists = svc.placeLists();
+  const all = svc.allPlaces();
+  const countBy = (key) => all.reduce((m, p) => m.set(p[key], (m.get(p[key]) || 0) + 1), new Map());
+  const perList = countBy("list_id"), perCat = countBy("category");
+
+  $("#places-lists").replaceChildren(
+    el("thead", {}, el("tr", {}, el("th", {}, "List"), el("th", {}, "Places"), el("th", {}, "Shown"), el("th", {}, ""))),
+    el("tbody", {}, lists.length
+      ? lists.map((l) => el("tr", {},
+          el("td", {}, l.name, l.source ? el("div", { class: "small muted" }, l.source) : null),
+          el("td", {}, String(perList.get(l.id) || 0)),
+          el("td", {}, el("input", {
+            type: "checkbox", checked: l.visible !== false, title: "Show on the maps and along the routes",
+            onchange: async (e) => { await svc.setPlaceListVisible(l.id, e.target.checked); refreshPlaces(); },
+          })),
+          el("td", {}, el("a", {
+            class: "link small",
+            onclick: async () => {
+              if (!confirm(`Remove the list “${l.name}” and its ${perList.get(l.id) || 0} places?`)) return;
+              await svc.deletePlaceList(l.id);
+              refreshPlaces();
+            },
+          }, "remove"))))
+      : [el("tr", {}, el("td", { colspan: 4, class: "muted" }, "No places yet."))]));
+
+  const builtIn = (c) => ["water", "toilet", "cafe", "food", "frituur", "bike", "station", "sight", "photo", "shelter", "lodging", "parking", "other"].includes(c.id);
+  $("#places-cats").replaceChildren(
+    el("tbody", {}, cats.map((c) => el("tr", {},
+      el("td", {}, el("input", {
+        class: "symbol-input", value: c.symbol, maxlength: 4, title: "Symbol on the map",
+        onchange: async (e) => { await svc.saveCategory({ id: c.id, label: c.label, symbol: e.target.value.trim() || c.symbol }); refreshPlaces(); },
+      })),
+      el("td", {}, el("input", {
+        value: c.label, "aria-label": "Category name",
+        onchange: async (e) => { if (e.target.value.trim()) await svc.saveCategory({ id: c.id, label: e.target.value }); refreshPlaces(); },
+      })),
+      el("td", {}, el("input", {
+        type: "color", value: c.color, title: "Colour",
+        onchange: async (e) => { await svc.saveCategory({ id: c.id, label: c.label, color: e.target.value }); refreshPlaces(); },
+      })),
+      el("td", { class: "small muted" }, String(perCat.get(c.id) || 0)),
+      el("td", {}, !builtIn(c) && !perCat.get(c.id)
+        ? el("a", { class: "link small", onclick: async () => { await svc.deleteCategory(c.id); refreshPlaces(); } }, "remove")
+        : ""))))
+  );
+
+  // Filters keep their choice across redraws.
+  const catSel = $("#places-cat-filter"), listSel = $("#places-list-filter");
+  const keep = (sel, options) => {
+    const v = sel.value;
+    sel.replaceChildren(...options);
+    if ([...sel.options].some((o) => o.value === v)) sel.value = v;
+  };
+  keep(catSel, [el("option", { value: "" }, "all categories"),
+    ...cats.filter((c) => perCat.get(c.id)).map((c) => el("option", { value: c.id }, `${c.symbol} ${c.label} (${perCat.get(c.id)})`))]);
+  keep(listSel, [el("option", { value: "" }, "all lists"),
+    ...lists.map((l) => el("option", { value: l.id }, `${l.name} (${perList.get(l.id) || 0})`))]);
+  renderPlacesTable();
+}
+
+function renderPlacesTable() {
+  const cats = svc.placeCategories();
+  const q = $("#places-q").value.trim().toLowerCase();
+  const cat = $("#places-cat-filter").value, list = $("#places-list-filter").value;
+  const listName = new Map(svc.placeLists().map((l) => [l.id, l.name]));
+  const all = svc.allPlaces();
+  const shown = all.filter((p) =>
+    (!cat || p.category === cat) && (!list || p.list_id === list) &&
+    (!q || p.name.toLowerCase().includes(q) || (p.notes || "").toLowerCase().includes(q)));
+  $("#places-count").textContent = shown.length === all.length ? `(${all.length})` : `(${shown.length} of ${all.length})`;
+  const MAX = 500;
+  setChildren($("#places-table"), 
+    el("thead", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "Name"), el("th", {}, "Category"), el("th", {}, "List"), el("th", {}, ""))),
+    el("tbody", {}, shown.slice(0, MAX).map((p) => el("tr", {},
+      el("td", {}, placeSymbol(categoryOf(p.category, cats))),
+      el("td", {}, p.name, p.notes ? el("div", { class: "small muted" }, p.notes.length > 80 ? `${p.notes.slice(0, 80)}…` : p.notes) : null),
+      el("td", {}, el("select", {
+        "aria-label": "Category",
+        onchange: async (e) => { await svc.updatePlace(p.id, { category: e.target.value }); refreshPlaces(); },
+      }, cats.map((c) => el("option", { value: c.id, selected: c.id === p.category }, c.label)))),
+      el("td", { class: "small" }, listName.get(p.list_id) || ""),
+      el("td", {},
+        el("a", { class: "link small", onclick: () => showPlaceOnMap(p) }, "map"), " ",
+        el("a", {
+          class: "link small",
+          onclick: async () => { if (confirm(`Remove “${p.name}”?`)) { await svc.deletePlaces([p.id]); refreshPlaces(); } },
+        }, "remove"))))),
+    shown.length > MAX ? el("tfoot", {}, el("tr", {}, el("td", { colspan: 5, class: "muted small" }, `… and ${shown.length - MAX} more: narrow the search`))) : null,
+  );
+}
+
+/** Show a place on the Map (its list is shown then too). */
+async function showPlaceOnMap(p) {
+  const list = svc.library().getDoc("poi_list", p.list_id);
+  if (list && list.visible === false) await svc.setPlaceListVisible(list.id, true);
+  setPlacesShown(true);
+  showView("map");
+  await showOverview();
+  refreshPlaces();
+  overview.map.setView([p.lat, p.lon], 16);
+  layeredMaps.find((x) => x.map === overview.map)?.places.eachLayer((m) => m.placeId === p.id && m.openPopup());
+}
+
+for (const id of ["#places-q", "#places-cat-filter", "#places-list-filter"]) $(id).addEventListener("input", renderPlacesTable);
+$("#places-file").addEventListener("change", async (e) => {
+  if (e.target.files[0]) await openPlacesFile(e.target.files[0]);
+  e.target.value = "";
+});
+{
+  const drop = $("#places-drop");
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    const file = [...e.dataTransfer.files].find((f) => isPlacesFileName(f.name));
+    if (file) await openPlacesFile(file);
+    else $("#places-status").textContent = "Drop a KML, KMZ or CSV file.";
+  });
+}
+$("#places-cat-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target.elements;
+  try {
+    await svc.saveCategory({ label: f.label.value, symbol: f.symbol.value.trim() || null, color: f.color.value });
+    e.target.reset();
+    refreshPlaces();
+  } catch (err) {
+    $("#places-status").textContent = `error: ${err.message}`;
+  }
+});
+
 async function loadSimilar(id) {
   const list = $("#d-similar");
   list.replaceChildren(el("li", {}, "checking…"));
@@ -944,6 +1370,11 @@ async function addFiles(fileList) {
     const lower = file.name.toLowerCase();
     try {
       if (isTrackFileName(lower)) add(file.name, path, new Uint8Array(await file.arrayBuffer()), item.diskPath || null);
+      else if (isPlacesFileName(lower) && !item.diskPath) {
+        // A list of places (KML, KMZ, CSV): that's for the Places screen.
+        showView("places");
+        await openPlacesFile(file);
+      }
       else if (lower.endsWith(".zip")) {
         for (const e of await readZip(await file.arrayBuffer())) {
           if (!isTrackFileName(e.name) || e.name.split("/").some((x) => x.startsWith("__MACOSX") || x.startsWith("._"))) continue;
@@ -1298,7 +1729,8 @@ function showOverview() {
     overview.routeLayer = L.layerGroup().addTo(m);
     overview.proxLayer = L.layerGroup().addTo(m);
     overview.sharedRenderer = L.canvas({ pane: "shared" });
-    m.on("click", () => { clearFocus(); });
+    m.on("click", () => { if (!addingPlace) clearFocus(); });
+    addPlaceControl(m);
     overview.map = m;
   }
   // The container was hidden; let Leaflet measure it again.

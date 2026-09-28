@@ -386,3 +386,34 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
   #view-weather .map-side { width: auto; max-height: none; }
   #weather-map { flex: none; height: 65vh; }
 }
+
+/* Places (POIs) */
+.dropzone-small { border: 2px dashed var(--border); border-radius: 6px; padding: 12px 16px; margin: 8px 0 12px; background: var(--panel); }
+.dropzone-small.over { border-color: var(--accent); background: var(--accent-soft); }
+.places-grid { display: grid; grid-template-columns: minmax(260px, 1fr) 2fr; gap: 24px; align-items: start; }
+@media (max-width: 800px) { .places-grid { grid-template-columns: 1fr; } }
+.places-grid td { white-space: normal; }
+.table-wrap { overflow-x: auto; }
+#view-places .actions input[type="search"] { flex: 1 1 180px; width: auto; }
+#view-places .actions select { flex: 0 1 auto; width: auto; }
+#places-cat-form input { width: auto; }
+#places-cat-form input[name="label"] { flex: 1 1 120px; }
+.symbol-input { width: 3.5em; text-align: center; }
+#places-preview table { margin: 8px 0; }
+#places-preview td { white-space: normal; }
+.poi-icon span {
+  display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  font-size: 12px; line-height: 1; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.poi-sym { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; vertical-align: middle; }
+.poi-popup { min-width: 180px; }
+.poi-popup .actions { margin-top: 6px; }
+.poi-popup form { display: flex; flex-direction: column; gap: 4px; }
+.poi-popup form input, .poi-popup form select, .poi-popup form textarea { width: 100%; box-sizing: border-box; }
+.poi-add { background: #fff; color: var(--text); border: 2px solid rgba(0, 0, 0, 0.2); border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.poi-add.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.adding-place, .adding-place .leaflet-interactive { cursor: crosshair !important; }
+.places-along li { margin: 3px 0; }
+.places-along a { color: var(--text); cursor: pointer; }
+.places-grid input[type="color"], #places-cat-form input[type="color"] { width: 34px; height: 26px; padding: 1px 2px; flex: none; }
+#places-cats input:not([type="color"]):not(.symbol-input) { min-width: 110px; }

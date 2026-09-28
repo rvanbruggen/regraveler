@@ -8,13 +8,19 @@
 //   files     {hash, name, data}   the original GPX files (bytes), never modified (keyPath hash)
 //   ignored   {key: "a_b", a_id, b_id}   pairs marked "not duplicates" (keyPath key)
 //   settings  {key, value}
+//   docs      {key: "<kind>:<id>", kind, id, ...}   other documents: places (POIs) and their
+//             lists ("poi", "poi_list"), later collections; ids are made in the page
 //
 // Everything except the file texts is loaded into memory at start-up (hundreds of routes are
 // a few MB at most); writes go straight through to the backend.
 
 const DB_NAME = "rerouter";
-const DB_VERSION = 1;
-const STORES = { routes: "id", files: "hash", ignored: "key", settings: "key" };
+const DB_VERSION = 2; // 2: the docs store
+const STORES = { routes: "id", files: "hash", ignored: "key", settings: "key", docs: "key" };
+
+/** A new document id: short, unique enough for one library, no secure context needed. */
+export const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+export const docKey = (kind, id) => `${kind}:${id}`;
 
 const req = (r) =>
   new Promise((resolve, reject) => {
@@ -111,6 +117,7 @@ export class Library {
     this.routes = new Map(); // id -> route
     this.ignored = new Set(); // "a_b" with a < b
     this.settings = {};
+    this.docs = new Map(); // "kind:id" -> document
   }
 
   static async open(backend = null) {
@@ -120,12 +127,13 @@ export class Library {
   }
 
   async reload() {
-    const [routes, ignored, settings] = this.backend.loadAll
+    const [routes, ignored, settings, docs = []] = this.backend.loadAll
       ? await this.backend.loadAll()
-      : await Promise.all([this.backend.all("routes"), this.backend.all("ignored"), this.backend.all("settings")]);
+      : await Promise.all(["routes", "ignored", "settings", "docs"].map((s) => this.backend.all(s)));
     this.routes = new Map(routes.map((r) => [r.id, r]));
     this.ignored = new Set(ignored.map((r) => r.key));
     this.settings = Object.fromEntries(settings.map((s) => [s.key, s.value]));
+    this.docs = new Map(docs.map((d) => [d.key, d]));
   }
 
   all() {
@@ -227,18 +235,48 @@ export class Library {
     await this.backend.put("settings", [{ key, value }]);
   }
 
+  // Other documents ({kind, id, ...}): places and their lists.
+  docsOf(kind) {
+    return [...this.docs.values()].filter((d) => d.kind === kind);
+  }
+  getDoc(kind, id) {
+    return this.docs.get(docKey(kind, id)) || null;
+  }
+  /** Save new or changed documents (each needs a kind; new ones get an id). */
+  async saveDocs(docs) {
+    if (!docs.length) return docs;
+    const now = new Date().toISOString();
+    for (const d of docs) {
+      if (!d.kind) throw new Error("A document needs a kind");
+      d.id ??= newId();
+      d.key = docKey(d.kind, d.id);
+      d.updated_at = now;
+    }
+    await this.backend.put("docs", docs.map((d) => ({ ...d })));
+    for (const d of docs) this.docs.set(d.key, d);
+    return docs;
+  }
+  async deleteDocs(docs) {
+    const keys = docs.map((d) => (typeof d === "string" ? d : d.key)).filter((k) => this.docs.has(k));
+    if (!keys.length) return 0;
+    keys.forEach((k) => this.docs.delete(k));
+    await this.backend.delete("docs", keys);
+    return keys.length;
+  }
+
   /** Everything, for a backup. */
   async dump() {
     return {
       routes: this.all(),
       ignored: [...this.ignored],
       settings: this.settings,
+      docs: [...this.docs.values()],
       files: await this.allFiles(),
     };
   }
 
   /** Replace everything with a backup's contents. */
-  async restore({ routes = [], ignored = [], settings = {}, files = [] }) {
+  async restore({ routes = [], ignored = [], settings = {}, files = [], docs = [] }) {
     await this.backend.clear();
     if (files.length) await this.backend.put("files", files);
     if (routes.length) await this.backend.put("routes", routes);
@@ -250,6 +288,7 @@ export class Library {
     }
     const entries = Object.entries(settings);
     if (entries.length) await this.backend.put("settings", entries.map(([key, value]) => ({ key, value })));
+    if (docs.length) await this.backend.put("docs", docs.map((d) => ({ ...d, key: docKey(d.kind, d.id) })));
     await this.reload();
   }
 

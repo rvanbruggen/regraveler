@@ -169,6 +169,21 @@ def put_settings(body: SettingsIn, session: SessionDep):
     return {"ok": True}
 
 
+class DocsIn(BaseModel):
+    docs: list[dict]
+
+
+@app.put("/api/docs")
+def put_docs(body: DocsIn, session: SessionDep):
+    """Save documents (places, place lists, …): {kind, id, ...} each."""
+    return {"saved": store.put_docs(session, body.docs)}
+
+
+@app.post("/api/docs/delete")
+def delete_docs(body: KeysIn, session: SessionDep):
+    return {"deleted": store.delete_docs(session, body.keys)}
+
+
 @app.post("/api/library/clear")
 def clear(session: SessionDep):
     """Remove every route from the library (the GPX files stay on disk)."""
