@@ -132,6 +132,7 @@ function ll([lat, lon]) {
 beforeEach(async () => {
   svc.setLibrary(await Library.open(new MemoryBackend()));
   places.setPlacesLoader(async () => [], []);
+  places.setAdminLoader(async () => ({ regions: {}, provinces: {} })); // no region names in these tests
   config.AUTO_RENAME_ON_IMPORT = false;
   config.SURFACE_AUTO_ESTIMATE = false;
 });

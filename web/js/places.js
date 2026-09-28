@@ -60,11 +60,12 @@ async function loadIndex() {
 function prepare(records) {
   const n = records.length;
   const t = {
-    names: new Array(n), codes: new Array(n), kinds: new Uint8Array(n),
+    names: new Array(n), codes: new Array(n), kinds: new Uint8Array(n), admin: new Array(n),
     x: new Float64Array(n), y: new Float64Array(n), population: new Float64Array(n), notability: new Float64Array(n),
     order: new Float64Array(n),
   };
-  records.forEach(([name, code, lat, lon, pop, notab, order], i) => {
+  records.forEach(([name, code, lat, lon, pop, notab, order, admin], i) => {
+    t.admin[i] = admin || null; // province code of a town (tools/build_places.py), e.g. BE.VLG.VAN
     const [x, y] = toMetric(lat, lon);
     t.names[i] = name;
     t.codes[i] = code;
@@ -104,6 +105,51 @@ async function placesIn(minLat, minLon, maxLat, maxLon) {
     throw err instanceof PlacesUnavailable ? err : new PlacesUnavailable(`Could not load place data: ${err.message}`);
   }
   return loaded;
+}
+
+// ------------------------------------------------------------------ regions
+
+// data/places/admin.json: {regions: {code: name}, provinces: {code: {name, region}}}
+let adminLoader = async () => {
+  const res = await fetch(new URL("../data/places/admin.json", import.meta.url));
+  if (!res.ok) throw new PlacesUnavailable(`Could not load the region names (${res.status})`);
+  return res.json();
+};
+let admin = null; // Promise of admin.json
+
+/** Replace how the region names are loaded (tests). */
+export function setAdminLoader(fn) {
+  adminLoader = fn;
+  admin = null;
+}
+
+/**
+ * The region and province of a point: those of the nearest town (within `maxM`) that has
+ * them: {region, region_name, province, province_name}, or null (no town with a region near).
+ */
+export async function regionAt(lat, lon, maxM = 15000) {
+  admin ??= Promise.resolve(adminLoader()).catch((err) => {
+    admin = null;
+    throw err;
+  });
+  const names = await admin;
+  const d = maxM / 111000;
+  const loaded = await placesIn(lat - d, lon - d * 1.6, lat + d, lon + d * 1.6);
+  const [x, y] = toMetric(lat, lon);
+  let best = null, bestD = maxM;
+  for (const t of loaded) {
+    for (let i = 0; i < t.names.length; i++) {
+      if (!t.admin[i]) continue;
+      const dist = Math.hypot(t.x[i] - x, t.y[i] - y);
+      if (dist < bestD) {
+        bestD = dist;
+        best = t.admin[i];
+      }
+    }
+  }
+  const prov = best && names.provinces?.[best];
+  if (!prov) return null;
+  return { region: prov.region, region_name: names.regions?.[prov.region] || prov.region, province: best, province_name: prov.name };
 }
 
 // ------------------------------------------------------------------ naming

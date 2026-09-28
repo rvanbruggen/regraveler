@@ -224,6 +224,7 @@ filterForm.addEventListener("reset", () => {
   // Hidden fields keep their value on a reset: clear them.
   filterForm.elements.coll.value = "";
   filterForm.elements.area.value = "";
+  filterForm.elements.region.value = "";
   setTimeout(refresh, 0);
 });
 filterForm.addEventListener("submit", (e) => e.preventDefault());
@@ -1750,7 +1751,7 @@ function setFilters(values, clear = []) {
   refresh();
 }
 
-const CATALOG_FIELDS = ["coll", "area", "activity", "source", "tags", "loop"];
+const CATALOG_FIELDS = ["coll", "area", "region", "activity", "source", "tags", "loop"];
 
 function catNode({ label, count, active, onclick, actions = [], title = null }) {
   return el("div", { class: `cat-node${active ? " active" : ""}`, title: title || label, onclick },
@@ -1770,7 +1771,7 @@ function renderCatalog() {
   view.classList.toggle("with-catalog", show);
   if (!show) return;
   const f = filterForm.elements;
-  const cur = { coll: f.coll.value, area: f.area.value, activity: f.activity.value, source: f.source.value, tags: f.tags.value.trim(), loop: f.loop.value };
+  const cur = { coll: f.coll.value, area: f.area.value, region: f.region.value, activity: f.activity.value, source: f.source.value, tags: f.tags.value.trim(), loop: f.loop.value };
   const toggle = (field, value) => () => setFilters({ [field]: cur[field] === String(value) ? "" : value });
   const openState = (name) => {
     try { return localStorage.getItem(`rerouter.catalog.${name}`) !== "0"; } catch { return true; }
@@ -1828,6 +1829,12 @@ function renderCatalog() {
       el("div", {},
         el("a", { class: "cat-add", title: "Draw an area on the Map", onclick: () => { showView("map"); showOverview().then(() => startDrawingArea(overview.map)); } }, "＋ draw on the map"),
         el("label", { class: "cat-add", title: "Areas drawn in Google My Maps (KML/KMZ)" }, "＋ import KML", areaFile))),
+    cat.regions.length ? section("regions", "Regions", el("ul", {}, cat.regions.map((g) => el("li", {},
+      catNode({ label: g.name, count: g.count, active: cur.region === g.code, onclick: toggle("region", g.code), title: `${g.name}: routes that start there` }),
+      g.provinces.length > 1 || g.provinces[0]?.name !== g.name
+        ? el("ul", {}, g.provinces.map((p) => el("li", {},
+            catNode({ label: p.name, count: p.count, active: cur.region === p.code, onclick: toggle("region", p.code), title: `${p.name} (${g.name}): routes that start there` }))))
+        : null)))) : null,
     section("activity", "Activity", valueList(cat.activities, "activity", ACT_LABEL)),
     cat.sources.length ? section("source", "Source", valueList(cat.sources, "source")) : null,
     cat.tags.length ? section("tags", "Tags", [valueList(cat.tags.slice(0, TAGS_SHOWN), "tags"),
@@ -1848,6 +1855,14 @@ function renderFilterChips() {
     chips.push(el("span", { class: "filter-chip", title: "Only routes in this collection (and the ones inside it)" },
       `In: ${c ? svc.collectionPath(c.id) : "a removed collection"}`, el("a", { title: "Show all routes again", onclick: () => setFilters({ coll: "" }) }, "×")));
   }
+  if (f.region.value) {
+    const g = svc.catalog().regions;
+    const reg = g.find((x) => x.code === f.region.value);
+    const prov = g.flatMap((x) => x.provinces.map((p) => ({ ...p, region: x.name }))).find((p) => p.code === f.region.value);
+    chips.push(el("span", { class: "filter-chip", title: "Only routes that start in this region or province" },
+      `Starts in: ${reg ? reg.name : prov ? `${prov.name} (${prov.region})` : f.region.value}`,
+      el("a", { title: "Show all routes again", onclick: () => setFilters({ region: "" }) }, "×")));
+  }
   if (f.area.value) {
     const a = svc.library()?.getDoc("area", f.area.value);
     chips.push(el("span", { class: "filter-chip", title: "Only routes that start in this area" },
@@ -1859,7 +1874,7 @@ function renderFilterChips() {
 function applySmart(s) {
   const p = new URLSearchParams(s.query);
   const f = filterForm.elements;
-  for (const k of ["q", "min_distance", "max_distance", "min_gain", "max_gain", "min_paved", "max_paved", "min_quality", "source", "loop", "activity", "coll", "area"]) {
+  for (const k of ["q", "min_distance", "max_distance", "min_gain", "max_gain", "min_paved", "max_paved", "min_quality", "source", "loop", "activity", "coll", "area", "region"]) {
     if (f[k]) f[k].value = p.get(k) ?? "";
   }
   f.tags.value = p.getAll("tags").join(", ");
@@ -2024,8 +2039,15 @@ function renderDetailCatalog(id) {
         refresh();
       },
     }, el("option", { value: "" }, "add to…"), all.map((c) => el("option", { value: c.id }, c.path)), el("option", { value: "new" }, "a new collection…")),
-    areasIn.length ? [el("br"), el("span", { class: "muted" }, "Starts in: "),
-      areasIn.flatMap((a, i) => [i ? " · " : "", el("a", { class: "link", onclick: () => { showView("library"); setFilters({ area: a.id }); } }, a.name)])] : null);
+    (() => {
+      const reg = svc.route(id).region;
+      const bits = [
+        ...areasIn.map((a) => el("a", { class: "link", title: "Your area", onclick: () => { showView("library"); setFilters({ area: a.id }); } }, a.name)),
+        ...(reg ? [el("a", { class: "link", title: "The routes that start in this province", onclick: () => { showView("library"); setFilters({ region: reg.province }); } },
+          reg.province_name === reg.region_name ? reg.province_name : `${reg.province_name} (${reg.region_name})`)] : []),
+      ];
+      return bits.length ? [el("br"), el("span", { class: "muted" }, "Starts in: "), bits.flatMap((b, i) => [i ? " · " : "", b])] : null;
+    })());
 }
 
 // ---- areas on the maps, and drawing one
@@ -4837,5 +4859,7 @@ async function startApp() {
   await loadRoutes();
   // Once, for libraries from before track hashes existed (in the background).
   svc.backfillTrackHashes().catch((err) => console.warn("Track hashes:", err));
+  // Once, the region of routes from before regions (in the background; needs the place data).
+  svc.backfillRegions().then((n) => n && renderCatalog()).catch((err) => console.warn("Regions:", err));
 }
 start();

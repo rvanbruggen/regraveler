@@ -25,6 +25,7 @@ beforeEach(async () => {
     ["Einddorp", "PPL", ...at(200, 10000), 3000, 0, 3],
   ];
   places.setPlacesLoader(async (k) => (k === "51_4" ? recs : []), ["51_4"]);
+  places.setAdminLoader(async () => ({ regions: {}, provinces: {} })); // no region names in these tests
   config.AUTO_RENAME_ON_IMPORT = true;
   config.SURFACE_AUTO_ESTIMATE = false;
 });

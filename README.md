@@ -77,6 +77,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     button again, Esc to stop) or import them from a KML/KMZ file (areas drawn in Google My
     Maps). The *Areas* layer (layer button) shows them on the maps; a route's panel says which
     areas it starts in.
+  - **Regions:** region › province of the route's start (e.g. *Vlaanderen › Vlaams-Brabant*,
+    *Nederland › Zeeland*, *Hauts-de-France › Nord*; see *Regions* below), found from the
+    place data; a route's panel says where it starts.
   - **Activity, source, tags, type** (loop or point to point), counted from the routes.
 
   Collections and areas are in backups, and *Export set* takes along the collections of the
@@ -582,7 +585,7 @@ and generated name for all of them, identical elevation gain for 74 (the other 3
   unpaved), and is left empty when more than half of the route is unknown.
 - **Route names:** place data comes from [GeoNames](https://www.geonames.org/) (CC BY 4.0) for
   Belgium, the Netherlands, Luxembourg, Germany, France, Italy and Romania, built by
-  `web/tools/build_places.py` into 1 × 1 degree tiles in `web/data/places/` (16 MB in all, at
+  `web/tools/build_places.py` into 1 × 1 degree tiles in `web/data/places/` (20 MB in all, at
   most about 150 KB per tile, 40 KB compressed; a route loads only the tiles it passes). Towns and villages are ranked by population (villages
   without one only count if they're widely known); landmarks are named forests, heaths, hills,
   parks, lakes, castles and abbeys the route passes close to. Names are local: in the
@@ -592,6 +595,14 @@ and generated name for all of them, identical elevation gain for 74 (the other 3
   name in `NAME_OVERRIDES` in the build script (Zoniënwoud, whose GeoNames point lies just
   inside Wallonia); `--languages` sets the language per country or region. The start is the nearest real
   town to the start point; the places are the most notable one in each third of the route.
+- **Regions:** every town in the place tiles carries the code of its province, and
+  `web/data/places/admin.json` has the local names (shortened: *Vlaanderen*, *Wallonie*,
+  *Brussel*; *Antwerpen*, *Hainaut*; *Nord*) and the region each province lies in: Belgium
+  region › province, France région › département, Germany Land › Kreis, Italy regione ›
+  provincia; the Netherlands, Luxembourg and Romania have no level above the province, so there
+  it is the country › province (`LEVELS` in the build script). A route's region is that of the
+  town nearest its start (within 15 km), stored with the route when it is imported; routes from
+  before get theirs in the background at start-up.
   Rebuild the tiles with `python3 web/tools/build_places.py` (standard library only; downloads
   about 200 MB of GeoNames dumps once), e.g. with `--countries` to add a country (and
   `--languages` for its language).
@@ -663,7 +674,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     zip.js, backup.js  zip files, library backups and exported route sets
     worker.js        Web Worker for "routes near each other"
     config.js        settings and the version
-  data/places/       GeoNames place tiles
+  data/places/       GeoNames place tiles, admin.json (region and province names)
   data/seeds/        example route sets offered to visitors (+ index.json)
   data/place-sets/   example place sets (CSV) on the Places tab (+ index.json)
   tools/build_places.py  builds data/places/ from the GeoNames dumps

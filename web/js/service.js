@@ -134,6 +134,7 @@ export function filtersFrom(params) {
     ids: p.getAll("ids").map(Number).filter(Boolean),
     activity: p.get("activity") || null,
     coll: p.get("coll") || null, // a collection (with its sub-collections)
+    region: p.get("region") || null, // a region or province code (of the start), e.g. BE.VLG or BE.VLG.VAN
     area: p.get("area") || null, // an area: routes that start inside it
   };
 }
@@ -159,6 +160,7 @@ export function filterRoutes(f = {}) {
     (!ids || ids.has(r.id)) &&
     (!inColl || inColl.has(r.id)) &&
     (!f.area || (area && startsIn(r, area))) &&
+    (!f.region || r.region?.region === f.region || r.region?.province === f.region) &&
     wanted.every((t) => (r.tags || []).includes(t))
   );
   const sort = SORTABLE.has(f.sort) ? f.sort : "name";
@@ -424,6 +426,19 @@ export function similarRoutes(id) {
 
 // ------------------------------------------------------------------ import
 
+/**
+ * The region and province where a route starts (places.regionAt), null when there is none,
+ * undefined when the place data could not be read (then it is tried again later).
+ */
+async function startRegion(lat, lon) {
+  try {
+    return await places.regionAt(lat, lon);
+  } catch (err) {
+    console.warn("Could not find the region of a route:", err); // never let this break an import
+    return undefined;
+  }
+}
+
 async function generatedName(geometry, isLoop) {
   try {
     return (await places.generateName(geometry, isLoop)).name;
@@ -526,6 +541,7 @@ export async function importGpx(data, filename, {
       }
     }
     taken.add(name.toLowerCase());
+    const region = await startRegion(st.start_lat, st.start_lon);
     const base = slugify(name).slice(0, 200);
     let slug = base, n = 2;
     while (slugs.has(slug)) slug = `${base}-${n++}`;
@@ -540,6 +556,7 @@ export async function importGpx(data, filename, {
       track_hash: th,
       ...st,
       activity: activity || parsed.activity || default_activity || config.ACTIVITIES[0],
+      ...(region !== undefined ? { region } : {}),
       quality_rating: null,
       paved_pct: null,
       paved_source: null,
@@ -1668,7 +1685,7 @@ export function collectionsOf(routeId) {
 
 // ---- smart collections: saved filters
 
-const SMART_KEYS = ["q", "min_distance", "max_distance", "min_gain", "max_gain", "min_paved", "max_paved", "min_quality", "tags", "source", "loop", "activity", "coll", "area"];
+const SMART_KEYS = ["q", "min_distance", "max_distance", "min_gain", "max_gain", "min_paved", "max_paved", "min_quality", "tags", "source", "loop", "activity", "coll", "area", "region"];
 
 /** The filter part of a query string (no sorting, views or selections). */
 export function filterQuery(params) {
@@ -1749,9 +1766,44 @@ export function catalog() {
     collections: tree(null),
     smart: smartCollections().map((s) => ({ id: s.id, name: s.name, query: s.query, count: filterRoutes(filtersFrom(s.query)).length })),
     areas: areas().map((a) => ({ id: a.id, name: a.name, count: count((r) => startsIn(r, a)) })),
+    regions: regionTree(routes),
     activities: config.ACTIVITIES.map((a) => ({ value: a, count: count((r) => r.activity === a) })).filter((x) => x.count),
     sources: tally("source_name").sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
     tags: tally("tags").sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
     loops: [{ value: "true", count: count((r) => r.is_loop) }, { value: "false", count: count((r) => !r.is_loop) }],
   };
+}
+
+/** Regions › provinces of the routes' starts, with counts, most routes first. */
+function regionTree(routes) {
+  const regions = new Map();
+  for (const r of routes) {
+    const g = r.region;
+    if (!g) continue;
+    let reg = regions.get(g.region);
+    if (!reg) regions.set(g.region, (reg = { code: g.region, name: g.region_name, count: 0, provinces: new Map() }));
+    reg.count++;
+    const p = reg.provinces.get(g.province) || { code: g.province, name: g.province_name, count: 0 };
+    p.count++;
+    reg.provinces.set(g.province, p);
+  }
+  const byCount = (a, b) => b.count - a.count || a.name.localeCompare(b.name);
+  return [...regions.values()].sort(byCount).map((g) => ({ ...g, provinces: [...g.provinces.values()].sort(byCount) }));
+}
+
+/**
+ * Routes that have no region yet (from before regions, or the place data could not be read
+ * then) get one. Runs in the background after start-up; returns how many were looked up.
+ */
+export async function backfillRegions() {
+  const missing = lib.all().filter((r) => r.region === undefined);
+  const changed = [];
+  for (const r of missing) {
+    const region = await startRegion(r.start_lat, r.start_lon);
+    if (region === undefined) break; // no place data now: try again next time
+    r.region = region;
+    changed.push(r);
+  }
+  for (let i = 0; i < changed.length; i += 50) await lib.saveRoutes(changed.slice(i, i + 50));
+  return changed.length;
 }

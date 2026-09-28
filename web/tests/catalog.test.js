@@ -15,6 +15,7 @@ const START = [51.0, 4.4];
 beforeEach(async () => {
   svc.setLibrary(await Library.open(new MemoryBackend()));
   places.setPlacesLoader(async () => [], []);
+  places.setAdminLoader(async () => ({ regions: {}, provinces: {} })); // no region names in these tests
   config.AUTO_RENAME_ON_IMPORT = false;
   config.SURFACE_AUTO_ESTIMATE = false;
 });
@@ -152,4 +153,49 @@ test("an exported set carries its collections and areas; adding it merges them",
   const again = await addBackup(lib2, data);
   assert.deepEqual([again.added, again.collections, again.areas], [0, 0, 0]);
   assert.equal(lib2.docsOf("collection").find((x) => x.name === "Ardennes").route_ids.length, 2);
+});
+
+test("regions: the region and province of a route's start, in the catalog and as a filter", async () => {
+  const town = (name, [lat, lon], code) => [name, "PPL", lat, lon, 1000, 0, 0, code];
+  const recs = [
+    town("Startdorp", offset(...START, 300, 0), "BE.VLG.VBR"),
+    town("Oostdorp", offset(...START, 300, 10000), "BE.VLG.VBR"),
+    town("Verdorp", offset(...START, 300, 20000), "BE.WAL.WBR"),
+    ["Een bos", "FRST", ...offset(...START, 0, 5000), 0, 3, 9], // a landmark: no region
+  ];
+  places.setPlacesLoader(async (k) => (k === "51_4" ? recs : []), ["51_4"]);
+  places.setAdminLoader(async () => ({
+    regions: { "BE.VLG": "Vlaanderen", "BE.WAL": "Wallonie" },
+    provinces: { "BE.VLG.VBR": { name: "Vlaams-Brabant", region: "BE.VLG" }, "BE.WAL.WBR": { name: "Brabant Wallon", region: "BE.WAL" } },
+  }));
+  const [a, b, c] = await threeRoutes();
+  assert.deepEqual(svc.route(a).region, { region: "BE.VLG", region_name: "Vlaanderen", province: "BE.VLG.VBR", province_name: "Vlaams-Brabant" });
+  assert.equal(svc.route(c).region.province_name, "Brabant Wallon");
+  assert.deepEqual(names("region=BE.VLG"), ["A", "B"]);
+  assert.deepEqual(names("region=BE.WAL.WBR"), ["C"]);
+  const tree = svc.catalog().regions;
+  assert.deepEqual(tree.map((g) => [g.name, g.count, g.provinces.map((p) => [p.name, p.count])]),
+    [["Vlaanderen", 2, [["Vlaams-Brabant", 2]]], ["Wallonie", 1, [["Brabant Wallon", 1]]]]);
+  assert.equal(svc.filterQuery("region=BE.VLG&view=map"), "region=BE.VLG");
+
+  // Routes from before regions get theirs in the background; far from any town: none (null).
+  const r = svc.route(b);
+  delete r.region;
+  await svc.library().saveRoutes([r]);
+  const pts = linePoints({ start: [48.0, 2.0], lengthM: 2000, stepM: 100, ele: () => 1 });
+  const { routes: [far] } = await svc.importGpx(gpxXml([["t", pts]]), "Far.gpx");
+  assert.equal(svc.route(far.id).region, null);
+  assert.equal(await svc.backfillRegions(), 1);
+  assert.equal(svc.route(b).region.province, "BE.VLG.VBR");
+  assert.equal(await svc.backfillRegions(), 0);
+});
+
+test("without the region names (no place data) the region is tried again later", async () => {
+  places.setAdminLoader(async () => { throw new Error("offline"); });
+  const [a] = await threeRoutes();
+  assert.equal(svc.route(a).region, undefined);
+  assert.equal(await svc.backfillRegions(), 0, "still offline: nothing yet");
+  places.setAdminLoader(async () => ({ regions: {}, provinces: {} }));
+  assert.equal(await svc.backfillRegions(), 3);
+  assert.equal(svc.route(a).region, null);
 });
