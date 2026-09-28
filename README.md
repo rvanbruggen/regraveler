@@ -827,5 +827,6 @@ The version appears in these places, which must stay in sync:
 - `app/__init__.py` — `__version__` (source of truth; served at `/api/info`, shown in the header of the self-hosted version)
 - `web/js/config.js` — `VERSION` (shown in the header of the browser version)
 - `web/package.json` — `version`
+- `web/index.html` — `?v=<version>` on `style.css`, `app.js` and every module in the import map (cache-busting: each release gets new URLs; `web/tests/cache_busting.test.js` checks them)
 - `README.md` — the **Version:** line at the top
 - `CHANGELOG.md` — one row per release
