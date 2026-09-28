@@ -360,10 +360,12 @@
       <span id="disk-ignored" class="muted small"></span>
     </div>
     <div id="dropzone">
-      <p>Drop GPX files, folders or zip files here, or
-        <label class="link">choose files<input type="file" id="file-input" accept=".gpx,.zip,application/gpx+xml,application/zip" multiple hidden></label>
+      <p>Drop route files (GPX, TCX, FIT), folders or zip files here, or
+        <label class="link">choose files<input type="file" id="file-input" accept=".gpx,.tcx,.fit,.gz,.zip,application/gpx+xml,application/zip" multiple hidden></label>
         or <label class="link">a folder<input type="file" id="folder-input" webkitdirectory multiple hidden></label></p>
-      <p class="small">Files in a subfolder get the subfolder's name as source name, unless you fill in a source name above.</p>
+      <p class="small">Files in a subfolder get the subfolder's name as source name, unless you fill in a source name above.
+        A recorded ride (a FIT or TCX activity from your bike computer or watch, also .gz as in a Strava export) that
+        rides most of a route in your library can be logged on that route instead of being imported as a new one.</p>
     </div>
     <table id="pending" hidden>
       <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th>Activity (override)</th><th>Extra tags</th><th></th></tr></thead>
@@ -524,6 +526,7 @@
     <div class="actions">
       <button type="submit">Save</button>
       <a id="d-download" class="button secondary" href="#">Download GPX</a>
+      <a id="d-download-original" class="button secondary" href="#" hidden></a>
       <button type="button" id="d-showmap" class="secondary">Show on map</button>
       <button type="button" id="d-combine" class="secondary">Combine…</button>
       <button type="button" id="d-restart" class="secondary" title="Start this loop somewhere else" hidden>Change start…</button>
@@ -532,6 +535,7 @@
       <span id="d-status" class="muted"></span>
     </div>
   </form>
+  <p id="d-rides" class="small" hidden></p>
   <p id="d-derived" class="small" hidden></p>
   <p id="d-file" class="muted small"></p>
   <h3>Similar / overlapping routes</h3>

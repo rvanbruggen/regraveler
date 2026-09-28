@@ -26,8 +26,20 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
 
-- **Import** GPX files by drag and drop: many files at once, whole folders or zip files. On a
-  server, the Import screen also offers the GPX files that are already in its `gpx/` folder.
+- **Import** route files by drag and drop: many files at once, whole folders or zip files. On a
+  server, the Import screen also offers the route files that are already in its `gpx/` folder.
+  - **Formats:** GPX, **TCX** and **FIT** (from Garmin, Wahoo and other bike computers and
+    watches), also gzip-compressed (`.fit.gz`, `.tcx.gz`, as in a Strava bulk export). The
+    original file is stored as it is; *Download GPX* in the route panel writes a GPX file for a
+    TCX or FIT route, and *Original .fit* / *Original .tcx* gives the original.
+  - **Activity from the file:** a FIT or TCX file that says it is a run or walk becomes hiking,
+    and a FIT file with the mountain, road or gravel sub-sport becomes that activity. Otherwise
+    the batch's activity is used (a per-file override always wins).
+  - **Recorded rides:** a FIT or TCX *activity* (a ride you recorded, not a planned course) that
+    covers at least 80% of a route in the library is not imported as a new route. The results
+    say which route it is, with *Log as ridden* (the route panel then lists the dates you rode
+    it) or *Import as a new route*; *Log all … recorded rides* does the whole batch. The same
+    recorded file is logged only once.
   - Source name, URL and **activity** (gravel, road, mountain biking or hiking; default gravel) per batch, with
     per-file override. If no URL is given, the link inside the GPX file (if any) is used.
   - **Tags** for the whole batch, plus optional extra tags per file (added to the batch tags).
@@ -212,7 +224,7 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   original GPX files) and **restore**, the BRouter server to use (with a test button), whether
   new routes are named and their surface estimated automatically, and *Remove everything*.
 
-Original GPX files are never modified.
+Original route files (GPX, TCX, FIT) are never modified.
 
 ![Duplicates: the same routes from two sites, with a suggestion which one to keep](docs/screenshots/duplicates.png)
 
@@ -529,6 +541,8 @@ web/                 the app: one page, runs in the browser (and as a static sit
     db.js            the library in memory, stored through a backend: IndexedDB (browser) ...
     remote.js        ... or the rerouter server's storage API (self-hosted)
     gpx.js           GPX reading and writing (a small XML reader, also runs in Node and workers)
+    tcx.js, fit.js   TCX and FIT reading (own FIT decoder: byte orders, developer fields, compressed timestamps)
+    trackfile.js     any route file: recognises GPX / TCX / FIT from the content, unpacks .gz
     stats.js         distance, smoothed elevation gain/loss, loop detection, simplified geometry
     profile.js       elevation profile of a route (gradient bands, chart in the route panel)
     geo.js           EPSG:3035 projection, WGS84 geodesic distance, line helpers, grid index

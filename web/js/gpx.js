@@ -80,14 +80,14 @@ export function parseXml(text) {
   return root;
 }
 
-const child = (node, name) => node.children.find((c) => c.name === name);
-const children = (node, name) => node.children.filter((c) => c.name === name);
+export const child = (node, name) => node.children.find((c) => c.name === name);
+export const children = (node, name) => node.children.filter((c) => c.name === name);
 const clean = (s) => {
   if (s == null) return null;
   s = s.trim();
   return s || null;
 };
-const textOf = (node, name) => {
+export const textOf = (node, name) => {
   const c = node && child(node, name);
   return c ? clean(c.text) : null;
 };

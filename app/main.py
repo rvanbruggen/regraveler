@@ -98,14 +98,14 @@ def delete_routes(body: IdsIn, session: SessionDep):
 def get_file(file_hash: str, session: SessionDep):
     f, path = store.get_file(session, file_hash)
     return FileResponse(
-        path, media_type="application/gpx+xml",
+        path, media_type=store.media_type(f.name),
         headers={"X-File-Name": quote(f.name), "Access-Control-Expose-Headers": "X-File-Name"},
     )
 
 
 @app.put("/api/files/{file_hash}")
 async def put_file(file_hash: str, request: Request, session: SessionDep, name: str = "", folder: str = ""):
-    """Store an original GPX file (the body). The bytes must match the hash."""
+    """Store an original route file (GPX, TCX or FIT; the body). The bytes must match the hash."""
     data = await request.body()
     return {"hash": file_hash, "path": store.put_file(session, file_hash, data, name, folder)}
 
@@ -136,9 +136,9 @@ def unignore_disk_files(session: SessionDep):
 @app.get("/api/disk-files/content")
 def disk_file(path: str):
     full = store.resolve(path)
-    if not full.is_file() or full.suffix.lower() != ".gpx":
-        raise HTTPException(404, "No such GPX file")
-    return FileResponse(full, media_type="application/gpx+xml")
+    if not full.is_file() or full.suffix.lower() not in store.TRACK_SUFFIXES:
+        raise HTTPException(404, "No such route file")
+    return FileResponse(full, media_type=store.media_type(full.name))
 
 
 # ---------------------------------------------------------------- pairs and settings

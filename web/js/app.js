@@ -6,6 +6,7 @@ import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
 import { drawProfile, nearestIndex } from "./profile.js";
+import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
 import { RemoteBackend, detectServer } from "./remote.js";
 import * as svc from "./service.js";
@@ -651,18 +652,36 @@ async function openDetail(id) {
   f.notes.value = r.notes ?? "";
   f.source_name.value = r.source_name ?? "";
   f.source_url.value = r.source_url ?? "";
+  // TCX and FIT routes: "Download GPX" writes a GPX file; the original has its own button.
   $("#d-download").onclick = async (e) => {
     e.preventDefault();
     try {
-      const f = await svc.routeGpx(r.id);
+      const f = await svc.routeAsGpx(r.id);
       downloadBlob(f.data, f.filename);
     } catch (err) {
       $("#d-status").textContent = `error: ${err.message}`;
     }
   };
+  const original = $("#d-download-original");
+  original.hidden = !svc.notGpx(r);
+  original.textContent = `Original .${r.file_format || "gpx"}`;
+  original.onclick = async (e) => {
+    e.preventDefault();
+    try {
+      const f = await svc.routeGpx(r.id);
+      downloadBlob(f.data, f.filename, "application/octet-stream");
+    } catch (err) {
+      $("#d-status").textContent = `error: ${err.message}`;
+    }
+  };
+  const rides = r.rides || [];
+  $("#d-rides").hidden = !rides.length;
+  $("#d-rides").textContent = rides.length
+    ? `Ridden ${rides.length === 1 ? "once" : `${rides.length} times`}: ${rides.map((x) => fmt.date(x.date)).join(", ")}`
+    : "";
   $("#d-restart").hidden = !r.is_loop;
   $("#d-file").textContent =
-    `File: ${r.original_filename}` + (r.track_name ? ` · GPX track ${r.track_index + 1}: "${r.track_name}"` : "") +
+    `File: ${r.original_filename}` + (r.track_name ? ` · track ${r.track_index + 1}: "${r.track_name}"` : "") +
     ` · imported ${fmt.date(r.imported_at)}`;
   const derived = $("#d-derived");
   derived.hidden = !r.derived_from.length;
@@ -907,7 +926,10 @@ $("#d-delete").addEventListener("click", async () => {
 
 let pending = []; // [{name, path, size, data (bytes), folder, source_name, source_url, activity, tags}]
 
-/** Add files: GPX files, zip files (their GPX files are added) and files from folders. */
+/**
+ * Add files: route files (GPX, TCX, FIT, also .gz), zip files (their route files are added)
+ * and files from folders.
+ */
 async function addFiles(fileList) {
   // diskPath: the file's path in the server's GPX folder, when it came from there.
   const add = (name, path, data, diskPath = null) => {
@@ -921,10 +943,10 @@ async function addFiles(fileList) {
     const path = item.path || file.webkitRelativePath || file.name;
     const lower = file.name.toLowerCase();
     try {
-      if (lower.endsWith(".gpx")) add(file.name, path, new Uint8Array(await file.arrayBuffer()), item.diskPath || null);
+      if (isTrackFileName(lower)) add(file.name, path, new Uint8Array(await file.arrayBuffer()), item.diskPath || null);
       else if (lower.endsWith(".zip")) {
         for (const e of await readZip(await file.arrayBuffer())) {
-          if (!e.name.toLowerCase().endsWith(".gpx") || e.name.split("/").some((x) => x.startsWith("__MACOSX") || x.startsWith("._"))) continue;
+          if (!isTrackFileName(e.name) || e.name.split("/").some((x) => x.startsWith("__MACOSX") || x.startsWith("._"))) continue;
           add(e.name.split("/").pop(), `${file.name.replace(/\.zip$/i, "")}/${e.name}`, e.data);
         }
       } else if (!file.name.startsWith(".")) skipped.push(file.name);
@@ -934,7 +956,7 @@ async function addFiles(fileList) {
   }
   pending.sort((a, b) => svc.importOrder()(a.path, b.path));
   renderPending();
-  if (skipped.length) $("#import-status").textContent += ` · skipped (not GPX): ${skipped.slice(0, 5).join(", ")}${skipped.length > 5 ? "…" : ""}`;
+  if (skipped.length) $("#import-status").textContent += ` · skipped (not a GPX, TCX or FIT file): ${skipped.slice(0, 5).join(", ")}${skipped.length > 5 ? "…" : ""}`;
 }
 
 /** "Folder/Sub/route.gpx" -> "Sub" (the first folder below the chosen or dropped one). */
@@ -1036,7 +1058,7 @@ $("#import-btn").addEventListener("click", async () => {
       activity: $("#batch-activity").value,
       tags: $("#batch-tags").value,
     }, (n, total, name) => ($("#import-status").textContent = `importing ${n + 1} of ${total}: ${name}…`));
-    renderResults(results);
+    renderResults(results, $("#import-results"), files);
     const imported = pending;
     pending = [];
     renderPending();
@@ -1057,14 +1079,67 @@ function routeLink(id, name) {
   return el("a", { onclick: () => { showView("library"); openDetail(id); } }, name);
 }
 
-function renderResults(results, target = $("#import-results")) {
+/**
+ * The import results. `files` (the imported files, in the same order) lets recorded rides
+ * that match a library route be logged on it or imported anyway.
+ */
+function renderResults(results, target = $("#import-results"), files = null) {
   const counts = results.reduce((c, r) => ((c[r.status] = (c[r.status] || 0) + 1), c), {});
-  const summary = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ");
-  target.replaceChildren(
+  const summary = Object.entries(counts).map(([k, v]) => `${v} ${k === "ride" ? "recorded ride(s) of a route" : k}`).join(", ");
+  const rides = results.map((r, i) => ({ r, i })).filter(({ r }) => r.status === "ride");
+  const rideBoxes = new Map(); // result index -> the element with its buttons
+
+  const logOne = async (r) => {
+    await svc.logRide(r.ride.route_id, r.ride);
+    rideBoxes.get(results.indexOf(r))?.replaceChildren("✓ Logged as ridden on ", routeLink(r.ride.route_id, r.ride.route_name),
+      r.ride.date ? ` (${fmt.date(r.ride.date)})` : "");
+  };
+  const importOne = async (r, i) => {
+    const box = rideBoxes.get(i);
+    box.replaceChildren("importing…");
+    const f = files[i];
+    const { results: [res] } = await svc.importFiles([{ ...f, match_rides: false }], {
+      source_name: $("#batch-source-name").value.trim(),
+      source_url: $("#batch-source-url").value,
+      activity: $("#batch-activity").value,
+      tags: $("#batch-tags").value,
+    });
+    box.replaceChildren(res.routes.length ? "✓ Imported as " : `${res.status}: ${res.message}`,
+      ...res.routes.flatMap((x, k) => [k ? ", " : "", routeLink(x.id, x.name)]));
+    watchSurfaceJob();
+    await Promise.all([refresh(), loadFacets()]);
+  };
+  const failed = (box) => (err) => box?.replaceChildren(`error: ${err.message}`);
+
+  target.replaceChildren(el("div", {},
     el("h3", {}, `Import results: ${summary}`),
-    ...results.map((r) =>
+    rides.length > 1 && files
+      ? el("p", { class: "actions" },
+          el("button", {
+            type: "button",
+            onclick: async (e) => {
+              e.target.disabled = true;
+              for (const { r, i } of rides) if (rideBoxes.get(i)?.querySelector("button")) await logOne(r).catch(failed(rideBoxes.get(i)));
+              await refresh();
+            },
+          }, `Log all ${rides.length} recorded rides as ridden`))
+      : null,
+    ...results.map((r, i) =>
       el("div", { class: `result ${r.status}` },
-        el("strong", {}, r.filename), ` — ${r.status}`, r.message ? `: ${r.message}` : "",
+        el("strong", {}, r.filename), ` — ${r.status === "ride" ? "recorded ride" : r.status}`, r.message ? `: ${r.message}` : "",
+        r.status === "ride" && files
+          ? (() => {
+              const box = el("div", { class: "actions" },
+                el("span", { class: "small" },
+                  r.ride.date ? `Ridden on ${fmt.date(r.ride.date)}, ` : "", `${fmt.km(r.ride.distance_km)} · `,
+                  routeLink(r.ride.route_id, r.ride.route_name),
+                  ` · ${Math.round(r.ride.on_route * 100)}% of the ride is on the route`),
+                el("button", { type: "button", onclick: () => logOne(r).then(refresh).catch(failed(box)) }, "Log as ridden"),
+                el("button", { type: "button", class: "secondary", onclick: () => importOne(r, i).catch(failed(box)) }, "Import as a new route"));
+              rideBoxes.set(i, box);
+              return box;
+            })()
+          : null,
         r.routes.length ? el("div", {}, "Created: ", r.routes.flatMap((x, i) => [i ? ", " : "", routeLink(x.id, x.name)])) : null,
         r.duplicates.length ? el("div", {}, "Already in library: ", r.duplicates.flatMap((x, i) => [i ? ", " : "", routeLink(x.id, x.name)])) : null,
         ...r.similar.map((s) =>
@@ -1072,7 +1147,7 @@ function renderResults(results, target = $("#import-results")) {
             ` is very similar to `, routeLink(s.other_id, s.other_name), ` (${Math.round(s.overlap * 100)}% overlap)`))
       )
     )
-  );
+  ));
 }
 
 // ------------------------------------------------------------------ import from a link

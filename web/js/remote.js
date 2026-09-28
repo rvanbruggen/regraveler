@@ -96,7 +96,7 @@ export class RemoteBackend {
       for (const f of records) {
         const q = new URLSearchParams({ name: f.name || "", folder: f.folder || "" });
         await this.request(`api/files/${encodeURIComponent(f.hash)}?${q}`, {
-          method: "PUT", body: f.data, headers: { "Content-Type": "application/gpx+xml" },
+          method: "PUT", body: f.data, headers: { "Content-Type": "application/octet-stream" },
         });
       }
       return records.map((f) => f.hash);

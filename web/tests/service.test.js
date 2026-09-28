@@ -8,7 +8,10 @@ import { parseGpx } from "../js/gpx.js";
 import * as places from "../js/places.js";
 import * as svc from "../js/service.js";
 import { readZip } from "../js/zip.js";
-import { approx, gpxXml, linePoints, loopPoints, offset } from "./helpers.js";
+import { gzipSync } from "node:zlib";
+
+import { parseTrackFile } from "../js/trackfile.js";
+import { approx, fitFile, gpxXml, linePoints, loopPoints, offset, tcxXml } from "./helpers.js";
 
 const START = [51.0, 4.4];
 const at = (n, e) => offset(...START, n, e);
@@ -373,4 +376,106 @@ test("combine pattern 'out on A, back on B' for two loops from the same start", 
   assert.deepEqual(prev.parts.map((p) => p.with_route), [true, true]);
   assert.equal(prev.connectors[1].routed, false); // back at the shared start already
   await assert.rejects(svc.combineSuggest(a.id, b.id, "zigzag"), svc.ServiceError);
+});
+
+// ------------------------------------------------------------------ TCX and FIT files
+
+// A recorded ride of the east() route, with 1 km of riding to its start first.
+const rideOfEast = () => [
+  ...linePoints({ start: offset(...START, -1000, 0), lengthM: 900, stepM: 100, headingDeg: 0, ele: () => 10 }),
+  ...east(),
+];
+
+test("a FIT course is imported as a route; its original is kept and GPX is written from it", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  const data = fitFile(east(), { fileType: 6, courseName: "Kempen", subSport: 46 });
+  const { results: [res] } = await svc.importFiles([{ name: "kempen.fit", data }], { activity: "road" });
+  assert.equal(res.status, "imported");
+  const r = svc.route(res.routes[0].id);
+  assert.equal(r.file_format, "fit");
+  assert.equal(r.track_name, "Kempen");
+  assert.equal(r.activity, "gravel"); // the file says gravel; the batch's "road" is only a default
+  approx(r.distance_km, 10, { rel: 0.01 });
+  assert.equal(svc.notGpx(r), true);
+
+  const original = await svc.routeGpx(r.id);
+  assert.equal(original.filename, "kempen.fit");
+  assert.deepEqual(original.data, data);
+  const gpx = await svc.routeAsGpx(r.id);
+  assert.equal(gpx.filename, "kempen.gpx");
+  assert.equal(parseTrackFile(new TextEncoder().encode(gpx.data)).tracks[0].points.length, east().length);
+  // The profile, the combiner and the surface estimate read the FIT file too.
+  assert.ok(await svc.routeProfile(r));
+
+  // A zip of GPX files gets the GPX version.
+  const zip = await svc.exportZip([r.id]);
+  const entries = await readZip(new Uint8Array(await zip.arrayBuffer()));
+  assert.deepEqual(entries.map((e) => e.name), ["kempen.gpx"]);
+});
+
+test("a recorded ride of a library route can be logged on it instead of imported", async () => {
+  const { results: [route] } = await svc.importFiles([{ name: "route.gpx", data: gpxXml([["t", east()]]) }]);
+  const routeId = route.routes[0].id;
+  const ride = fitFile(rideOfEast(), { start: "2026-09-14T07:30:00Z" });
+
+  const { results: [res] } = await svc.importFiles([{ name: "Morning_Ride.fit.gz", data: new Uint8Array(gzipSync(ride)) }]);
+  assert.equal(res.status, "ride");
+  assert.equal(res.filename, "Morning_Ride.fit");
+  assert.equal(res.ride.route_id, routeId);
+  assert.equal(res.ride.date, "2026-09-14");
+  assert.ok(res.ride.covered >= 0.95, `covered ${res.ride.covered}`);
+  assert.ok(res.ride.on_route < 0.95 && res.ride.on_route > 0.8, `on route ${res.ride.on_route}`);
+  approx(res.ride.distance_km, 10.9, { abs: 0.2 });
+  assert.equal(svc.listRoutes("").length, 1, "nothing imported");
+
+  await svc.logRide(routeId, res.ride);
+  await svc.logRide(routeId, res.ride); // the same file is logged once
+  await svc.logRide(routeId, { date: "2026-05-01" });
+  assert.deepEqual(svc.route(routeId).rides.map((x) => x.date), ["2026-05-01", "2026-09-14"]);
+
+  // The same file again: already logged.
+  const again = await svc.importFiles([{ name: "Morning_Ride.fit", data: ride }]);
+  assert.equal(again.results[0].status, "duplicate");
+  assert.match(again.results[0].message, /already logged/);
+
+  // Or imported anyway, as its own route.
+  const other = fitFile(rideOfEast(), { start: "2026-09-21T07:30:00Z" });
+  const forced = await svc.importFiles([{ name: "Other.fit", data: other, match_rides: false }]);
+  assert.equal(forced.results[0].status, "imported");
+  assert.equal(svc.route(forced.results[0].routes[0].id).file_format, "fit");
+});
+
+test("a ride elsewhere, part of a route, a course or a GPX file is not taken for a ride of a route", async () => {
+  await svc.importFiles([{ name: "route.gpx", data: gpxXml([["t", east()]]) }]);
+  const elsewhere = fitFile(east(-5000));
+  const halfway = fitFile(east(0, 4000)); // only 40% of the route
+  const course = fitFile(rideOfEast(), { fileType: 6 });
+  const tcx = tcxXml(rideOfEast(), { sport: "Biking" });
+  const { results } = await svc.importFiles([
+    { name: "ride.tcx", data: tcx }, // a TCX activity is a recorded ride too
+    { name: "elsewhere.fit", data: elsewhere },
+    { name: "halfway.fit", data: halfway },
+    { name: "course.fit", data: course },
+  ]);
+  assert.deepEqual(results.map((r) => r.status), ["ride", "imported", "imported", "imported"]);
+  // The GPX version of the same ride is imported like any GPX file (here: the same track as
+  // the course, so a duplicate).
+  const gpx = await svc.importFiles([{ name: "ride.gpx", data: gpxXml([["t", rideOfEast()]]) }]);
+  assert.equal(gpx.results[0].status, "duplicate");
+});
+
+test("backups keep TCX and FIT originals under their own extension", async () => {
+  await svc.importFiles([
+    { name: "a.fit", data: fitFile(east(0, 3000), { fileType: 6 }) },
+    { name: "b.tcx", data: tcxXml(east(-5000, 3000), { course: "B" }) },
+  ]);
+  const zip = await makeBackup(svc.library());
+  const names = (await readZip(new Uint8Array(await zip.arrayBuffer()))).map((e) => e.name).sort();
+  assert.ok(names.some((n) => /^gpx\/[0-9a-f]{64}\.fit$/.test(n)), names.join());
+  assert.ok(names.some((n) => /^gpx\/[0-9a-f]{64}\.tcx$/.test(n)), names.join());
+  const data = await readBackup(new Uint8Array(await zip.arrayBuffer()));
+  const other = await Library.open(new MemoryBackend());
+  await other.restore(data);
+  svc.setLibrary(other);
+  for (const r of other.all()) assert.ok(await svc.routeProfile(r));
 });

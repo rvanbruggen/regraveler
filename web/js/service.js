@@ -6,11 +6,12 @@ import * as brouter from "./brouter.js";
 import * as cb from "./combiner.js";
 import { config } from "./config.js";
 import { round, simplifyLatLon } from "./geo.js";
-import { GpxError, parseGpx, writeGpx } from "./gpx.js";
+import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
 import { bboxOf, duplicatePairs, findSimilar, groupPairs, proximityPairs } from "./similarity.js";
 import { buildProfile } from "./profile.js";
 import { computeStats } from "./stats.js";
+import { parseTrackFile, unwrapFile } from "./trackfile.js";
 import * as surface from "./surface.js";
 import { makeZip } from "./zip.js";
 import { sha256 } from "./sha256.js";
@@ -337,12 +338,29 @@ export async function deleteRoutes(ids) {
   return { deleted: await lib.deleteRoutes(ids) };
 }
 
-/** The original GPX file of a route: {filename, data (bytes)}. */
+/** The original file of a route (GPX, TCX or FIT, never modified): {filename, data (bytes)}. */
 export async function routeGpx(id) {
   const r = getRoute(id);
   const file = await lib.getFile(r.file_hash);
   if (!file) throw new ServiceError("GPX file not found in the library", 404);
   return { filename: r.original_filename || `${r.name}.gpx`, data: file.data };
+}
+
+/** Is the route's original file something other than GPX (TCX or FIT)? */
+export const notGpx = (r) => !!r.file_format && r.file_format !== "gpx";
+
+/**
+ * The route as a GPX file: the original when it is GPX, else a GPX written from the route's
+ * track in its TCX or FIT file. {filename, data (bytes or text)}.
+ */
+export async function routeAsGpx(id) {
+  const r = getRoute(id);
+  if (!notGpx(r)) return routeGpx(id);
+  const file = await lib.getFile(r.file_hash);
+  if (!file) throw new ServiceError("The route's file was not found in the library", 404);
+  const track = parseTrackFile(file.data).tracks[r.track_index || 0];
+  const stem = stemOf(baseName(r.original_filename || "")) || slugify(r.name);
+  return { filename: `${stem}.gpx`, data: writeGpx(r.name, track.points, r.notes) };
 }
 
 /**
@@ -359,11 +377,18 @@ export async function exportZip(ids) {
     if (!file) continue;
     seen.add(r.file_hash);
     let name = baseName(r.original_filename || "") || `route-${r.id}.gpx`;
+    let data = file.data;
+    if (notGpx(r)) {
+      // A zip of GPX files: TCX and FIT routes are written as GPX (one file per route).
+      seen.delete(r.file_hash);
+      data = (await routeAsGpx(r.id)).data;
+      name = `${stemOf(name)}${r.track_index ? ` (${r.track_index + 1})` : ""}.gpx`;
+    }
     const stem = stemOf(name), suffix = name.slice(stem.length) || ".gpx";
     let n = 2;
     while (used.has(name.toLowerCase())) name = `${stem} (${n++})${suffix}`;
     used.add(name.toLowerCase());
-    entries.push({ name, data: file.data });
+    entries.push({ name, data });
   }
   if (!entries.length) throw new ServiceError("GPX files not found", 404);
   return makeZip(entries);
@@ -395,24 +420,39 @@ async function generatedName(geometry, isLoop) {
 }
 
 /**
- * Import one GPX file (one route per track).
- * data: Uint8Array of the file. Returns {filename, status, message, routes, duplicates, similar}
- * with status "imported", "duplicate", "partial" (some tracks duplicate) or "error".
+ * Import one route file (GPX, TCX or FIT; one route per track).
+ * data: Uint8Array of the file. Returns {filename, status, message, routes, duplicates, similar,
+ * ride} with status "imported", "duplicate", "partial" (some tracks duplicate), "ride" or "error".
+ *
+ * `activity` wins over what the file says (a FIT or TCX file knows running from cycling),
+ * which wins over `default_activity`.
+ *
+ * A recorded ride (a FIT or TCX activity) that rides most of a route in the library is not
+ * imported when `match_rides` is on: status "ride", with `ride` describing the match, so the
+ * page can offer to log it on that route (logRide) or import it anyway.
  */
 export async function importGpx(data, filename, {
-  source_name = null, source_url = null, tags = [], notes = null, activity = null,
+  source_name = null, source_url = null, tags = [], notes = null, activity = null, default_activity = null,
   derived_from = [], check_similar = true, rename = config.AUTO_RENAME_ON_IMPORT, name: forcedName = null,
+  match_rides = false,
 } = {}) {
-  const result = { filename, status: "imported", message: "", routes: [], duplicates: [], similar: [] };
+  const result = { filename, status: "imported", message: "", routes: [], duplicates: [], similar: [], ride: null };
   let parsed;
   try {
-    parsed = parseGpx(data);
+    parsed = parseTrackFile(data);
   } catch (err) {
     if (!(err instanceof GpxError)) throw err;
     return { ...result, status: "error", message: err.message };
   }
   const digest = await sha256(data);
   const all = lib.all();
+  const logged = all.find((r) => (r.rides || []).some((x) => x.file_hash === digest));
+  if (logged) {
+    result.status = "duplicate";
+    result.message = "This ride is already logged";
+    result.duplicates.push({ id: logged.id, name: logged.name });
+    return result;
+  }
   const existing = new Map(all.filter((r) => r.file_hash === digest).map((r) => [r.track_index, r]));
   const newTracks = [];
   let sameTrack = false;
@@ -439,6 +479,20 @@ export async function importGpx(data, filename, {
   } catch (err) {
     if (!(err instanceof GpxError)) throw err;
     return { ...result, status: "error", message: err.message };
+  }
+  if (match_rides && parsed.kind === "activity" && newTracks.length === 1) {
+    const match = rideMatch(stats[0], all);
+    if (match) {
+      result.status = "ride";
+      result.ride = {
+        ...match,
+        date: (parsed.started_at || "").slice(0, 10) || null,
+        distance_km: stats[0].distance_km,
+        file_hash: digest,
+      };
+      result.message = `Recorded ride of ${match.route_name} (${Math.round(match.covered * 100)}% of the route)`;
+      return result;
+    }
   }
 
   const taken = new Set(all.map((r) => r.name.toLowerCase()));
@@ -467,9 +521,10 @@ export async function importGpx(data, filename, {
       track_index: i,
       track_name: track.name,
       file_hash: digest,
+      file_format: parsed.format,
       track_hash: th,
       ...st,
-      activity: activity || config.ACTIVITIES[0],
+      activity: activity || parsed.activity || default_activity || config.ACTIVITIES[0],
       quality_rating: null,
       paved_pct: null,
       paved_source: null,
@@ -510,6 +565,39 @@ export async function importGpx(data, filename, {
 }
 
 /**
+ * The library route a recorded ride rode (most of): the route with the largest share of its
+ * length within SIMILAR_TOLERANCE_M of the ride, if that is at least RIDE_MATCH_MIN_COVERED.
+ * The ride may have more (riding to the start, a detour): only the route's coverage counts.
+ * `ride` is {geometry, min_lat, …} (route stats). Returns {route_id, route_name, covered,
+ * on_route} or null.
+ */
+export function rideMatch(ride, routes = lib.all()) {
+  let best = null;
+  for (const s of findSimilar(ride.geometry, bboxOf(ride), routes, config.SIMILAR_TOLERANCE_M, config.RIDE_MATCH_MIN_COVERED)) {
+    if (s.b_in_a < config.RIDE_MATCH_MIN_COVERED) continue;
+    if (!best || s.b_in_a > best.b_in_a) best = s;
+  }
+  if (!best) return null;
+  const r = routes.find((x) => x.id === best.other_id);
+  return { route_id: r.id, route_name: r.name, covered: best.b_in_a, on_route: best.a_in_b };
+}
+
+/**
+ * Log a ride on a route: {date (YYYY-MM-DD), distance_km, file_hash, note}. The route keeps
+ * its rides in `rides`, oldest first; the same recorded file is logged only once.
+ */
+export async function logRide(id, { date = null, distance_km = null, file_hash = null, note = null } = {}) {
+  const r = getRoute(id);
+  const rides = [...(r.rides || [])];
+  if (file_hash && rides.some((x) => x.file_hash === file_hash)) return r;
+  rides.push({ date: date || new Date().toISOString().slice(0, 10), distance_km, file_hash, note: note || null });
+  rides.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  r.rides = rides;
+  await lib.saveRoutes([r]);
+  return r;
+}
+
+/**
  * Import a batch: files [{name, data, override: {source_name, source_url, activity, tags}}].
  * Batch values apply to every file; per-file values override them (per-file tags are added).
  */
@@ -522,11 +610,14 @@ export async function importFiles(files, batch = {}, onProgress = null) {
     onProgress?.(n, files.length, f.name);
     let res;
     try {
-      res = await importGpx(f.data, f.name, {
+      const { data, name } = await unwrapFile(f.data, f.name); // ride.fit.gz -> ride.fit
+      res = await importGpx(data, name, {
         source_name: (ov.source_name || batch.source_name || "").trim() || null,
         source_url: (ov.source_url || batch.source_url || "").trim() || null,
-        activity: (ov.activity ? checkActivity(ov.activity) : null) || batchActivity,
+        activity: ov.activity ? checkActivity(ov.activity) : null,
+        default_activity: batchActivity,
         tags: [...batchTags, ...splitTags(ov.tags)],
+        match_rides: f.match_rides ?? batch.match_rides ?? true,
       });
     } catch (err) {
       res = { filename: f.name, status: "error", message: err.message, routes: [], duplicates: [], similar: [] };
@@ -549,7 +640,7 @@ export async function backfillTrackHashes() {
   for (const r of missing) {
     try {
       const file = await lib.getFile(r.file_hash);
-      const track = file && parseGpx(file.data).tracks[r.track_index || 0];
+      const track = file && parseTrackFile(file.data).tracks[r.track_index || 0];
       if (!track) continue;
       r.track_hash = await trackHash(track.points);
       changed.push(r);
@@ -571,7 +662,7 @@ export async function loadTrack(r) {
   if (hit && hit.hash === r.file_hash && hit.isLoop === r.is_loop) return hit.track;
   const file = await lib.getFile(r.file_hash);
   if (!file) throw new ServiceError(`GPX file of '${r.name}' not found in the library`, 404);
-  const tracks = parseGpx(file.data).tracks;
+  const tracks = parseTrackFile(file.data).tracks;
   const track = cb.makeTrack(tracks[r.track_index].points, r.is_loop);
   trackCache.set(r.id, { hash: r.file_hash, isLoop: r.is_loop, track });
   if (trackCache.size > 64) trackCache.delete(trackCache.keys().next().value);
@@ -586,7 +677,7 @@ export async function routeProfile(r) {
   if (hit && hit.hash === r.file_hash && hit.index === r.track_index) return hit.profile;
   const file = await lib.getFile(r.file_hash);
   if (!file) throw new ServiceError(`GPX file of '${r.name}' not found in the library`, 404);
-  const profile = buildProfile(parseGpx(file.data).tracks[r.track_index].points);
+  const profile = buildProfile(parseTrackFile(file.data).tracks[r.track_index].points);
   profileCache.set(r.id, { hash: r.file_hash, index: r.track_index, profile });
   if (profileCache.size > 32) profileCache.delete(profileCache.keys().next().value);
   return profile;

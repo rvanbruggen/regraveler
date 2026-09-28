@@ -114,6 +114,7 @@ td.name { white-space: normal; min-width: 220px; font-weight: 500; }
 .result.imported { border-color: var(--ok); }
 .result.partial, .result.duplicate { border-color: var(--warn); }
 .result.error { border-color: var(--danger); }
+.result.ride { border-color: var(--accent); }
 .result .warn { color: var(--warn); }
 .result a { color: var(--accent); cursor: pointer; }
 

@@ -1,8 +1,8 @@
-"""The library store: routes (JSON documents), original GPX files, "not duplicates" pairs and
+"""The library store: routes (JSON documents), original route files (GPX, TCX, FIT), "not duplicates" pairs and
 settings. No route logic here: the page computes everything, the server keeps it.
 
 Backups use the same zip format as the browser version (web/js/backup.js): library.json plus
-gpx/<sha256>.gpx for every original file.
+gpx/<sha256>.<gpx|tcx|fit> for every original file (its own extension).
 """
 from __future__ import annotations
 
@@ -125,10 +125,25 @@ def _safe_part(text: str, fallback: str) -> str:
     return text or fallback
 
 
+# Route file formats: the original file is stored as it is, with its own extension.
+TRACK_SUFFIXES = (".gpx", ".tcx", ".fit")
+MEDIA_TYPES = {".gpx": "application/gpx+xml", ".tcx": "application/vnd.garmin.tcx+xml", ".fit": "application/vnd.ant.fit"}
+
+
+def suffix_of(name: str) -> str:
+    """.gpx, .tcx or .fit (anything else counts as .gpx)."""
+    suffix = Path(name or "").suffix.lower()
+    return suffix if suffix in TRACK_SUFFIXES else ".gpx"
+
+
+def media_type(name: str) -> str:
+    return MEDIA_TYPES[suffix_of(name)]
+
+
 def _safe_filename(name: str) -> str:
     name = Path(name or "").name  # strip any directory parts
     name = re.sub(r"[^\w\-. ()]+", "_", name).strip() or "route.gpx"
-    if not name.lower().endswith(".gpx"):
+    if not name.lower().endswith(TRACK_SUFFIXES):
         name += ".gpx"
     return name
 
@@ -150,14 +165,14 @@ _disk_cache: dict[str, tuple[int, int, str]] = {}
 
 
 def disk_index() -> dict[str, str]:
-    """{sha256: relative path} of every .gpx file under GPX_DIR (first path wins)."""
+    """{sha256: relative path} of every route file (.gpx, .tcx, .fit) under GPX_DIR (first path wins)."""
     root = config.GPX_DIR
     seen: dict[str, str] = {}
     if not root.is_dir():
         return seen
     live = set()
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.suffix.lower() != ".gpx" or any(p.startswith(".") for p in path.relative_to(root).parts):
+        if not path.is_file() or path.suffix.lower() not in TRACK_SUFFIXES or any(p.startswith(".") for p in path.relative_to(root).parts):
             continue
         rel = path.relative_to(root).as_posix()
         st = path.stat()
@@ -335,7 +350,7 @@ def backup_zip(session: Session) -> bytes:
                 _, path = get_file(session, f.hash)
             except StoreError:
                 continue  # missing on disk: the routes are still in library.json
-            zf.writestr(f"gpx/{f.hash}.gpx", path.read_bytes())
+            zf.writestr(f"gpx/{f.hash}{suffix_of(f.name)}", path.read_bytes())
             files.append({"hash": f.hash, "name": f.name})
         manifest = {
             "format": BACKUP_FORMAT,
@@ -360,8 +375,9 @@ def read_backup(data: bytes) -> dict:
     files = []
     for f in manifest.get("files", []):
         try:
-            content = zf.read(f"gpx/{f['hash']}.gpx")
-        except KeyError:
+            names = (f"gpx/{f['hash']}{suffix_of(f.get('name') or '')}", f"gpx/{f['hash']}.gpx")
+            content = next(zf.read(n) for n in names if n in zf.namelist())
+        except (KeyError, StopIteration):
             raise StoreError(f"The backup is incomplete: {f.get('name')} is missing", 400)
         files.append({**f, "data": content})
     return {

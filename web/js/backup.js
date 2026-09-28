@@ -1,5 +1,5 @@
 // Library backups: one zip with library.json (routes, settings, "not duplicates" decisions)
-// and the original GPX files under gpx/<file hash>.gpx. The same format for the browser
+// and the original route files under gpx/<file hash>.<gpx|tcx|fit>. The same format for the browser
 // version and the server (app/store.py), so a library moves between them in either direction.
 // The browser's storage can be cleared (site data, private windows, low disk space), so
 // backups are also how a browser library survives.
@@ -10,6 +10,13 @@
 
 import { VERSION } from "./config.js";
 import { makeZip, readZip } from "./zip.js";
+import { extensionOf } from "./trackfile.js";
+
+/**
+ * Where an original file is in the zip: gpx/<hash>.<its own extension> (gpx, tcx or fit; the
+ * folder keeps its name so backups from before TCX/FIT support read the same way).
+ */
+const fileEntry = (f) => `gpx/${f.hash}.${extensionOf(f.name)}`;
 
 export const FORMAT = "rerouter-backup";
 
@@ -30,7 +37,7 @@ export async function makeBackup(library) {
   };
   return makeZip([
     { name: "library.json", data: JSON.stringify(manifest) },
-    ...dump.files.map((f) => ({ name: `gpx/${f.hash}.gpx`, data: f.data })),
+    ...dump.files.map((f) => ({ name: fileEntry(f), data: f.data })),
   ]);
 }
 
@@ -68,7 +75,7 @@ export async function makeSelection(library, ids, { title = null, description = 
   };
   return makeZip([
     { name: "library.json", data: JSON.stringify(manifest) },
-    ...files.map((f) => ({ name: `gpx/${f.hash}.gpx`, data: f.data })),
+    ...files.map((f) => ({ name: fileEntry(f), data: f.data })),
   ]);
 }
 
@@ -81,7 +88,7 @@ export async function readBackup(buffer) {
   const manifest = JSON.parse(new TextDecoder().decode(json));
   if (manifest.format !== FORMAT) throw new Error("This is not a rerouter backup");
   const files = manifest.files.map((f) => {
-    const data = byName.get(`gpx/${f.hash}.gpx`);
+    const data = byName.get(fileEntry(f)) ?? byName.get(`gpx/${f.hash}.gpx`);
     if (!data) throw new Error(`The backup is incomplete: ${f.name} is missing`);
     return { hash: f.hash, name: f.name, data };
   });

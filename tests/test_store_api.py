@@ -230,3 +230,31 @@ def test_ignored_files_are_not_offered_again(client, library):
 
     assert client.post("/api/disk-files/unignore").json() == {"unignored": 2}
     assert len(client.get("/api/disk-files").json()["files"]) == 3
+
+
+def test_tcx_and_fit_originals_keep_their_format(client, library):
+    fit = b"\x0e\x10\x00\x00\x00\x00\x00\x00.FIT\x00\x00" + bytes(range(40))  # the server never reads it
+    tcx = b'<?xml version="1.0"?><TrainingCenterDatabase></TrainingCenterDatabase>'
+    assert put_file(client, fit, "Morning ride.fit") == "uploads/gravel-db/Morning ride.fit"
+    assert put_file(client, tcx, "Run.tcx") == "uploads/gravel-db/Run.tcx"
+    res = client.get(f"/api/files/{h(fit)}")
+    assert res.content == fit and res.headers["content-type"] == "application/vnd.ant.fit"
+    assert client.get(f"/api/files/{h(tcx)}").headers["content-type"].startswith("application/vnd.garmin.tcx+xml")
+    # A file of another type still gets .gpx (never an executable or a page).
+    assert put_file(client, gpx(5), "evil.html") == "uploads/gravel-db/evil.html.gpx"
+
+    # Backups keep the extension, and restore reads them back.
+    client.put("/api/routes", json={"routes": [route(fit, "Ride", file_format="fit"), route(tcx, "Run", file_format="tcx")]})
+    backup = client.get("/api/backup").content
+    names = zipfile.ZipFile(io.BytesIO(backup)).namelist()
+    assert f"gpx/{h(fit)}.fit" in names and f"gpx/{h(tcx)}.tcx" in names
+    res = client.post("/api/restore", content=backup, headers={"Content-Type": "application/zip"})
+    assert res.status_code == 200, res.text
+    assert client.get(f"/api/files/{h(fit)}").content == fit
+
+    # Files in the GPX folder: FIT and TCX files are offered for import too.
+    (library / "rides").mkdir()
+    (library / "rides" / "Evening.fit").write_bytes(fit + b"x")
+    paths = [f["path"] for f in client.get("/api/disk-files").json()["files"]]
+    assert "rides/Evening.fit" in paths
+    assert client.get("/api/disk-files/content", params={"path": "rides/Evening.fit"}).content == fit + b"x"

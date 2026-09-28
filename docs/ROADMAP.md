@@ -140,8 +140,10 @@ Conclusions:
   big-endian, and TCX trackpoints without a position. The real files are only used locally,
   to check the decoder against the Python probe.
 
-**Open point:** do we keep the original FIT of a ride that was only *logged*, not imported?
-(Proposal: no; only the date and distance are logged.)
+**Built (2026-09-28):** `fit.js`, `tcx.js`, `trackfile.js`; G1 in the page, the server and
+backups. A logged ride keeps no file, only `{date, distance_km, file_hash, note}` in the
+route's `rides` (the hash stops the same file being logged twice). Still wanted: a real FIT or
+TCX **course** from a device, to check against the synthetic ones.
 
 **Tests:** FIT header/definition/data, both byte orders, compressed timestamps, developer fields,
 TCX activity + course, gzip, and the ride-match threshold.
@@ -400,5 +402,4 @@ part as a new route with the trip in the notes.
 ## Still open
 
 - A FIT or TCX **course** (a planned route) as a test file.
-- Keep the FIT of a ride that is only logged? (proposal: no)
 - Transitous fair-use terms for a public site, iRail rate limits, how far ahead timetables reach.

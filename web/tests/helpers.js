@@ -84,3 +84,114 @@ export const approx = (actual, expected, { abs = null, rel = null } = {}) => {
     throw new Error(`expected ${actual} to be ${expected} ± ${tol}`);
   }
 };
+
+// ------------------------------------------------------------------ FIT and TCX test files
+
+const FIT_EPOCH_S = 631065600;
+
+/**
+ * A FIT file with the given points [[lat, lon, ele|null], ...] (one per second), built like a
+ * device would: file_id, (course), session and record messages. Options exercise the parts of
+ * the format real files use: big-endian definitions (Garmin), developer fields (Wahoo), the
+ * enhanced altitude field, compressed timestamps, records without a position.
+ */
+export function fitFile(points, {
+  bigEndian = false, fileType = 4, sport = 2, subSport = 0, courseName = null, devFields = false,
+  enhancedAltitude = false, compressed = false, noPositionAt = [], start = "2026-09-14T08:00:00Z", fixCrc = true,
+} = {}) {
+  const out = [];
+  const little = !bigEndian;
+  const num = (v, size, signed = false) => {
+    const b = new DataView(new ArrayBuffer(size));
+    if (size === 1) b.setUint8(0, v);
+    else if (size === 2) signed ? b.setInt16(0, v, little) : b.setUint16(0, v, little);
+    else signed ? b.setInt32(0, v, little) : b.setUint32(0, v, little);
+    return [...new Uint8Array(b.buffer)];
+  };
+  // fields: [fieldNumber, size, baseType]; dev: [[fieldNumber, size, devIndex]]
+  const define = (local, global, fields, dev = null) => {
+    out.push(0x40 | (dev ? 0x20 : 0) | local, 0, little ? 0 : 1, ...num(global, 2), fields.length);
+    for (const f of fields) out.push(...f);
+    if (dev) {
+      out.push(dev.length);
+      for (const d of dev) out.push(...d);
+    }
+  };
+  const t0 = Math.round(Date.parse(start) / 1000) - FIT_EPOCH_S;
+
+  define(0, 0, [[0, 1, 0x00], [1, 2, 0x84], [4, 4, 0x86]]);
+  out.push(0, fileType, ...num(32, 2), ...num(t0, 4));
+  if (courseName) {
+    define(1, 31, [[5, 16, 0x07]]);
+    const name = [...new TextEncoder().encode(courseName)].slice(0, 15);
+    out.push(1, ...name, ...new Array(16 - name.length).fill(0));
+  }
+  define(2, 18, [[2, 4, 0x86], [5, 1, 0x00], [6, 1, 0x00]]);
+  out.push(2, ...num(t0, 4), sport, subSport);
+  // An unknown manufacturer message, to be skipped.
+  define(5, 65280, [[0, 4, 0x86], [1, 3, 0x0d]]);
+  out.push(5, ...num(12345, 4), 1, 2, 3);
+
+  const alt = enhancedAltitude ? [78, 4, 0x86] : [2, 2, 0x84];
+  const posFields = [[0, 4, 0x85], [1, 4, 0x85], alt, [3, 1, 0x02]];
+  const dev = devFields ? [[0, 4, 0], [1, 2, 0]] : null;
+  define(3, 20, [[253, 4, 0x86], ...posFields], dev);
+  // Records with a compressed timestamp header (local types 0-3 only; 2 is free again after the session).
+  if (compressed) define(2, 20, posFields, dev);
+  const semi = (deg) => Math.round((deg / 180) * 2 ** 31);
+  points.forEach(([lat, lon, ele], i) => {
+    const t = t0 + i;
+    const noPos = noPositionAt.includes(i);
+    const fields = [
+      ...num(noPos ? 0x7fffffff : semi(lat), 4, true), ...num(noPos ? 0x7fffffff : semi(lon), 4, true),
+      ...(ele == null ? num(enhancedAltitude ? 0xffffffff : 0xffff, alt[1]) : num(Math.round((ele + 500) * 5), alt[1])),
+      120,
+    ];
+    const devBytes = devFields ? [9, 9, 9, 9, 7, 7] : [];
+    if (compressed && i > 0) out.push(0x80 | (2 << 5) | (t & 0x1f), ...fields, ...devBytes);
+    else out.push(3, ...num(t, 4), ...fields, ...devBytes);
+  });
+
+  const data = new Uint8Array(out);
+  const file = new Uint8Array(14 + data.length + 2);
+  const view = new DataView(file.buffer);
+  file.set([14, 0x20], 0);
+  view.setUint16(2, 2132, true);
+  view.setUint32(4, data.length, true);
+  file.set([0x2e, 0x46, 0x49, 0x54], 8);
+  view.setUint16(12, fitCrcHelper(file, 0, 12), true);
+  file.set(data, 14);
+  view.setUint16(14 + data.length, fixCrc ? fitCrcHelper(file, 0, 14 + data.length) : 0, true);
+  return file;
+}
+
+function fitCrcHelper(bytes, start, end) {
+  const T = [0x0000, 0xcc01, 0xd801, 0x1400, 0xf001, 0x3c00, 0x2800, 0xe401,
+    0xa001, 0x6c00, 0x7800, 0xb401, 0x5000, 0x9c01, 0x8801, 0x4400];
+  let crc = 0;
+  for (let i = start; i < end; i++) {
+    const b = bytes[i];
+    let t = T[crc & 0xf];
+    crc = ((crc >> 4) & 0x0fff) ^ t ^ T[b & 0xf];
+    t = T[crc & 0xf];
+    crc = ((crc >> 4) & 0x0fff) ^ t ^ T[(b >> 4) & 0xf];
+  }
+  return crc;
+}
+
+/** A TCX file: an activity (laps of trackpoints, some without a position) or a course. */
+export function tcxXml(points, { course = null, sport = "Biking", start = "2026-09-14T08:00:00Z", noPositionAt = [], laps = 1 } = {}) {
+  const tp = (p, i) => {
+    const time = new Date(Date.parse(start) + i * 1000).toISOString();
+    const pos = noPositionAt.includes(i) ? "" :
+      `<Position><LatitudeDegrees>${p[0].toFixed(7)}</LatitudeDegrees><LongitudeDegrees>${p[1].toFixed(7)}</LongitudeDegrees></Position>`;
+    return `<Trackpoint><Time>${time}</Time>${pos}${p[2] != null ? `<AltitudeMeters>${p[2]}</AltitudeMeters>` : ""}<HeartRateBpm><Value>120</Value></HeartRateBpm></Trackpoint>`;
+  };
+  const per = Math.ceil(points.length / laps);
+  const chunks = Array.from({ length: laps }, (_, k) => points.slice(k * per, (k + 1) * per).map((p, j) => tp(p, k * per + j)).join(""));
+  const body = course
+    ? `<Courses><Course><Name>${course}</Name><Track>${chunks.join("")}</Track></Course></Courses>`
+    : `<Activities><Activity Sport="${sport}"><Id>${start}</Id>${chunks.map((c) => `<Lap StartTime="${start}"><Track>${c}</Track></Lap>`).join("")}</Activity></Activities>`;
+  return new TextEncoder().encode(`<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">${body}</TrainingCenterDatabase>`);
+}
