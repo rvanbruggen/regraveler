@@ -5,12 +5,13 @@
 import * as brouter from "./brouter.js";
 import * as cb from "./combiner.js";
 import { config } from "./config.js";
-import { pointInPolygon, round, simplifyLatLon, toMetric } from "./geo.js";
+import { geodesicDistance, pointInPolygon, round, simplifyLatLon, toMetric } from "./geo.js";
 import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
 import * as osm from "./osm.js";
 import * as poi from "./poi.js";
 import * as share from "./share.js";
+import * as trains from "./trains.js";
 import { bboxOf, duplicatePairs, findSimilar, groupPairs, proximityPairs } from "./similarity.js";
 import { buildProfile } from "./profile.js";
 import { computeStats } from "./stats.js";
@@ -1871,5 +1872,165 @@ export async function addSharedRoute(shared) {
   });
   if (res.status === "duplicate") throw new ServiceError(`You already have this route: ${res.duplicates[0]?.name || "in your library"}`, 409);
   if (res.status !== "imported") throw new ServiceError(res.message || "Could not add the route", 422);
+  return { id: res.routes[0].id, name: res.routes[0].name };
+}
+
+// ------------------------------------------------------------------ train rides
+
+const TRAIN_BUFFER_MIN = 10; // from arriving at a station on the bike to the train leaving
+
+/** Stations near home (for choosing the home station), nearest first. */
+export async function homeStations(maxM = 15000) {
+  const h = home();
+  if (!h) return [];
+  return trains.stationsNear(await trains.allStations(), h.lat, h.lon, maxM).slice(0, 12)
+    .map((x) => ({ key: `${x.station.name}@${x.station.lat},${x.station.lon}`, name: x.station.name, km: round(x.m / 1000, 1), station: x.station }));
+}
+
+const addMin = (d, min) => new Date(d.getTime() + min * 60000);
+
+/**
+ * Days out with the train, with library routes as the riding part. req: {date "YYYY-MM-DD",
+ * start "HH:MM" (leaving home), patterns, max_transfers, max_station_m, home_reach_m,
+ * min_km, max_km, speed_kmh, activities, home_station (key from homeStations)}. Plans the
+ * candidates offline, then asks the timetables for the best ones (config.TRAIN_TRIPS).
+ * Returns {candidates, trips: [...], failed, home_station}; trips have legs of kind "ride"
+ * and "train", leave and back (Date), day_hours, ride_km.
+ */
+export async function trainRides(req, { fetchFn = fetch, onProgress = null } = {}) {
+  const h = home();
+  if (!h) throw new ServiceError("Set your home first (Utilities › Library & settings › Home): train rides start and end there");
+  const list = await trains.allStations();
+  const near = await homeStations();
+  const chosen = near.find((x) => x.key === req.home_station) || near[0];
+  if (!chosen) throw new ServiceError("There is no train station within 15 km of your home");
+  const homeStation = chosen.station;
+  const speed = Number(req.speed_kmh) || 20;
+  const activities = new Set(req.activities?.length ? req.activities : ["gravel", "road", "mtb"]);
+  const routes = lib.all().filter((r) => activities.has(r.activity));
+  const cands = trains.planCandidates(routes, list, {
+    patterns: req.patterns, home: h, homeStation,
+    maxStationM: Number(req.max_station_m) || 3000, homeReachM: Number(req.home_reach_m) || 5000,
+    minKm: Number(req.min_km) || 0, maxKm: Number(req.max_km) || Infinity,
+  });
+  const [y, mo, d] = String(req.date).split("-").map(Number);
+  const [hh, mm] = String(req.start || "08:00").split(":").map(Number);
+  const leave = new Date(y, mo - 1, d, hh, mm);
+  if (Number.isNaN(leave.getTime())) throw new ServiceError("Choose a date and a start time");
+  const homeLegKm = round((geodesicDistanceKm(h, homeStation) * 1.3), 1);
+  const rideMin = (km) => Math.round((km / speed) * 60);
+  const maxTransfers = Number(req.max_transfers ?? 2);
+  const train = (from, to, after) => trains.connections(from, to, after, { maxTransfers, fetchFn }).then((l) => l.find((c) => c.dep >= after) || null);
+
+  const trips = [], failed = [];
+  // Each chosen pattern gets its turn (else loops next to a station would take every place).
+  const byPattern = trains.PATTERNS.map((p) => cands.filter((c) => c.pattern === p)).filter((l) => l.length);
+  const todo = [];
+  for (let i = 0; todo.length < config.TRAIN_TRIPS && byPattern.some((l) => i < l.length); i++) {
+    for (const l of byPattern) if (i < l.length && todo.length < config.TRAIN_TRIPS) todo.push(l[i]);
+  }
+  for (const [n, c] of todo.entries()) {
+    onProgress?.(n, todo.length);
+    const r = lib.get(c.route_id);
+    try {
+      const legs = [];
+      let t = leave;
+      const ride = (from, to, km) => {
+        const end = addMin(t, rideMin(km));
+        legs.push({ kind: "ride", from, to, km: round(km, 1), start: t, end });
+        t = end;
+      };
+      const takeTrain = async (from, to) => {
+        const conn = await train(from, to, addMin(t, TRAIN_BUFFER_MIN));
+        if (!conn) throw new Error(`no train from ${from.name} to ${to.name} with at most ${maxTransfers} transfer(s) that day`);
+        legs.push({ kind: "train", from: from.name, to: to.name, conn });
+        t = conn.arr;
+      };
+      if (c.pattern === "ride-out") {
+        ride("home", c.to.name, c.ride_km);
+        await takeTrain(c.to, homeStation);
+        if (homeLegKm > 0.3) ride(homeStation.name, "home", homeLegKm);
+      } else {
+        if (homeLegKm > 0.3) ride("home", homeStation.name, homeLegKm);
+        await takeTrain(homeStation, c.from);
+        if (c.pattern === "train-out") ride(c.from.name, "home", c.ride_km);
+        else {
+          ride(c.from.name, c.to.name, c.ride_km);
+          await takeTrain(c.to, homeStation);
+          if (homeLegKm > 0.3) ride(homeStation.name, "home", homeLegKm);
+        }
+      }
+      trips.push({
+        ...c, from: c.from === "home" ? "home" : c.from.name, to: c.to === "home" ? "home" : c.to.name,
+        from_station: c.from === "home" ? null : c.from, to_station: c.to === "home" ? null : c.to,
+        route_name: r.name, route_km: r.distance_km, elevation_gain_m: r.elevation_gain_m,
+        legs, leave, back: t, day_hours: round((t - leave) / 3600000, 1),
+        train_minutes: legs.filter((l) => l.kind === "train").reduce((s, l) => s + l.conn.minutes, 0),
+      });
+    } catch (err) {
+      if (err instanceof trains.TrainsUnavailable && !trips.length && n === todo.length - 1) throw new ServiceError(err.message, 503);
+      failed.push({ route_name: r.name, pattern: c.pattern, reason: err.message });
+    }
+  }
+  trips.sort((a, b) => a.back - b.back || a.day_hours - b.day_hours);
+  return { candidates: cands.length, asked: todo.length, trips, failed, home_station: chosen.name };
+}
+
+function geodesicDistanceKm(a, b) {
+  return geodesicDistance(a.lat, a.lon, b.lat, b.lon) / 1000;
+}
+
+/**
+ * The riding part of a train trip as a route: from the station (or home) to the route, the
+ * route (the other way round, or a loop from the station), and on to the station (or home),
+ * with connectors routed by BRouter (or straight, `straight`). {points, description}.
+ */
+async function trainTripRoute(trip, { straight = false } = {}) {
+  const r = getRoute(trip.route_id);
+  const h = home();
+  const track = await loadTrack(r);
+  let body;
+  if (trip.pattern === "loop") body = cb.restartLoop(track, trip.start_at_m || 0);
+  else body = trip.reversed ? cb.section(track, track.length, 0) : cb.section(track, 0, track.length);
+  const place = (end) => (end === "home" ? [h.lat, h.lon] : null);
+  const from = trip.from_station ? [trip.from_station.lat, trip.from_station.lon] : place(trip.from);
+  const to = trip.to_station ? [trip.to_station.lat, trip.to_station.lon] : place(trip.to);
+  const profile = config.ACTIVITY_PROFILES[r.activity] || config.BROUTER_PROFILES[0];
+  const router = straight ? cb.straightRouter : (p, q) => brouter.route(p, q, profile);
+  const xyz = (pts) => pts.map(([lat, lon, e]) => [...toMetric(lat, lon), e == null ? NaN : e]);
+  const parts = [];
+  try {
+    const first = cb.latLonOf(body[0]), last = cb.latLonOf(body[body.length - 1]);
+    if (from && geodesicDistance(from[0], from[1], first[0], first[1]) > 30) parts.push(xyz(await router(from, first)));
+    parts.push(body);
+    if (to && geodesicDistance(to[0], to[1], last[0], last[1]) > 30) parts.push(xyz(await router(last, to)));
+  } catch (err) {
+    if (err instanceof brouter.BRouterUnavailable) throw new ServiceError(err.message, 503);
+    if (err instanceof brouter.BRouterError) throw new ServiceError(err.message, 502);
+    throw err;
+  }
+  const trainsText = (trip.legs || []).filter((l) => l.kind === "train")
+    .map((l) => `${l.conn.trains.join(" + ")} ${l.from} → ${l.to}`).join("; ");
+  const description = `Train ride: ${r.name}, from ${trip.from} to ${trip.to}` + (trainsText ? ` (${trainsText})` : "") + ".";
+  return { route: r, points: cb.toLatLon(cb.join(parts)), description };
+}
+
+export async function trainTripGpx(trip, name, opts = {}) {
+  const { points, description } = await trainTripRoute(trip, opts);
+  return { filename: `${name}.gpx`.replace(/"/g, ""), text: writeGpx(name, points, description) };
+}
+
+export async function trainTripSave(trip, name, opts = {}) {
+  name = String(name || "").trim();
+  if (!name) throw new ServiceError("Give the route a name");
+  const { route: orig, points, description } = await trainTripRoute(trip, opts);
+  const res = await importGpx(new TextEncoder().encode(writeGpx(name, points, description)), `${slugify(name).slice(0, 150)}.gpx`, {
+    source_name: orig.source_name, source_url: orig.source_url, derived_from: [orig.id], tags: [...(orig.tags || []), "train"],
+    notes: description, activity: orig.activity, name,
+  });
+  if (res.status !== "imported") {
+    if (res.status === "duplicate" && res.duplicates.length) throw new ServiceError(`This route is already saved as '${res.duplicates[0].name}'`, 409);
+    throw new ServiceError(`Could not save the route: ${res.message}`, 500);
+  }
   return { id: res.routes[0].id, name: res.routes[0].name };
 }

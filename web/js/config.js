@@ -26,6 +26,10 @@ export const config = {
   PUBLIC_SITE_URL: "https://rerouter.eu/",
   // The privacy zone around home, left out of the start and end of shared routes.
   HOME_PRIVACY_M: 500,
+  // Train rides: timetables (Transitous, iRail) are asked for this many trips at most, and
+  // each answer is waited for this long.
+  TRAIN_TRIPS: 8,
+  TRAINS_TIMEOUT_S: 25,
   // Overpass API servers for places from OpenStreetMap, tried in turn (they are often busy).
   // On a rerouter server the page asks the server (api/overpass), which caches the answers.
   OVERPASS_URLS: [

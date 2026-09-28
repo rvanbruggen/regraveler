@@ -416,6 +416,17 @@ part as a new route with the trip in the notes.
 
 ---
 
+**Built (2026-09-28):** the Train rides utility (four patterns, home station, transfers
+filtered here, Transitous with iRail as fallback, stations from OpenStreetMap via
+`build_stations.py`: 2,370 stations, 1,886 with a UIC code). Findings: Belgian stations get
+their Transitous id from the UIC code (`be-sncb_S<uic>`); others are looked up by name and the
+nearest result kept (ids differ per feed: `nl-OpenOV_stoparea:…`, `de-DELFI_…`,
+`be-sncb_<uic>`). Transitous answers 403 to Node's default fetch (not to browsers). Stations
+within 10 km of the home station don't count, and each pattern gets its turn among the trips
+that are timed (otherwise loops next to a station took every place).
+
+---
+
 ## Answered (2026-09-28)
 
 1. FIT/TCX samples: two FIT and two TCX files, all recorded activities (see item 2). A **course**

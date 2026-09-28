@@ -96,7 +96,7 @@ function fillActivitySelects(activities) {
 let currentView = "library";
 
 // Views reached through the Utilities menu.
-const UTILITIES = ["combine", "restart", "weather", "findplaces", "link", "duplicates", "data"];
+const UTILITIES = ["combine", "restart", "weather", "findplaces", "trains", "link", "duplicates", "data"];
 // Views a link (URL hash) can open.
 const LINKABLE_VIEWS = ["library", "map", "places", "import", ...UTILITIES];
 
@@ -115,6 +115,7 @@ function showView(name) {
   if (name === "restart") showRestart();
   if (name === "weather") showWeather();
   if (name === "findplaces") showFindPlaces();
+  if (name === "trains") showTrains();
   if (name === "duplicates") loadDuplicates();
   if (name === "data") showData();
   if (name === "places") renderPlaces();
@@ -4519,6 +4520,175 @@ $("#d-findplaces").addEventListener("click", async () => {
   await fp.loading;
   if (fp.id !== id) await setFindRoute(id);
 });
+
+// ------------------------------------------------------------------ train rides (utility)
+
+const PATTERN_LABELS = {
+  "ride-out": "Ride out, train back", "train-out": "Train out, ride home",
+  "train-both": "Train out and back", loop: "Loop from a station",
+};
+const tr = { map: null, layer: null, trips: [], trip: null, busy: false };
+const hm2 = (d) => d.toTimeString().slice(0, 5);
+
+/** The next Saturday (or today, on a Saturday), as YYYY-MM-DD. */
+function nextSaturday() {
+  const d = new Date();
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function showTrains() {
+  if (!tr.map) {
+    tr.map = L.map("trains-map").setView([50.9, 4.5], 9);
+    addMapLayers(tr.map);
+    tr.layer = L.layerGroup().addTo(tr.map);
+    $("#tr-date").value = nextSaturday();
+    try {
+      const v = Number(localStorage.getItem("rerouter.weatherSpeed.gravel"));
+      if (v > 0) $("#tr-speed").value = v;
+    } catch { /* default */ }
+  }
+  setTimeout(() => tr.map.invalidateSize(), 0);
+  const h = svc.home();
+  $("#tr-nohome").hidden = !!h;
+  $("#tr-form").hidden = !h;
+  if (!h) return;
+  let near = [];
+  try {
+    near = await svc.homeStations();
+  } catch (err) {
+    $("#tr-status").textContent = err.message;
+  }
+  const sel = $("#tr-station");
+  const cur = sel.value;
+  sel.replaceChildren(...(near.length ? near.map((s) => el("option", { value: s.key }, `${s.name} (${s.km} km)`)) : [el("option", { value: "" }, "no station within 15 km of home")]));
+  if (near.some((s) => s.key === cur)) sel.value = cur;
+  if (!tr.trips.length) {
+    tr.layer.clearLayers();
+    L.circleMarker([h.lat, h.lon], { radius: 6, color: "#b3261e", fillOpacity: 1 }).bindTooltip("Home").addTo(tr.layer);
+    tr.map.setView([h.lat, h.lon], 10);
+  }
+}
+
+$("#tr-sethome").addEventListener("click", () => showView("data"));
+
+$("#tr-search").addEventListener("click", async () => {
+  if (tr.busy) return;
+  const req = {
+    date: $("#tr-date").value, start: $("#tr-start").value,
+    patterns: $$('input[name="tr-pattern"]:checked').map((i) => i.value),
+    activities: $$('input[name="tr-act"]:checked').map((i) => i.value),
+    max_transfers: Number($("#tr-transfers").value), max_station_m: Number($("#tr-reach").value),
+    min_km: Number($("#tr-min").value) || 0, max_km: Number($("#tr-max").value) || Infinity,
+    speed_kmh: Number($("#tr-speed").value) || 20, home_station: $("#tr-station").value,
+  };
+  if (!req.patterns.length) return ($("#tr-status").textContent = "Tick at least one kind of trip.");
+  tr.busy = true;
+  $("#tr-search").disabled = true;
+  $("#tr-trip").hidden = true;
+  $("#tr-results").replaceChildren();
+  $("#tr-status").textContent = "Looking for routes near stations…";
+  try {
+    const res = await svc.trainRides(req, {
+      onProgress: (n, of) => ($("#tr-status").textContent = `Asking the timetables: trip ${n + 1} of ${of}…`),
+    });
+    tr.trips = res.trips;
+    $("#tr-status").textContent = !res.candidates
+      ? "None of your routes fits: try a larger distance to a station, a wider km range, or other kinds of trip."
+      : `${res.trips.length} train ride${res.trips.length === 1 ? "" : "s"} from ${res.home_station} ` +
+        `(${res.candidates} routes fit; the best ${res.asked} were timed` + (res.failed.length ? `, ${res.failed.length} without a suitable train` : "") + ").";
+    renderTrainTrips();
+  } catch (err) {
+    $("#tr-status").textContent = err.message;
+  } finally {
+    tr.busy = false;
+    $("#tr-search").disabled = false;
+  }
+});
+
+function trainLine(l) {
+  return `🚆 ${hm2(l.conn.dep)} ${l.from} → ${l.to} ${hm2(l.conn.arr)}` +
+    ` (${l.conn.trains.join(" + ")}${l.conn.transfers ? `, ${l.conn.transfers} transfer${l.conn.transfers > 1 ? "s" : ""}` : ""})`;
+}
+
+function renderTrainTrips() {
+  $("#tr-results").replaceChildren(...tr.trips.map((t, i) => el("div", {
+    class: `tr-card${tr.trip === t ? " active" : ""}`, onclick: () => showTrainTrip(i),
+  },
+    el("div", { class: "tr-kind" }, PATTERN_LABELS[t.pattern]),
+    el("div", { class: "tr-head" }, el("span", {}, t.route_name), el("span", {}, `${hm2(t.leave)}–${hm2(t.back)}`)),
+    el("div", { class: "tr-line" }, `🚴 ${fmt.km(t.ride_km)}${t.elevation_gain_m ? `, ${fmt.m(t.elevation_gain_m)} up` : ""} · 🚆 ${t.train_minutes} min · ${t.day_hours} h in all`),
+    ...t.legs.filter((l) => l.kind === "train").map((l) => el("div", { class: "tr-line" }, trainLine(l))))));
+}
+
+function showTrainTrip(i) {
+  const t = tr.trips[i];
+  tr.trip = t;
+  renderTrainTrips();
+  $("#tr-trip").hidden = false;
+  $("#tr-saved").textContent = "";
+  $("#tr-trip-title").textContent = `${PATTERN_LABELS[t.pattern]}: ${t.route_name}`;
+  $("#tr-name").value = `${t.route_name} (train ride)`;
+  $("#tr-legs").replaceChildren(...t.legs.map((l) => el("li", {}, l.kind === "train" ? trainLine(l)
+    : `🚴 ${hm2(l.start)}–${hm2(l.end)} ride ${fmt.km(l.km)}: ${l.from === "home" ? "from home" : `from ${l.from}`} ${l.to === "home" ? "home" : `to ${l.to}`}`)));
+  // The map: the route, the stations, home.
+  const r = svc.route(t.route_id);
+  const h = svc.home();
+  tr.layer.clearLayers();
+  const line = L.polyline(r.geometry, { color: "#b35c1e", weight: 4 }).addTo(tr.layer);
+  const station = (s) => s && L.marker([s.lat, s.lon], {
+    icon: L.divIcon({ className: "station-icon", html: el("span", {}, "🚉"), iconSize: [22, 22], iconAnchor: [11, 11] }),
+  }).bindTooltip(s.name).addTo(tr.layer);
+  station(t.from_station);
+  if (t.to_station !== t.from_station) station(t.to_station);
+  L.circleMarker([h.lat, h.lon], { radius: 6, color: "#b3261e", fillOpacity: 1 }).bindTooltip("Home").addTo(tr.layer);
+  // Straight lines to and from the route (the real ones are routed when you save).
+  const first = t.reversed ? [r.end_lat, r.end_lon] : [r.start_lat, r.start_lon];
+  const last = t.reversed ? [r.start_lat, r.start_lon] : [r.end_lat, r.end_lon];
+  const fromPt = t.from_station ? [t.from_station.lat, t.from_station.lon] : [h.lat, h.lon];
+  const toPt = t.to_station ? [t.to_station.lat, t.to_station.lon] : [h.lat, h.lon];
+  if (t.pattern !== "loop") {
+    L.polyline([fromPt, first], { color: "#1a5fb4", weight: 3, dashArray: "6 6" }).addTo(tr.layer);
+    L.polyline([last, toPt], { color: "#1a5fb4", weight: 3, dashArray: "6 6" }).addTo(tr.layer);
+  }
+  tr.map.fitBounds(line.getBounds().extend(fromPt).extend(toPt), { padding: [30, 30] });
+}
+
+$("#tr-weather").addEventListener("click", async () => {
+  const t = tr.trip;
+  if (!t) return;
+  const rideLeg = t.legs.find((l) => l.kind === "ride" && l.km === t.ride_km) || t.legs.find((l) => l.kind === "ride");
+  showView("weather");
+  await wx.loading;
+  await setWeatherRoute(t.route_id, $("#tr-date").value);
+  wxEl.time.value = hm2(rideLeg.start);
+  wxEl.speed.value = $("#tr-speed").value;
+  wxEl.reverse.checked = !!t.reversed;
+  if (wx.hourly) renderWeather();
+});
+
+async function trainTripFile(save) {
+  const t = tr.trip;
+  if (!t) return;
+  const name = $("#tr-name").value.trim() || `${t.route_name} (train ride)`;
+  const opts = { straight: $("#tr-straight").checked };
+  $("#tr-saved").textContent = opts.straight ? "Making the route…" : "Routing to and from the stations…";
+  try {
+    if (save) {
+      const res = await svc.trainTripSave(t, name, opts);
+      setChildren($("#tr-saved"), "Saved as ", routeLink(res.id, res.name), ".");
+      await Promise.all([refresh(), loadFacets()]);
+    } else {
+      const f = await svc.trainTripGpx(t, name, opts);
+      downloadBlob(f.text, f.filename);
+      $("#tr-saved").textContent = "";
+    }
+  } catch (err) {
+    $("#tr-saved").textContent = `Error: ${err.message}`;
+  }
+}
+$("#tr-save").addEventListener("click", () => trainTripFile(true));
+$("#tr-gpx").addEventListener("click", () => trainTripFile(false));
 
 // ------------------------------------------------------------------ duplicates
 

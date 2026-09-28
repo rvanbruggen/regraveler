@@ -263,6 +263,26 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   selected OpenStreetMap places in a list named after the route. When OpenStreetMap is busy,
   your own places are still found.
 
+- **Train rides** (Utilities): a day out with the train, with your library routes as the
+  riding part. Four kinds: **ride out, train back** (a route that starts near home, the train
+  home from a station near its end), **train out, ride home**, **train out and back** (point
+  to point, station to station) and **a loop from a station**. Point-to-point routes are tried
+  both ways round. It needs your **home** (*Library & settings*; the home station is the nearest
+  one, or choose another within 15 km). Choose the date, when you leave home, the kinds of trip,
+  the transfers (at most), how far a route may lie from a station (1–5 km), the riding km, your
+  speed and the activities. rerouter first finds the routes that fit (offline, from
+  `web/data/stations.json`: the train stations of Belgium, the Netherlands, Luxembourg, the north
+  of France and the west of Germany, from OpenStreetMap by `web/tools/build_stations.py`;
+  stations closer than 10 km to your home station don't count), then asks the timetables for
+  the best ones (8; each kind gets its turn), from
+  [Transitous](https://transitous.org/) (Europe) with [iRail](https://irail.be/) (SNCB/NMBS) as
+  a fallback between Belgian stations, and times the whole day: from home to the station, the
+  train (10 minutes to spare), the ride, the train back, home. Each trip shows its trains (with
+  the train numbers and transfers), the riding km, the climbing and when you are back home; a
+  trip on the map shows the route and the stations. *Ride weather* opens the weather for that
+  route, day and time; *Save the riding part as a route* makes it one route from station to
+  station (connectors by BRouter; tag *train*), or *Download GPX*. A bike on a train needs a
+  ticket of its own, and not every train or station suits a bike: check before you go.
 - **Ride weather:** the forecast along a route for the day you ride it. Choose a route (dropdown,
   click it on the map, or *Weather…* in its detail panel), pick the day in the calendar (today
   and the next 15 days, each with its weather, top temperature and a bar for the chance of rain;
@@ -673,6 +693,8 @@ web/                 the app: one page, runs in the browser (and as a static sit
     poi.js           places: KML/KMZ and CSV reading, category suggestions, places along a route,
                      OpenStreetMap tags and Overpass queries
     osm.js           asking the Overpass API (servers in turn, cache)
+    trains.js        train rides: stations, timetables (Transitous, iRail), candidate trips
+    share.js         share links: packing a route into a link, the privacy zone
     gpx.js           GPX reading and writing (a small XML reader, also runs in Node and workers)
     tcx.js, fit.js   TCX and FIT reading (own FIT decoder: byte orders, developer fields, compressed timestamps)
     trackfile.js     any route file: recognises GPX / TCX / FIT from the content, unpacks .gz
@@ -692,9 +714,11 @@ web/                 the app: one page, runs in the browser (and as a static sit
   data/places/       GeoNames place tiles, admin.json (region and province names)
   data/seeds/        example route sets offered to visitors (+ index.json)
   data/place-sets/   example place sets (CSV) on the Places tab (+ index.json)
+  data/stations.json train stations (from OpenStreetMap) for Train rides
   tools/build_places.py  builds data/places/ from the GeoNames dumps
   tools/build_seeds.py   builds data/seeds/index.json from the zips there
   tools/build_place_sets.py  builds data/place-sets/index.json from the CSV files there
+  tools/build_stations.py    builds data/stations.json from OpenStreetMap (Overpass)
   tests/             Node tests of the route logic
 app/                 the server (self-hosted version): stores the library, serves web/
   main.py            FastAPI: storage API, backups, /brouter proxy, the page

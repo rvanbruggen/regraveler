@@ -28,6 +28,7 @@
         <button type="button" role="menuitem" data-view="restart">Change start point<small>Start a loop somewhere else on the loop</small></button>
         <button type="button" role="menuitem" data-view="weather">Ride weather<small>Rain, temperature and wind along a route on the day you ride</small></button>
         <button type="button" role="menuitem" data-view="findplaces">Search for places<small>Cafés, water, toilets, … along a route; a route with them</small></button>
+        <button type="button" role="menuitem" data-view="trains">Train rides<small>A day out with the train: your routes from and to stations</small></button>
         <button type="button" role="menuitem" data-view="link">Import from a link<small>A RideWithGPS, Komoot or Strava route, or any GPX file online</small></button>
         <button type="button" role="menuitem" data-view="duplicates">Duplicates<small>Find and clean up (near-)duplicate routes</small></button>
         <button type="button" role="menuitem" data-view="data">Library &amp; settings<small>Back up, restore, storage and routing server</small></button>
@@ -249,6 +250,66 @@
         </div>
         <div class="table-wrap"><table id="places-table"></table></div>
       </div>
+    </div>
+  </section>
+
+  <!-- Train rides (utility) -->
+  <section id="view-trains" class="view" hidden>
+    <div class="map-layout">
+      <div class="map-side">
+        <p class="muted small">A day out with the train, with your routes as the riding part: ride out and take the train
+          back, take the train out and ride home, or take the train out and back (point to point, or a loop from a
+          station). Timetables from <a href="https://transitous.org/" target="_blank" rel="noopener">Transitous</a> and
+          <a href="https://irail.be/" target="_blank" rel="noopener">iRail</a> (SNCB/NMBS). A bike on the train needs a
+          ticket of its own, and not every train or station suits a bike: check before you go.</p>
+        <p id="tr-nohome" class="warn-box small" hidden>Set your home first (<a class="link" id="tr-sethome">Library &amp;
+          settings › Home</a>): train rides start and end there.</p>
+        <div id="tr-form">
+          <label>Home station <select id="tr-station"></select></label>
+          <div class="row">
+            <label>Date <input type="date" id="tr-date"></label>
+            <label>Leave home at <input type="time" id="tr-start" value="08:30" step="300"></label>
+          </div>
+          <fieldset class="fp-box">
+            <legend>Kinds of trip</legend>
+            <label class="check"><input type="checkbox" name="tr-pattern" value="ride-out" checked> Ride out, train back</label>
+            <label class="check"><input type="checkbox" name="tr-pattern" value="train-out" checked> Train out, ride home</label>
+            <label class="check"><input type="checkbox" name="tr-pattern" value="train-both" checked> Train out and back, point to point</label>
+            <label class="check"><input type="checkbox" name="tr-pattern" value="loop" checked> Train out and back, a loop from a station</label>
+          </fieldset>
+          <div class="row">
+            <label>Transfers, at most <select id="tr-transfers"><option>0</option><option selected>1</option><option>2</option><option>3</option></select></label>
+            <label>Route within <select id="tr-reach"><option value="1000">1 km</option><option value="2000">2 km</option><option value="3000" selected>3 km</option><option value="5000">5 km</option></select> of a station</label>
+          </div>
+          <div class="row">
+            <label>Riding, km <span class="range"><input type="number" id="tr-min" min="0" step="5" value="40">–<input type="number" id="tr-max" min="0" step="5" value="110"></span></label>
+            <label>Speed (km/h) <input type="number" id="tr-speed" min="5" max="45" step="0.5" value="20"></label>
+          </div>
+          <div class="actions small" id="tr-acts">
+            <label class="check"><input type="checkbox" name="tr-act" value="gravel" checked> Gravel</label>
+            <label class="check"><input type="checkbox" name="tr-act" value="road" checked> Road</label>
+            <label class="check"><input type="checkbox" name="tr-act" value="mtb" checked> Mountain biking</label>
+          </div>
+          <div class="actions"><button type="button" id="tr-search">Find train rides</button></div>
+        </div>
+        <p id="tr-status" class="muted small"></p>
+        <div id="tr-results" class="tr-results"></div>
+        <div id="tr-trip" class="panel" hidden>
+          <h3 id="tr-trip-title"></h3>
+          <ol id="tr-legs" class="tr-legs small"></ol>
+          <div class="actions">
+            <button type="button" id="tr-weather" class="secondary">Ride weather</button>
+          </div>
+          <label>Name <input id="tr-name"></label>
+          <label class="check small"><input type="checkbox" id="tr-straight"> Straight lines to and from the stations (no routing)</label>
+          <div class="actions">
+            <button type="button" id="tr-save">Save the riding part as a route</button>
+            <button type="button" id="tr-gpx" class="secondary">Download GPX</button>
+          </div>
+          <p id="tr-saved" class="small"></p>
+        </div>
+      </div>
+      <div id="trains-map"></div>
     </div>
   </section>
 
