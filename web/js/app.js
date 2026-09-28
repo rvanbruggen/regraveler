@@ -540,17 +540,78 @@ let map = null;
 let mapLayer = null;
 let detailRoute = null; // the route shown in the detail panel
 
-function osmTiles() {
-  return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+// Map styles: every map gets a layer switcher with the styles and overlays of config.js. The
+// choice is remembered in this browser and applied to all maps.
+const MAP_STYLE_KEY = "rerouter.mapStyle";
+const MAP_OVERLAYS_KEY = "rerouter.mapOverlays";
+const layeredMaps = []; // { map, styles: {name: layer}, overlays: {name: layer} }
+
+function readMapChoice() {
+  let style = null;
+  let overlays = [];
+  try {
+    style = localStorage.getItem(MAP_STYLE_KEY);
+    overlays = JSON.parse(localStorage.getItem(MAP_OVERLAYS_KEY) || "[]");
+  } catch { /* no storage: use the defaults */ }
+  if (!config.MAP_STYLES.some((s) => s.name === style)) style = config.MAP_STYLES[0].name;
+  if (!Array.isArray(overlays)) overlays = [];
+  return { style, overlays: overlays.filter((n) => config.MAP_OVERLAYS.some((o) => o.name === n)) };
+}
+
+function saveMapChoice(choice) {
+  try {
+    localStorage.setItem(MAP_STYLE_KEY, choice.style);
+    localStorage.setItem(MAP_OVERLAYS_KEY, JSON.stringify(choice.overlays));
+  } catch { /* not important */ }
+}
+
+function tileLayer(def) {
+  return L.tileLayer(def.url, {
     maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxNativeZoom: def.maxNativeZoom,
+    subdomains: "abc",
+    attribution: def.attribution,
   });
+}
+
+/** Show the chosen style and overlays on one map (without firing its switcher events). */
+function applyMapChoice(entry, choice) {
+  entry.applying = true;
+  for (const [name, layer] of Object.entries(entry.styles)) {
+    if (name === choice.style) { if (!entry.map.hasLayer(layer)) layer.addTo(entry.map); }
+    else if (entry.map.hasLayer(layer)) entry.map.removeLayer(layer);
+  }
+  for (const [name, layer] of Object.entries(entry.overlays)) {
+    if (choice.overlays.includes(name)) { if (!entry.map.hasLayer(layer)) layer.addTo(entry.map); }
+    else if (entry.map.hasLayer(layer)) entry.map.removeLayer(layer);
+  }
+  entry.applying = false;
+}
+
+/** Add the base map and a layer switcher to a new map. */
+function addMapLayers(map) {
+  const entry = { map, styles: {}, overlays: {}, applying: false };
+  for (const def of config.MAP_STYLES) entry.styles[def.name] = tileLayer(def);
+  for (const def of config.MAP_OVERLAYS) entry.overlays[def.name] = tileLayer(def);
+  applyMapChoice(entry, readMapChoice());
+  L.control.layers(entry.styles, entry.overlays, { position: "topright" }).addTo(map);
+  const changed = () => {
+    if (entry.applying) return;
+    const choice = {
+      style: Object.keys(entry.styles).find((n) => map.hasLayer(entry.styles[n])) || config.MAP_STYLES[0].name,
+      overlays: Object.keys(entry.overlays).filter((n) => map.hasLayer(entry.overlays[n])),
+    };
+    saveMapChoice(choice);
+    for (const other of layeredMaps) if (other !== entry) applyMapChoice(other, choice);
+  };
+  map.on("baselayerchange overlayadd overlayremove", changed);
+  layeredMaps.push(entry);
 }
 
 function ensureMap() {
   if (map) return map;
   map = L.map("d-map");
-  osmTiles().addTo(map);
+  addMapLayers(map);
   return map;
 }
 
@@ -1084,7 +1145,7 @@ const overview = {
 function showOverview() {
   if (!overview.map) {
     const m = L.map("overview-map", { renderer: L.canvas({ tolerance: 6 }) }).setView([50.9, 4.5], 9);
-    osmTiles().addTo(m);
+    addMapLayers(m);
     // Shared stretches are drawn in their own pane, underneath the route lines.
     m.createPane("shared").style.zIndex = 390;
     overview.routeLayer = L.layerGroup().addTo(m);
@@ -1347,7 +1408,7 @@ const cbEl = {
 function showCombine() {
   if (!cb.map) {
     const m = L.map("combine-map", { renderer: L.canvas({ tolerance: 6 }) }).setView([50.9, 4.5], 9);
-    osmTiles().addTo(m);
+    addMapLayers(m);
     cb.bgLayer = L.layerGroup().addTo(m);
     cb.routeLayer = L.layerGroup().addTo(m);
     cb.resultLayer = L.layerGroup().addTo(m);
@@ -1828,7 +1889,7 @@ const rsEl = {
 function showRestart() {
   if (!rs.map) {
     const m = L.map("restart-map", { renderer: L.canvas({ tolerance: 6 }) }).setView([50.9, 4.5], 9);
-    osmTiles().addTo(m);
+    addMapLayers(m);
     rs.bgLayer = L.layerGroup().addTo(m);
     rs.routeLayer = L.layerGroup().addTo(m);
     rs.markerLayer = L.layerGroup().addTo(m);
@@ -2155,7 +2216,7 @@ function rememberSpeed(activity, v) {
 function showWeather() {
   if (!wx.map) {
     const m = L.map("weather-map", { renderer: L.canvas({ tolerance: 6 }) }).setView([50.9, 4.5], 9);
-    osmTiles().addTo(m);
+    addMapLayers(m);
     wx.bgLayer = L.layerGroup().addTo(m);
     wx.routeLayer = L.layerGroup().addTo(m);
     wx.markerLayer = L.layerGroup().addTo(m);

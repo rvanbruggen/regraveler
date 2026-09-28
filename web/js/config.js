@@ -1,7 +1,7 @@
 // Settings. The defaults below can be changed by the user in Utilities > Settings (stored
 // with the library); `applySettings` copies those over the defaults at start-up.
 
-export const VERSION = "0.12.0";
+export const VERSION = "0.13.0";
 
 export const config = {
   // "browser": the library lives in this browser (a static host such as GitHub Pages);
@@ -50,6 +50,56 @@ export const config = {
   // profile the combiner uses by default for connectors.
   ACTIVITIES: ["gravel", "road", "mtb", "hiking"],
   ACTIVITY_PROFILES: { gravel: "gravel", road: "fastbike", mtb: "mtb", hiking: "hiking-mountain" },
+
+  // Map styles offered in each map's layer switcher (free, no key); the first is the default.
+  // maxNativeZoom: the deepest zoom the tile server has; beyond it tiles are scaled up.
+  MAP_STYLES: [
+    {
+      name: "OpenStreetMap",
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      maxNativeZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    },
+    {
+      name: "CyclOSM (cycling)",
+      url: "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",
+      maxNativeZoom: 19,
+      attribution: '<a href="https://www.cyclosm.org/">CyclOSM</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    },
+    {
+      name: "OpenTopoMap (topographic)",
+      url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+      maxNativeZoom: 17,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM | style &copy; <a href="https://opentopomap.org/">OpenTopoMap</a> (CC-BY-SA)',
+    },
+    {
+      name: "NGI topo (Belgium)",
+      url: "https://cartoweb.wmts.ngi.be/1.0.0/topo/default/3857/{z}/{y}/{x}.png",
+      maxNativeZoom: 17,
+      attribution: '&copy; <a href="https://www.ngi.be/">NGI/IGN</a>',
+    },
+    {
+      name: "Satellite (Esri)",
+      url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      maxNativeZoom: 19,
+      attribution: "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+    },
+  ],
+  // Transparent layers that can be switched on over any map style.
+  MAP_OVERLAYS: [
+    {
+      name: "Hiking routes",
+      url: "https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png",
+      maxNativeZoom: 18,
+      attribution: '&copy; <a href="https://waymarkedtrails.org/">Waymarked Trails</a>',
+    },
+    {
+      name: "Cycling routes",
+      url: "https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png",
+      maxNativeZoom: 18,
+      attribution: '&copy; <a href="https://waymarkedtrails.org/">Waymarked Trails</a>',
+    },
+  ],
 };
 
 // Settings the user can change (key -> type).

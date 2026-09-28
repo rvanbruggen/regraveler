@@ -21,7 +21,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 0.12.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, import from a link, duplicates).** See [CLAUDE.md](CLAUDE.md) for
+**Version:** 0.13.0 · **Status: phase 4 (import, library, map, surface estimate; utilities: combine, change start point, ride weather, import from a link, duplicates).** See [CLAUDE.md](CLAUDE.md) for
 the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## What it does
@@ -97,6 +97,11 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 - **Map:** all routes that match the filters (the same filter bar as the library) drawn as
   coloured lines on an OpenStreetMap map. Hover for the name, click a route to open its details
   (the side list then shows only the routes near it). "Show on map" in the route panel jumps there.
+- **Map styles:** every map has a layer button (top right) to switch between OpenStreetMap,
+  CyclOSM (cycling, shows unpaved roads), OpenTopoMap (contour lines), the Belgian NGI topo map
+  and Esri satellite, with the signposted hiking and cycling routes of Waymarked Trails as
+  optional overlays. All are free and need no key; the choice applies to every map and is
+  remembered in this browser. The list is `MAP_STYLES` / `MAP_OVERLAYS` in `web/js/config.js`.
 - **Routes near each other:** tick *Highlight routes near each other* and set a distance
   (default 100 m). Routes that overlap or come within that distance of another route stay
   coloured, the rest fade out. Shared stretches are drawn in yellow, and for near misses a

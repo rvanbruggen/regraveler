@@ -148,6 +148,9 @@ td.name { white-space: normal; min-width: 220px; font-weight: 500; }
 #overview-map, #combine-map, #restart-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
 label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
 label.check input { width: auto; }
+/* Leaflet's layer switcher: its labels are not the column-style form labels above. */
+.leaflet-control-layers label { display: block; font-size: 13px; color: #333; }
+.leaflet-control-layers input { width: auto; padding: 0; margin: 0 4px 0 0; }
 #prox-list { list-style: none; padding: 0; margin: 0; }
 #prox-list li { padding: 6px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
 #prox-list li:hover, #prox-list li.active { background: var(--accent-soft); }
