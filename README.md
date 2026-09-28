@@ -56,7 +56,8 @@ with places are new files.
 The menu at the top follows the order you use it in: **Import**, **Library**, **Map**,
 **Places**, **Utilities**, and **About**: what rerouter is for, a short manual, who made it
 (questions and ideas: [GitHub issues](https://github.com/rvanbruggen/rerouter/issues)), the
-license and a disclaimer, and the open data and software it is built with.
+license and a disclaimer, and the open data and software it is built with. The ⚙ at the right
+of the menu bar opens *Library & settings* (backups, storage, the routing server, your home).
 
 ### Importing routes
 
@@ -453,7 +454,7 @@ push. The section is hidden when the index is missing or empty.
 
 ### Library & settings
 
-- **Library & settings** (also in the Utilities menu): where the library is stored and how much
+- **Library & settings** (the ⚙ at the right of the menu bar): where the library is stored and how much
   space it takes, **backup** (one zip with every route, your ratings, tags and notes, places,
   collections and areas, and all original route files) and **restore**, *Add routes from a
   zip…* and the example routes, the BRouter server to use (with a test button), whether new
@@ -542,7 +543,7 @@ GeoNames data is no longer downloaded into `data/geonames/`: the place data ship
 
 ### Backups
 
-*Utilities › Library & settings › Download backup* (or `docker compose run --rm app python -m
+*⚙ Library & settings › Download backup* (or `docker compose run --rm app python -m
 app.cli backup /data/backup.zip`) writes one zip: `library.json` with every route, setting and
 "not duplicates" pair and document (places and their lists, collections, smart collections,
 areas), and every original route file as `gpx/<sha256>.<gpx|tcx|fit>`. Restoring it (in the
@@ -592,7 +593,7 @@ files), closing the tab or the browser, restarting the computer, and new version
   one address (e.g. `rerouter.eu`): clearing the site data of that address clears it
   for all of them.
 
-**So:** download a backup now and then (*Utilities › Library & settings › Download backup*) and
+**So:** download a backup now and then (*⚙ Library & settings › Download backup*) and
 keep it outside the browser, e.g. in a cloud folder. The library reminds you when the last
 backup is more than 30 days old. A backup restores the library after a wipe, and moves it to
 another browser, another device or a rerouter server.
@@ -738,7 +739,7 @@ and generated name for all of them, identical elevation gain for 74 (the other 3
 Settings: the thresholds (loop 200 m, similarity 50 m / 85 %, variants 90 %, proximity
 100 m default and 5000 m maximum, direct join 25 m, surface waypoints every 300 m, the BRouter
 profiles) are in `web/js/config.js`. The ones you're likely to change are in the page, under
-*Utilities › Library & settings*: the BRouter server, automatic names and surface estimates,
+*⚙ Library & settings*: the BRouter server, automatic names and surface estimates,
 the default distance for routes near each other, and your home (with its privacy zone). The
 place categories and the kinds of places looked up on OpenStreetMap are set on the *Places*
 tab. All are stored with the library (and in backups).

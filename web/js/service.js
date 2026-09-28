@@ -4,7 +4,7 @@
 
 import * as brouter from "./brouter.js";
 import * as cb from "./combiner.js";
-import { config } from "./config.js";
+import { VERSION, config } from "./config.js";
 import { geodesicDistance, pointInPolygon, round, simplifyLatLon, toMetric } from "./geo.js";
 import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
@@ -224,7 +224,8 @@ function inWorker(routes, distanceM) {
     workerJob = null;
   }
   if (!worker) {
-    worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+    // The release in the URL, like the page's modules (workers don't use the import map).
+    worker = new Worker(new URL(`./worker.js?v=${VERSION}`, import.meta.url), { type: "module" });
     worker.onmessage = (e) => {
       const job = workerJob;
       if (!job || e.data.id !== job.id) return;
@@ -1899,7 +1900,7 @@ const addMin = (d, min) => new Date(d.getTime() + min * 60000);
  */
 export async function trainRides(req, { fetchFn = fetch, onProgress = null } = {}) {
   const h = home();
-  if (!h) throw new ServiceError("Set your home first (Utilities › Library & settings › Home): train rides start and end there");
+  if (!h) throw new ServiceError("Set your home first (⚙ Library & settings › Home): train rides start and end there");
   const list = await trains.allStations();
   const near = await homeStations();
   const chosen = near.find((x) => x.key === req.home_station) || near[0];

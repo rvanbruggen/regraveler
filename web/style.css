@@ -31,7 +31,10 @@ header h1 { font-size: 18px; margin: 0; }
 .brand .wordmark { font-size: 24px; letter-spacing: -0.5px; line-height: 1; }
 .brand .re { color: var(--accent); }
 .brand .tagline { align-self: flex-end; font-size: 12px; font-weight: 400; color: var(--muted); margin: 0 0 2px 4px; }
-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+nav { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; align-items: center; }
+/* Library & settings: a cog at the far right of the menu bar. */
+.settings-tab { margin-left: auto; padding: 4px 8px; line-height: 0; }
+.settings-tab svg { display: block; }
 main { padding: 16px; }
 
 button, .button {

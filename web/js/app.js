@@ -96,9 +96,9 @@ function fillActivitySelects(activities) {
 let currentView = "library";
 
 // Views reached through the Utilities menu.
-const UTILITIES = ["combine", "restart", "weather", "findplaces", "trains", "link", "duplicates", "data"];
+const UTILITIES = ["combine", "restart", "weather", "findplaces", "trains", "link", "duplicates"];
 // Views a link (URL hash) can open.
-const LINKABLE_VIEWS = ["import", "library", "map", "places", "about", ...UTILITIES];
+const LINKABLE_VIEWS = ["import", "library", "map", "places", "about", "data", ...UTILITIES];
 
 function showView(name) {
   currentView = name;
@@ -106,7 +106,7 @@ function showView(name) {
   $("#utilities .menu-button").classList.toggle("active", UTILITIES.includes(name));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import screen and the utilities.
-  const noFilters = ["import", "rename", "places", "shared", "about", ...UTILITIES].includes(name);
+  const noFilters = ["import", "rename", "places", "shared", "about", "data", ...UTILITIES].includes(name);
   $("#filters").hidden = noFilters || libraryEmpty();
   updateIdsNote();
   if (noFilters) closeDetail();
@@ -816,7 +816,7 @@ function renderSurface(r) {
     r.paved_source === "estimated" ? "(estimated)" : r.paved_source === "manual" || r.paved_pct != null ? "(yours)" : "";
   const estimateBtn = el("button", {
     type: "button", class: "secondary", onclick: () => estimateOne(r.id, false),
-    title: "Matches the route to OpenStreetMap through the BRouter server (Utilities › Library & settings)",
+    title: "Matches the route to OpenStreetMap through the BRouter server (⚙ Library & settings)",
   }, s ? "Estimate again" : "Estimate surface from OpenStreetMap");
   if (!s) {
     box.replaceChildren(el("div", { class: "actions" }, estimateBtn, el("span", { class: "muted small", id: "d-surface-status" })));
@@ -2275,7 +2275,7 @@ $("#d-share").addEventListener("click", () => {
   $("#share-privacy").checked = !!h;
   $("#share-privacy-text").textContent = h
     ? `Leave out the start and end within ${h.radius_m} m of my home`
-    : "Leave out the start and end near my home (set your home first: Utilities › Library & settings)";
+    : "Leave out the start and end near my home (set your home first: ⚙ Library & settings)";
   $("#share-result").hidden = true;
   panel.scrollIntoView({ block: "nearest" });
 });
@@ -5219,6 +5219,29 @@ async function checkDiskFiles() {
   };
 }
 
+/**
+ * Static site: has a new release come out while the browser still has this page cached? Then
+ * reload once (a reload asks the host for index.html again, and its import map loads the new
+ * modules). The server version sends its files with no-cache and needs none of this.
+ */
+async function reloadForNewVersion() {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2000);
+    const res = await fetch("js/config.js", { cache: "no-store", signal: ctrl.signal });
+    clearTimeout(timer);
+    const latest = res.ok ? (await res.text()).match(/VERSION = "([^"]+)"/)?.[1] : null;
+    if (!latest || latest === VERSION) return false;
+    // Once per version, so a host that still serves the old page can't make it reload forever.
+    if (sessionStorage.getItem("rerouter.reloadedFor") === latest) return false;
+    sessionStorage.setItem("rerouter.reloadedFor", latest);
+    location.reload();
+    return true;
+  } catch (_) {
+    return false; // offline, slow or no sessionStorage: carry on with this version
+  }
+}
+
 async function start() {
   try {
     await startApp();
@@ -5241,6 +5264,8 @@ async function startApp() {
       return;
     }
     renderServerMode(server);
+  } else if (await reloadForNewVersion()) {
+    return; // the page reloads with the new release
   } else try {
     lib = await Library.open();
   } catch (err) {
