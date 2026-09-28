@@ -5,7 +5,7 @@ import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from 
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
-import { isPlacesFileName, readPlacesFile, suggestCategory } from "./poi.js";
+import { OSM_TAGS, isPlacesFileName, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
 import { drawProfile, nearestIndex } from "./profile.js";
 import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
@@ -401,7 +401,9 @@ $("#export-form").addEventListener("submit", async (e) => {
   const title = f.title.value.trim();
   const personal = !f.strip.checked;
   try {
-    const blob = await makeSelection(svc.library(), ids, { title: title || null, description: f.description.value.trim() || null, personal });
+    const blob = await makeSelection(svc.library(), ids, {
+      title: title || null, description: f.description.value.trim() || null, personal, places: f.places.checked,
+    });
     downloadBlob(blob, `rerouter-${svc.slugify(title || "routes")}.zip`);
     $("#export-status").textContent = `${ids.length} route${ids.length === 1 ? "" : "s"} exported` +
       (personal ? ", with your notes and ratings." : ", without your notes and ratings.");
@@ -608,6 +610,7 @@ function addMapLayers(map) {
   // Your places (POIs), on every map; shown or hidden on all maps at once.
   entry.places = L.layerGroup();
   control.addOverlay(entry.places, "Places");
+  entry.osm = L.layerGroup().addTo(map); // places from OpenStreetMap, when asked for
   if (placesShown()) entry.places.addTo(map);
   drawPlaces(entry);
   map.on("overlayadd overlayremove", (e) => {
@@ -718,6 +721,7 @@ async function openDetail(id) {
 
   loadProfile(r);
   loadPlacesAlong(r);
+  offerRouteWaypoints(r);
   loadSimilar(r.id);
 }
 
@@ -863,6 +867,7 @@ function onDetailMapMove(e) {
 // ------------------------------------------------------------------ places (POIs)
 
 const PLACES_HIDDEN_KEY = "rerouter.hidePlaces";
+const OSM_KINDS = Object.keys(OSM_TAGS);
 const OTHER_CATEGORY = { id: "other", label: "Other", symbol: "📍", color: "#757575" };
 
 function placesShown() {
@@ -915,7 +920,10 @@ function drawPlaces(entry) {
 function refreshPlaces() {
   for (const e of layeredMaps) drawPlaces(e);
   if (currentView === "places") renderPlaces();
-  if (detailRoute && !detail.hidden) loadPlacesAlong(detailRoute);
+  if (detailRoute && !detail.hidden) {
+    loadPlacesAlong(detailRoute);
+    if (osmShownFor === detailRoute.id) osmAlongRoute(detailRoute);
+  }
 }
 
 /** The popup of a place: what it is, and an editor. */
@@ -1018,6 +1026,159 @@ function stopAddingPlace() {
   map.getContainer().classList.remove("adding-place");
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") stopAddingPlace(); });
+
+// ---- places from OpenStreetMap
+
+const osmOpts = () => ({ proxyUrl: onServer() ? new URL("api/overpass", document.baseURI).href : null });
+
+/** Draw OpenStreetMap places on a map (as rings, to tell them from your own). */
+function drawOsm(entry, found) {
+  entry.osm.clearLayers();
+  const cats = svc.placeCategories();
+  for (const p of found) {
+    const cat = categoryOf(p.category, cats);
+    const icon = L.divIcon({
+      className: "poi-icon osm", html: el("span", { style: `border-color:${cat.color}` }, cat.symbol),
+      iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -11],
+    });
+    const marker = L.marker([p.lat, p.lon], { icon, title: `${p.name} (OpenStreetMap)` });
+    marker.bindPopup(() => osmPopup(p, marker, entry));
+    entry.osm.addLayer(marker);
+  }
+}
+
+function osmPopup(p, marker, entry) {
+  const cat = categoryOf(p.category);
+  const box = el("div", { class: "poi-popup" });
+  const url = safeUrl(p.url);
+  setChildren(box,
+    el("strong", {}, p.name),
+    el("div", { class: "small muted" }, placeSymbol(cat), ` ${cat.label} · from OpenStreetMap`),
+    p.notes ? el("div", { class: "small", style: "white-space:pre-line;margin-top:4px" }, p.notes) : null,
+    el("div", { class: "small" },
+      url && url !== p.osm_url ? [el("a", { href: url, target: "_blank", rel: "noopener" }, "website ↗"), " · "] : null,
+      el("a", { href: p.osm_url, target: "_blank", rel: "noopener" }, "on OpenStreetMap ↗")),
+    el("div", { class: "actions" }, el("button", {
+      type: "button",
+      onclick: async (e) => {
+        e.stopPropagation();
+        await svc.keepOsmPlace(p);
+        entry.osm.removeLayer(marker);
+        setPlacesShown(true);
+        refreshPlaces();
+      },
+    }, "Keep as my place")));
+  return box;
+}
+
+let osmShownFor = null; // the route whose OpenStreetMap places are in its panel
+
+/** "Also look on OpenStreetMap" in the route panel (again after a change: then from the cache). */
+async function osmAlongRoute(r) {
+  const link = $("#d-osm-link"), status = $("#d-osm-status");
+  if (!link || !status) return;
+  link.hidden = true;
+  status.textContent = " asking OpenStreetMap… (this can take half a minute)";
+  osmShownFor = r.id;
+  let along;
+  try {
+    along = await svc.osmAlongRoute(r.id, osmOpts());
+  } catch (err) {
+    if (selectedId === r.id) {
+      status.textContent = ` ${err.message}`;
+      link.hidden = false;
+      link.textContent = "Try OpenStreetMap again";
+      osmShownFor = null;
+    }
+    return;
+  }
+  if (selectedId !== r.id) return;
+  const cats = svc.placeCategories();
+  status.textContent = along.length
+    ? ` ${along.length} more on OpenStreetMap (rings on the map; keep the ones you like):`
+    : " nothing more on OpenStreetMap along this route.";
+  const entry = layeredMaps.find((x) => x.map === ensureMap());
+  drawOsm(entry, along.map((a) => a.place));
+  const ul = $("#d-places");
+  if (!along.length) return;
+  if (ul.querySelector("li:not([data-kind])")?.textContent.startsWith("none")) ul.replaceChildren();
+  for (const { place: p, km, off_m } of along) {
+    ul.append(el("li", { "data-kind": "osm" },
+      el("a", {
+        title: "Show on the map",
+        onclick: () => {
+          const m = ensureMap();
+          m.setView([p.lat, p.lon], Math.max(m.getZoom(), 15));
+          entry.osm.eachLayer((mk) => mk.getLatLng().lat === p.lat && mk.getLatLng().lng === p.lon && mk.openPopup());
+        },
+      }, `km ${km.toFixed(1)} · `, placeSymbol(categoryOf(p.category, cats)), ` ${p.name}`),
+      el("span", { class: "osm-badge", title: "From OpenStreetMap" }, "OSM"),
+      off_m > 30 ? el("span", { class: "small" }, ` (${off_m} m from the route)`) : null));
+  }
+  // Riding order again, with your own places.
+  const items = [...ul.children].sort((a, b) => parseFloat(a.textContent.slice(3)) - parseFloat(b.textContent.slice(3)));
+  ul.replaceChildren(...items);
+}
+
+function addOsmControl(map) {
+  const Control = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const b = el("button", { type: "button", class: "poi-add", title: "Look for places on OpenStreetMap in this part of the map" }, "OSM places here");
+      L.DomEvent.disableClickPropagation(b);
+      b.addEventListener("click", async () => {
+        const entry = layeredMaps.find((x) => x.map === map);
+        if (map.getZoom() < 12) {
+          b.textContent = "Zoom in first";
+          setTimeout(() => (b.textContent = "OSM places here"), 2500);
+          return;
+        }
+        const bounds = map.getBounds();
+        b.disabled = true;
+        b.textContent = "Asking OpenStreetMap…";
+        try {
+          const found = await svc.osmInArea([bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()], osmOpts());
+          drawOsm(entry, found);
+          b.textContent = found.length ? `${found.length} found (rings)` : "Nothing found here";
+        } catch (err) {
+          b.textContent = "OpenStreetMap is busy";
+          b.title = err.message;
+        } finally {
+          b.disabled = false;
+          setTimeout(() => {
+            b.textContent = "OSM places here";
+            b.title = "Look for places on OpenStreetMap in this part of the map";
+          }, 4000);
+        }
+      });
+      return b;
+    },
+  });
+  new Control().addTo(map);
+}
+
+/** Offer the waypoints in the route's own file as places, and places from OpenStreetMap. */
+async function offerRouteWaypoints(r) {
+  const more = $("#d-places-more");
+  more.replaceChildren();
+  layeredMaps.find((x) => x.map === ensureMap())?.osm.clearLayers();
+  osmShownFor = null;
+  const osmLink = el("a", { class: "link", id: "d-osm-link", title: `Look for ${svc.osmCategories().length} kinds of places (see the Places tab)` }, "Also look on OpenStreetMap");
+  osmLink.addEventListener("click", () => osmAlongRoute(r));
+  more.append(osmLink, el("span", { id: "d-osm-status", class: "muted" }));
+  const wps = await svc.routeWaypoints(r);
+  if (selectedId !== r.id || !wps.length) return;
+  more.append(" · ", el("a", {
+    class: "link",
+    title: "The points of interest stored in this route's file",
+    onclick: () => {
+      placesImport = { parsed: waypointPlaces(wps, r.name), filename: r.original_filename || r.name };
+      showView("places");
+      renderPlacesPreview();
+      $("#places-preview").scrollIntoView({ block: "start" });
+    },
+  }, `Add the ${wps.length} waypoint${wps.length === 1 ? "" : "s"} in its file to your places…`));
+}
 
 /** The places along the route in the route panel. */
 function loadPlacesAlong(r) {
@@ -1182,6 +1343,17 @@ function renderPlaces() {
         : ""))))
   );
 
+  const osmCats = new Set(svc.osmCategories());
+  $("#osm-cats").replaceChildren(...cats.filter((c) => OSM_KINDS.includes(c.id)).map((c) => el("label", { class: "check" },
+    el("input", {
+      type: "checkbox", checked: osmCats.has(c.id),
+      onchange: async (e) => {
+        if (e.target.checked) osmCats.add(c.id);
+        else osmCats.delete(c.id);
+        await svc.setOsmCategories([...osmCats]);
+      },
+    }), ` ${c.symbol} ${c.label}`)));
+
   // Filters keep their choice across redraws.
   const catSel = $("#places-cat-filter"), listSel = $("#places-list-filter");
   const keep = (sel, options) => {
@@ -1251,9 +1423,9 @@ $("#places-file").addEventListener("change", async (e) => {
   drop.addEventListener("drop", async (e) => {
     e.preventDefault();
     drop.classList.remove("over");
-    const file = [...e.dataTransfer.files].find((f) => isPlacesFileName(f.name));
+    const file = [...e.dataTransfer.files].find((f) => isPlacesFileName(f.name) || isTrackFileName(f.name));
     if (file) await openPlacesFile(file);
-    else $("#places-status").textContent = "Drop a KML, KMZ or CSV file.";
+    else $("#places-status").textContent = "Drop a KML, KMZ or CSV file (or a GPX, TCX or FIT file with waypoints).";
   });
 }
 $("#places-cat-form").addEventListener("submit", async (e) => {
@@ -1731,6 +1903,7 @@ function showOverview() {
     overview.sharedRenderer = L.canvas({ pane: "shared" });
     m.on("click", () => { if (!addingPlace) clearFocus(); });
     addPlaceControl(m);
+    addOsmControl(m);
     overview.map = m;
   }
   // The container was hidden; let Leaflet measure it again.
@@ -1971,6 +2144,7 @@ const cb = {
   preview: null,
   token: 0,
   nameTouched: false,
+  vias: [], // per connector: the id of a place it must pass, or null
 };
 
 const POINT_KEYS = ["a1", "a2", "b1", "b2"];
@@ -2059,6 +2233,7 @@ async function setRoutes(a, b) {
   cb.b = b && b !== a ? b : null;
   cb.points = { a1: null, a2: null, b1: null, b2: null };
   cb.pointsTouched = false;
+  cb.vias = [];
   stopPlacing();
   cb.preview = null;
   cb.nameTouched = false;
@@ -2243,6 +2418,7 @@ function combineRequest(extra = {}) {
     profile: cbEl.profile.value,
     prefer_unpaved: cbEl.unpaved.checked,
     straight: cbEl.straight.checked,
+    vias: cb.vias,
     ...extra,
   };
 }
@@ -2307,8 +2483,9 @@ function renderRide(res) {
     : el("span", { class: "against" }, `against ${letter}'s direction (backwards)`));
   // A connector step: routed, a short straight join, or none at all (the points touch).
   const connector = (c, to, touching) => (!c ? null
-    : !c.routed && c.distance_km < 0.03 ? touching
-    : `Connector to ${to}: ${fmt.km(c.distance_km)}${c.routed ? ", routed along roads and paths" : ", joined in a straight line"}.`);
+    : !c.routed && c.distance_km < 0.03 && !c.via ? touching
+    : `Connector to ${to}${c.via ? `, through ${c.via.name}` : ""}: ${fmt.km(c.distance_km)}` +
+      `${c.routed ? ", routed along roads and paths" : ", joined in a straight line"}.`);
   const [c1, c2] = res.connectors;
   const steps = [
     [`Start at A1: ${where(routeA, pa.start_km)} of route A.`],
@@ -2324,6 +2501,30 @@ function renderRide(res) {
   $("#cb-steps").replaceChildren(...steps.map((parts) => el("li", {}, ...parts.filter((x) => x !== null && x !== ""))));
 }
 
+/** Per connector: ride it through one of your places (a café, water, a viewpoint, …). */
+function renderVias(res) {
+  const box = $("#cb-vias");
+  box.hidden = !res || !svc.visiblePlaces().length;
+  if (box.hidden) return box.replaceChildren();
+  const cats = svc.placeCategories();
+  setChildren(box, el("strong", {}, "Through a place"), ...res.connectors.map((c, k) => {
+    const options = svc.placesForConnector(c.from, c.to);
+    const chosen = cb.vias[k] ? svc.place(cb.vias[k]) : null;
+    if (chosen && !options.some((o) => o.place.id === chosen.id)) options.unshift({ place: chosen, detour_km: null });
+    const label = res.connectors.length > 1 ? (k === 0 ? "Connector 1 (to route B)" : "Connector 2 (back to A1)") : "Connector (to route B)";
+    return el("label", {}, `${label}: `,
+      el("select", {
+        onchange: (e) => {
+          cb.vias[k] = e.target.value || null;
+          runPreview();
+        },
+      },
+        el("option", { value: "" }, options.length ? "— straight to the next route —" : "— no places near this connector —"),
+        options.map(({ place: p, detour_km }) => el("option", { value: p.id, selected: chosen?.id === p.id },
+          `${categoryOf(p.category, cats).symbol} ${p.name}${detour_km != null ? ` (+${detour_km.toFixed(1)} km)` : ""}`))));
+  }));
+}
+
 function markerIcon(label, cls) {
   return L.divIcon({ className: `cb-marker ${cls}`, html: label, iconSize: [28, 22], iconAnchor: [14, 11] });
 }
@@ -2335,6 +2536,7 @@ function drawCombineResult() {
   cbEl.stats.hidden = !res;
   cbEl.save.hidden = !res;
   renderRide(res);
+  renderVias(res);
   if (res) {
     for (const leg of res.legs) {
       const color = leg.kind === "a" ? COLOR_A : leg.kind === "b" ? COLOR_B : COLOR_CONNECTOR;
@@ -3438,7 +3640,8 @@ async function addRoutes(data, status, { ask = true } = {}) {
   await afterLibraryChange();
   requestPersistence();
   status.textContent = `Added ${res.added} route${res.added === 1 ? "" : "s"}` +
-    (res.skipped ? ` (${res.skipped} already in the library)` : "") + ".";
+    (res.skipped ? ` (${res.skipped} already in the library)` : "") +
+    (res.places ? ` and ${res.places} place${res.places === 1 ? "" : "s"}` : "") + ".";
   return res;
 }
 

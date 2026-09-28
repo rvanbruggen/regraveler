@@ -128,6 +128,7 @@
       </form>
       <label class="check small"><input type="checkbox" name="strip" form="export-form" checked> Leave out my notes and quality ratings
         (e.g. for a set you share or publish)</label>
+      <label class="check small"><input type="checkbox" name="places" form="export-form" checked> Include the places along these routes</label>
       <span id="export-status" class="muted small"></span>
     </div>
     <div id="tag-panel" class="tag-panel" hidden>
@@ -190,7 +191,8 @@
       Map.</p>
     <div id="places-drop" class="dropzone-small">
       Drop a KML, KMZ or CSV file here, or
-      <label class="link">choose a file<input type="file" id="places-file" accept=".kml,.kmz,.csv" hidden></label>
+      <label class="link">choose a file<input type="file" id="places-file" accept=".kml,.kmz,.csv,.gpx,.tcx,.fit,.gz" hidden></label>
+      <span class="small muted">(also the waypoints of a GPX, TCX or FIT file)</span>
       <span id="places-status" class="muted small"></span>
     </div>
     <div id="places-preview" class="panel" hidden></div>
@@ -200,6 +202,11 @@
         <table id="places-lists"></table>
         <h3>Categories</h3>
         <table id="places-cats"></table>
+        <h3>From OpenStreetMap</h3>
+        <p class="small muted">Places anyone mapped on OpenStreetMap, looked up when you ask: <em>Also look on
+          OpenStreetMap</em> in a route's panel, or <strong>OSM places here</strong> on the Map. They are not stored,
+          unless you keep one. Look for:</p>
+        <div id="osm-cats" class="osm-cats small"></div>
         <form id="places-cat-form" class="actions">
           <input name="symbol" placeholder="📍" maxlength="4" class="symbol-input" title="A symbol (an emoji) for the map">
           <input name="label" placeholder="new category" required>
@@ -278,6 +285,7 @@
           <h3>Your ride</h3>
           <ol id="cb-steps"></ol>
         </div>
+        <div id="cb-vias" class="cb-vias small" hidden></div>
         <dl id="cb-stats" class="stats" hidden></dl>
         <div id="cb-save" hidden>
           <label>Name <input id="cb-name"></label>
@@ -578,6 +586,7 @@
   <p id="d-file" class="muted small"></p>
   <h3>Places along this route</h3>
   <ul id="d-places" class="muted places-along"><li>…</li></ul>
+  <p class="small actions" id="d-places-more"></p>
   <h3>Similar / overlapping routes</h3>
   <ul id="d-similar" class="muted"><li>…</li></ul>
 </aside>

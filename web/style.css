@@ -417,3 +417,9 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .places-along a { color: var(--text); cursor: pointer; }
 .places-grid input[type="color"], #places-cat-form input[type="color"] { width: 34px; height: 26px; padding: 1px 2px; flex: none; }
 #places-cats input:not([type="color"]):not(.symbol-input) { min-width: 110px; }
+.cb-vias { margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.cb-vias select { max-width: 100%; }
+.poi-icon.osm span { background: #fff; border-width: 3px; border-style: solid; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.osm-badge { font-size: 9px; font-weight: 700; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; margin-left: 4px; vertical-align: middle; }
+.osm-cats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; }
+.poi-add + .poi-add, .leaflet-control.poi-add { margin-top: 6px; }

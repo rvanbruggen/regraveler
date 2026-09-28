@@ -479,3 +479,36 @@ test("backups keep TCX and FIT originals under their own extension", async () =>
   svc.setLibrary(other);
   for (const r of other.all()) assert.ok(await svc.routeProfile(r));
 });
+
+test("combine: a connector can ride through one of your places", async () => {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  await importOne("A.gpx", east(0, 6000));
+  await importOne("B.gpx", east(800, 6000));
+  const [a, b] = ["A", "B"].map((n) => svc.listRoutes("").find((r) => r.name === n));
+  const sug = await svc.combineSuggest(a.id, b.id, 2);
+  const [pa, pb] = sug.parts;
+  const req = {
+    parts: [{ route_id: a.id, start: pa.start, end: pa.end }, { route_id: b.id, start: pb.start, end: pb.end }],
+    closed: true, straight: true,
+  };
+  const plain = await svc.combinePreview(req);
+  // A café 1 km out of the way of the first connector, and one far away.
+  const c = plain.connectors[0];
+  const mid = [(c.from[0] + c.to[0]) / 2, (c.from[1] + c.to[1]) / 2];
+  const cafe = await svc.addPlace({ lat: offset(...mid, 0, 500)[0], lon: offset(...mid, 0, 500)[1], name: "Café Halfweg", category: "cafe" });
+  await svc.addPlace({ lat: 50.0, lon: 5.9, name: "Far away" });
+  const options = svc.placesForConnector(c.from, c.to);
+  assert.deepEqual(options.map((o) => o.place.name), ["Café Halfweg"]);
+  approx(options[0].detour_km, 0.48, { abs: 0.05 }); // 2 × √(0.4² + 0.5²) − 0.8
+
+  const via = await svc.combinePreview({ ...req, vias: [cafe.id, null] });
+  assert.deepEqual(via.connectors.map((x) => x.via?.name ?? null), ["Café Halfweg", null]);
+  assert.ok(via.connectors[0].distance_km > c.distance_km + 0.2, "the connector makes the detour");
+  assert.match(via.description, /through Café Halfweg/);
+  // The route passes the café.
+  const along = (await svc.combineGpx({ ...req, vias: [cafe.id, null], name: "x" })).text;
+  const pts = parseGpx(along).tracks[0].points;
+  assert.ok(pts.some(([la, lo]) => Math.abs(la - cafe.lat) < 1e-6 && Math.abs(lo - cafe.lon) < 1e-6));
+  await svc.deletePlaces([cafe.id]);
+  await assert.rejects(svc.combinePreview({ ...req, vias: [cafe.id] }), /was removed/);
+});

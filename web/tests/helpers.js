@@ -34,7 +34,7 @@ export function loopPoints({ center = [51.0, 4.4], radiusM = 2000, n = 400, ele 
 }
 
 /** tracks: [[trackName, points or [segment, ...]], ...] */
-export function gpxXml(tracks, { name = null, link = null, useRoute = false } = {}) {
+export function gpxXml(tracks, { name = null, link = null, useRoute = false, waypoints = [] } = {}) {
   const out = ['<?xml version="1.0" encoding="UTF-8"?>',
     '<gpx version="1.1" creator="tests" xmlns="http://www.topografix.com/GPX/1/1">'];
   if (name || link) {
@@ -42,6 +42,10 @@ export function gpxXml(tracks, { name = null, link = null, useRoute = false } = 
     if (name) out.push(`<name>${name}</name>`);
     if (link) out.push(`<link href="${link}"></link>`);
     out.push("</metadata>");
+  }
+  for (const w of waypoints) {
+    out.push(`<wpt lat="${w.lat}" lon="${w.lon}">${w.name ? `<name>${w.name}</name>` : ""}${w.desc ? `<desc>${w.desc}</desc>` : ""}` +
+      `${w.sym ? `<sym>${w.sym}</sym>` : ""}${w.type ? `<type>${w.type}</type>` : ""}</wpt>`);
   }
   for (let [tname, segs] of tracks) {
     if (segs.length && typeof segs[0][0] === "number") segs = [segs];
@@ -98,6 +102,7 @@ const FIT_EPOCH_S = 631065600;
 export function fitFile(points, {
   bigEndian = false, fileType = 4, sport = 2, subSport = 0, courseName = null, devFields = false,
   enhancedAltitude = false, compressed = false, noPositionAt = [], start = "2026-09-14T08:00:00Z", fixCrc = true,
+  coursePoints = [],
 } = {}) {
   const out = [];
   const little = !bigEndian;
@@ -132,6 +137,14 @@ export function fitFile(points, {
   define(5, 65280, [[0, 4, 0x86], [1, 3, 0x0d]]);
   out.push(5, ...num(12345, 4), 1, 2, 3);
 
+  if (coursePoints.length) {
+    define(6, 32, [[2, 4, 0x85], [3, 4, 0x85], [5, 1, 0x00], [6, 16, 0x07]]);
+    for (const cp of coursePoints) {
+      const name = [...new TextEncoder().encode(cp.name || "")].slice(0, 15);
+      out.push(6, ...num(Math.round((cp.lat / 180) * 2 ** 31), 4, true), ...num(Math.round((cp.lon / 180) * 2 ** 31), 4, true),
+        cp.type ?? 0, ...name, ...new Array(16 - name.length).fill(0));
+    }
+  }
   const alt = enhancedAltitude ? [78, 4, 0x86] : [2, 2, 0x84];
   const posFields = [[0, 4, 0x85], [1, 4, 0x85], alt, [3, 1, 0x02]];
   const dev = devFields ? [[0, 4, 0], [1, 2, 0]] : null;
@@ -180,7 +193,7 @@ function fitCrcHelper(bytes, start, end) {
 }
 
 /** A TCX file: an activity (laps of trackpoints, some without a position) or a course. */
-export function tcxXml(points, { course = null, sport = "Biking", start = "2026-09-14T08:00:00Z", noPositionAt = [], laps = 1 } = {}) {
+export function tcxXml(points, { course = null, sport = "Biking", start = "2026-09-14T08:00:00Z", noPositionAt = [], laps = 1, coursePoints = [] } = {}) {
   const tp = (p, i) => {
     const time = new Date(Date.parse(start) + i * 1000).toISOString();
     const pos = noPositionAt.includes(i) ? "" :
@@ -190,7 +203,9 @@ export function tcxXml(points, { course = null, sport = "Biking", start = "2026-
   const per = Math.ceil(points.length / laps);
   const chunks = Array.from({ length: laps }, (_, k) => points.slice(k * per, (k + 1) * per).map((p, j) => tp(p, k * per + j)).join(""));
   const body = course
-    ? `<Courses><Course><Name>${course}</Name><Track>${chunks.join("")}</Track></Course></Courses>`
+    ? `<Courses><Course><Name>${course}</Name><Track>${chunks.join("")}</Track>${coursePoints.map((cp) =>
+        `<CoursePoint><Name>${cp.name}</Name><Time>${start}</Time><Position><LatitudeDegrees>${cp.lat}</LatitudeDegrees>` +
+        `<LongitudeDegrees>${cp.lon}</LongitudeDegrees></Position><PointType>${cp.type}</PointType></CoursePoint>`).join("")}</Course></Courses>`
     : `<Activities><Activity Sport="${sport}"><Id>${start}</Id>${chunks.map((c) => `<Lap StartTime="${start}"><Track>${c}</Track></Lap>`).join("")}</Activity></Activities>`;
   return new TextEncoder().encode(`<?xml version="1.0" encoding="UTF-8"?>
 <TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">${body}</TrainingCenterDatabase>`);

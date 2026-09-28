@@ -8,11 +8,12 @@ import { config } from "./config.js";
 import { round, simplifyLatLon } from "./geo.js";
 import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
+import * as osm from "./osm.js";
 import * as poi from "./poi.js";
 import { bboxOf, duplicatePairs, findSimilar, groupPairs, proximityPairs } from "./similarity.js";
 import { buildProfile } from "./profile.js";
 import { computeStats } from "./stats.js";
-import { parseTrackFile, unwrapFile } from "./trackfile.js";
+import { fileWaypoints, parseTrackFile, unwrapFile } from "./trackfile.js";
 import * as surface from "./surface.js";
 import { makeZip } from "./zip.js";
 import { sha256 } from "./sha256.js";
@@ -740,7 +741,7 @@ const namesOf = (routes) => {
 
 /**
  * req: {parts: [{route_id, start: [lat, lon], end: [lat, lon], other_way}], closed, reverse,
- *       profile, prefer_unpaved, straight}
+ *       profile, prefer_unpaved, straight, vias: [place id | null per connector]}
  */
 async function runCombine(req) {
   const reqParts = req.parts || [];
@@ -755,14 +756,18 @@ async function runCombine(req) {
   const profile = req.profile || byActivity || config.BROUTER_PROFILES[0];
   if (!config.BROUTER_PROFILES.includes(profile)) throw new ServiceError(`Unknown profile '${profile}'`);
   const params = req.prefer_unpaved && profile === "gravel" ? { prefer_unpaved_paths: "1" } : null;
-  const router = req.straight ? cb.straightRouter : (p, q) => brouter.route(p, q, profile, params);
+  const router = req.straight ? cb.straightRouter : (p, q, via = []) => brouter.route(p, q, profile, params, null, via);
+  // Connectors through a place: vias[k] is the id of a place connector k must pass.
+  const viaPlaces = (req.vias || []).map((id) => (id ? lib.getDoc("poi", id) : null));
+  if (viaPlaces.some((p, k) => req.vias[k] && !p)) throw new ServiceError("A place to ride through was removed");
+  const vias = viaPlaces.map((p) => (p ? [[p.lat, p.lon]] : []));
   let result;
   try {
     const parts = reqParts.map((p) => {
       const t = tracks.get(p.route_id);
       return cb.part(t, cb.locate(t, ...p.start), cb.locate(t, ...p.end), !!p.other_way);
     });
-    result = await cb.combineParts(parts, router, { closed: req.closed !== false, reverse: !!req.reverse, directJoinM: config.DIRECT_JOIN_M });
+    result = await cb.combineParts(parts, router, { closed: req.closed !== false, reverse: !!req.reverse, directJoinM: config.DIRECT_JOIN_M, vias });
   } catch (err) {
     if (err instanceof cb.CombineError) throw new ServiceError(err.message);
     if (err instanceof brouter.BRouterUnavailable) throw new ServiceError(err.message, 503);
@@ -771,11 +776,15 @@ async function runCombine(req) {
   }
   const how = req.straight ? "straight lines" : `BRouter (${profile}${params ? ", prefer unpaved" : ""})`;
   const used = [...new Map(ids.map((id) => [id, routes.get(id)])).values()];
-  return { used, result, description: `Combined from ${namesOf(used)} via ${how}.` };
+  const through = viaPlaces.filter(Boolean).map((p) => p.name);
+  return {
+    used, result, viaPlaces,
+    description: `Combined from ${namesOf(used)} via ${how}${through.length ? `, through ${through.join(" and ")}` : ""}.`,
+  };
 }
 
 export async function combinePreview(req) {
-  const { result, description } = await runCombine(req);
+  const { result, description, viaPlaces } = await runCombine(req);
   const stats = computeStats(result.points);
   const partLegs = result.legs.filter((l) => l.kind !== "connector");
   return {
@@ -796,7 +805,11 @@ export async function combinePreview(req) {
     is_loop: stats.is_loop,
     start: [stats.start_lat, stats.start_lon],
     end: [stats.end_lat, stats.end_lon],
-    connectors: cb.connectorsOf(result).map((l) => ({ distance_km: round(cb.legLength(l.xyz) / 1000, 2), routed: l.routed })),
+    connectors: cb.connectorsOf(result).map((l, k) => ({
+      distance_km: round(cb.legLength(l.xyz) / 1000, 2), routed: l.routed,
+      from: ll(cb.latLonOf(l.xyz[0])), to: ll(cb.latLonOf(l.xyz[l.xyz.length - 1])),
+      via: viaPlaces[k] ? { id: viaPlaces[k].id, name: viaPlaces[k].name } : null,
+    })),
     legs: result.legs.filter((l) => l.xyz.length >= 2).map((l) => ({
       kind: l.kind,
       routed: l.routed,
@@ -1259,4 +1272,71 @@ export async function setPlaceListVisible(id, visible) {
 export function placesAlongRoute(id, maxM = config.PLACES_NEAR_ROUTE_M) {
   const r = getRoute(id);
   return poi.placesAlong(r.geometry, r.distance_km, visiblePlaces(), maxM);
+}
+
+/** The waypoints in a route's original file (GPX <wpt>, FIT/TCX course points). */
+export async function routeWaypoints(r) {
+  const file = await lib.getFile(r.file_hash);
+  if (!file) return [];
+  try {
+    return fileWaypoints(file.data);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Places a connector from `from` to `to` ([lat, lon]) could pass without a big detour:
+ * [{place, detour_km}] (straight-line detour), fewest extra km first.
+ */
+export function placesForConnector(from, to, { maxDetourM = null, limit = 30 } = {}) {
+  return poi.placesNearLeg(from, to, visiblePlaces(), maxDetourM).slice(0, limit);
+}
+
+// ---- places from OpenStreetMap (not stored, unless you keep one)
+
+/** The categories looked up on OpenStreetMap (a setting). */
+export const osmCategories = () =>
+  (Array.isArray(lib.settings.OSM_CATEGORIES) ? lib.settings.OSM_CATEGORIES : poi.OSM_DEFAULT_CATEGORIES)
+    .filter((c) => c in poi.OSM_TAGS);
+
+export async function setOsmCategories(categories) {
+  await lib.setSetting("OSM_CATEGORIES", categories.filter((c) => c in poi.OSM_TAGS));
+}
+
+const osmLabels = () => Object.fromEntries(placeCategories().map((c) => [c.id, c.label]));
+
+/** Leave out OSM places you already have (same name within 25 m, or anything within 10 m). */
+function notMine(found) {
+  const mine = lib.docsOf("poi");
+  return found.filter((p) => !poi.isDuplicatePlace(p, mine) && !poi.isDuplicatePlace(p, mine.map((m) => ({ ...m, name: p.name })), 10));
+}
+
+/**
+ * OpenStreetMap places along a route (the categories of osmCategories): [{place, km, off_m}]
+ * like placesAlongRoute. `opts` for osm.runQuery (proxyUrl on a server). Slow: seconds.
+ */
+export async function osmAlongRoute(id, opts = {}) {
+  const r = getRoute(id);
+  const found = await osm.placesAroundRoute(r.geometry, osmCategories(), osmLabels(), config.PLACES_NEAR_ROUTE_M + 50, opts);
+  return poi.placesAlong(r.geometry, r.distance_km, notMine(found), config.PLACES_NEAR_ROUTE_M);
+}
+
+/** OpenStreetMap places in a map area [south, west, north, east]. */
+export async function osmInArea(bbox, opts = {}) {
+  const [s, w, n, e] = bbox;
+  if ((n - s) * (e - w) > 0.25) throw new ServiceError("Zoom in further to look for places on OpenStreetMap");
+  return notMine(await osm.placesInArea(bbox, osmCategories(), osmLabels(), opts));
+}
+
+/** Keep a place found on OpenStreetMap as one of yours (list "From OpenStreetMap"). */
+export async function keepOsmPlace(p) {
+  const list = await ensureList("From OpenStreetMap", { id: "osm", source: "OpenStreetMap" });
+  const have = lib.docsOf("poi").find((x) => x.osm_id && x.osm_id === p.osm_id);
+  if (have) return have;
+  const [doc] = await lib.saveDocs([{
+    kind: "poi", name: p.name, lat: p.lat, lon: p.lon, category: p.category, list_id: list.id,
+    notes: p.notes || null, url: p.url || null, source: "OpenStreetMap", osm_id: p.osm_id,
+  }]);
+  return doc;
 }

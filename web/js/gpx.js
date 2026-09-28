@@ -106,12 +106,26 @@ function linkOf(node) {
   return l ? clean(l.attrs.href) : null;
 }
 
+/** Waypoints (<wpt>): [{name, description, lat, lon, symbol, type, link}]. */
+function waypointsOf(gpx) {
+  const out = [];
+  for (const w of children(gpx, "wpt")) {
+    const q = point(w);
+    if (!q) continue;
+    out.push({
+      name: textOf(w, "name"), description: textOf(w, "desc") ?? textOf(w, "cmt"),
+      lat: q[0], lon: q[1], symbol: textOf(w, "sym"), type: textOf(w, "type"), link: linkOf(w),
+    });
+  }
+  return out;
+}
+
 /**
- * Parse GPX content into tracks: {name, description, link, tracks: [{name, points}]}.
+ * Parse GPX content into tracks: {name, description, link, tracks: [{name, points}], waypoints}.
  * Every <trk> with at least two points becomes a track (its segments are joined).
  * Files without tracks fall back to <rte> routes. Points are [lat, lon, ele|null].
  */
-export function parseGpx(text) {
+export function parseGpx(text, opts = {}) {
   if (typeof text !== "string") text = new TextDecoder("utf-8").decode(text);
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const root = parseXml(text);
@@ -135,7 +149,7 @@ export function parseGpx(text) {
       if (pts.length >= 2) tracks.push({ name: textOf(rte, "name"), points: pts });
     }
   }
-  if (!tracks.length) throw new GpxError("GPX file contains no track or route with at least two points");
+  if (!tracks.length && !opts.waypointsOnly) throw new GpxError("GPX file contains no track or route with at least two points");
 
   const meta = child(gpx, "metadata");
   let link = linkOf(meta) || linkOf(gpx);
@@ -146,6 +160,7 @@ export function parseGpx(text) {
     description: textOf(meta, "desc") ?? textOf(gpx, "desc"),
     link: link || null,
     tracks,
+    waypoints: waypointsOf(gpx),
   };
 }
 

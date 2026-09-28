@@ -19,6 +19,15 @@ export const config = {
   RIDE_MATCH_MIN_COVERED: 0.8,
   // Places (POIs) within this distance of a route are listed in its panel as "along the route".
   PLACES_NEAR_ROUTE_M: 200,
+  // Overpass API servers for places from OpenStreetMap, tried in turn (they are often busy).
+  // On a rerouter server the page asks the server (api/overpass), which caches the answers.
+  OVERPASS_URLS: [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  ],
+  OVERPASS_TIMEOUT_S: 50,
+  OVERPASS_CACHE_DAYS: 7,
   // Duplicates view: also list "variants", where one route lies (almost) entirely on another.
   VARIANT_MIN_OVERLAP: 0.9,
   // Map view: default and maximum distance (metres) for "routes near each other".

@@ -8,7 +8,9 @@
 // the library, and added to a library without replacing what is there. The example route sets
 // on the public site (data/seeds/, see tools/build_seeds.py) are such selections.
 
-import { VERSION } from "./config.js";
+import { VERSION, config } from "./config.js";
+import { newId } from "./db.js";
+import { DEFAULT_CATEGORIES, isDuplicatePlace, placesAlong } from "./poi.js";
 import { makeZip, readZip } from "./zip.js";
 import { extensionOf } from "./trackfile.js";
 
@@ -51,7 +53,7 @@ const stored = (r) => Object.fromEntries(Object.entries(r).filter(([k]) => !k.st
  * `personal: false` leaves out the notes and quality ratings (for a set that is shared).
  * Built in the page, so it works for a server library too (its files are fetched one by one).
  */
-export async function makeSelection(library, ids, { title = null, description = null, personal = true } = {}) {
+export async function makeSelection(library, ids, { title = null, description = null, personal = true, places = true } = {}) {
   const routes = ids.map((id) => library.get(id)).filter(Boolean);
   if (!routes.length) throw new Error("No routes selected");
   const inSet = new Set(routes.map((r) => r.id));
@@ -73,11 +75,68 @@ export async function makeSelection(library, ids, { title = null, description = 
     ignored: [...library.ignored].filter((k) => k.split("_").every((id) => inSet.has(Number(id)))),
     settings: {},
     files: files.map((f) => ({ hash: f.hash, name: f.name })),
+    ...(places ? placesOfSet(library, routes, personal) : {}),
   };
   return makeZip([
     { name: "library.json", data: JSON.stringify(manifest) },
     ...files.map((f) => ({ name: fileEntry(f), data: f.data })),
   ]);
+}
+
+/**
+ * The places along a set's routes, with their lists and the categories of your own they use:
+ * {docs, categories}. Without `personal`, the places' notes are left out too.
+ */
+function placesOfSet(library, routes, personal) {
+  const all = library.docsOf("poi");
+  const near = new Map();
+  for (const r of routes) {
+    for (const { place } of placesAlong(r.geometry, r.distance_km, all, config.PLACES_NEAR_ROUTE_M)) near.set(place.key, place);
+  }
+  if (!near.size) return {};
+  const places = [...near.values()].map((p) => (personal ? { ...p } : { ...p, notes: null }));
+  const lists = [...new Set(places.map((p) => p.list_id))].map((id) => library.getDoc("poi_list", id)).filter(Boolean);
+  const used = new Set(places.map((p) => p.category));
+  const builtIn = new Set(DEFAULT_CATEGORIES.map((c) => c.id));
+  const saved = Array.isArray(library.settings.POI_CATEGORIES) ? library.settings.POI_CATEGORIES : [];
+  return { docs: [...lists, ...places], categories: saved.filter((c) => used.has(c.id) && !builtIn.has(c.id)) };
+}
+
+/**
+ * Add the places of a set (or a backup) to a library: lists with the same name are merged,
+ * places already there (same name within 25 m, in that list) skipped, categories of your own
+ * added when the library doesn't have them. Returns how many places were added.
+ */
+async function addPlaces(library, docs = [], categories = []) {
+  const lists = docs.filter((d) => d.kind === "poi_list");
+  const places = docs.filter((d) => d.kind === "poi");
+  if (!places.length) return 0;
+  const saved = Array.isArray(library.settings.POI_CATEGORIES) ? library.settings.POI_CATEGORIES : [];
+  const newCats = categories.filter((c) => c && c.id && !saved.some((x) => x.id === c.id || x.label.toLowerCase() === String(c.label).toLowerCase()));
+  if (newCats.length) await library.setSetting("POI_CATEGORIES", [...saved, ...newCats]);
+  const listId = new Map(); // id in the set -> id in the library
+  const mine = library.docsOf("poi_list");
+  const created = [];
+  for (const l of lists) {
+    const same = mine.find((x) => x.name.toLowerCase() === String(l.name).toLowerCase());
+    if (same) listId.set(l.id, same.id);
+    else {
+      const id = mine.some((x) => x.id === l.id) ? newId() : l.id;
+      created.push({ kind: "poi_list", id, name: l.name, source: l.source || null, visible: true, created_at: new Date().toISOString() });
+      listId.set(l.id, id);
+    }
+  }
+  if (created.length) await library.saveDocs(created);
+  const existing = library.docsOf("poi");
+  const fresh = [];
+  for (const p of places) {
+    const list_id = listId.get(p.list_id) ?? p.list_id;
+    if (isDuplicatePlace(p, [...existing, ...fresh].filter((x) => x.list_id === list_id))) continue;
+    fresh.push({ ...p, id: undefined, key: undefined, updated_at: undefined, list_id });
+  }
+  const clean = fresh.map((p) => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined)));
+  for (let i = 0; i < clean.length; i += 200) await library.saveDocs(clean.slice(i, i + 200));
+  return clean.length;
 }
 
 /** Read a backup zip: {routes, ignored, settings, files: [{hash, name, data}], kind, title, description} */
@@ -94,7 +153,8 @@ export async function readBackup(buffer) {
     return { hash: f.hash, name: f.name, data };
   });
   return {
-    routes: manifest.routes, ignored: manifest.ignored || [], settings: manifest.settings || {}, docs: manifest.docs || [], files,
+    routes: manifest.routes, ignored: manifest.ignored || [], settings: manifest.settings || {}, docs: manifest.docs || [],
+    categories: manifest.categories || [], files,
     created_at: manifest.created_at, kind: manifest.kind || "library", title: manifest.title || null, description: manifest.description || null,
   };
 }
@@ -162,5 +222,8 @@ export async function addBackup(library, data) {
     .map((k) => k.split("_").map((id) => idMap.get(Number(id))))
     .filter(([a, b]) => a != null && b != null && a !== b);
   if (pairs.length) await library.ignorePairs(pairs);
-  return { added: records.length, skipped: data.routes.length - records.length, ids: records.map((r) => r.id) };
+  // Places: those of a set, or of a whole backup (its own categories are in its settings).
+  const categories = data.categories?.length ? data.categories : data.settings?.POI_CATEGORIES || [];
+  const placesAdded = await addPlaces(library, data.docs || [], categories);
+  return { added: records.length, skipped: data.routes.length - records.length, ids: records.map((r) => r.id), places: placesAdded };
 }

@@ -1,7 +1,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { makeBackup, readBackup } from "../js/backup.js";
+import { addBackup, makeBackup, makeSelection, readBackup } from "../js/backup.js";
 import { Library, MemoryBackend } from "../js/db.js";
 import {
   categoryId, isDuplicatePlace, matchCategory, parseCsv, parseKml, parseKmz, parsePlacesCsv, placesAlong,
@@ -11,7 +11,7 @@ import * as places from "../js/places.js";
 import * as svc from "../js/service.js";
 import { config } from "../js/config.js";
 import { makeZip } from "../js/zip.js";
-import { gpxXml, linePoints, offset } from "./helpers.js";
+import { fitFile, gpxXml, linePoints, offset, tcxXml } from "./helpers.js";
 
 // A Google My Maps export, trimmed: styles with a StyleMap, layers as folders, a line.
 const KML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -54,7 +54,7 @@ test("KMZ: the KML inside the zip", async () => {
   const zip = await makeZip([{ name: "images/icon-1.png", data: new Uint8Array([1, 2]) }, { name: "doc.kml", data: KML }]);
   const d = await parseKmz(new Uint8Array(await zip.arrayBuffer()));
   assert.equal(d.layers.length, 3);
-  await assert.rejects(readPlacesFile(new TextEncoder().encode("x"), "places.gpx"), /KML, KMZ/);
+  await assert.rejects(readPlacesFile(new TextEncoder().encode("x"), "places.pdf"), /KML, KMZ/);
 });
 
 test("categories are suggested from the icon, then the layer name", () => {
@@ -203,4 +203,111 @@ test("places along a library route, and places in backups", async () => {
   const other = await Library.open(new MemoryBackend());
   await other.restore(data);
   assert.deepEqual(other.docsOf("poi").map((p) => p.name).sort(), ["Too far", "Water tap"]);
+});
+
+// ------------------------------------------------------------------ waypoints
+
+const line = linePoints({ start: [51.0, 4.4], lengthM: 2000, stepM: 50, ele: () => 10 });
+
+test("waypoints: GPX <wpt>, FIT and TCX course points (not turn instructions) become places", async () => {
+  const gpx = gpxXml([["t", line]], { waypoints: [
+    { lat: 51.001, lon: 4.401, name: "Kraantje", sym: "Drinking Water" },
+    { lat: 51.002, lon: 4.402, name: "Top", sym: "Scenic Area", desc: "nice view" },
+  ] });
+  const g = await readPlacesFile(gpx, "Rondje.gpx");
+  assert.equal(g.name, "Rondje");
+  const [a, b] = g.layers[0].places;
+  assert.deepEqual([a.name, suggestCategory(a, "Rondje")], ["Kraantje", "water"]);
+  assert.deepEqual([b.description, suggestCategory(b, "Rondje")], ["nice view", "photo"]);
+  // A GPX file with only waypoints (no track) is fine here.
+  const only = new TextEncoder().encode('<gpx><wpt lat="51" lon="4"><name>X</name></wpt></gpx>');
+  assert.equal((await readPlacesFile(only, "x.gpx")).layers[0].places.length, 1);
+
+  const fit = fitFile(line, { fileType: 6, coursePoints: [
+    { lat: 51.0005, lon: 4.405, type: 3, name: "Water" },
+    { lat: 51.0006, lon: 4.406, type: 6, name: "Left" }, // a turn: not a place
+    { lat: 51.0007, lon: 4.407, type: 39, name: "WC" },
+    { lat: 51.0008, lon: 4.408, type: 0, name: "" }, // generic without a name: not a place
+  ] });
+  const f = await readPlacesFile(fit, "course.fit");
+  assert.deepEqual(f.layers[0].places.map((p) => [p.name, suggestCategory(p, "course")]), [["Water", "water"], ["WC", "toilet"]]);
+
+  const tcx = tcxXml(line, { course: "C", coursePoints: [
+    { name: "Frietkot", lat: 51.001, lon: 4.41, type: "Food" },
+    { name: "Turn", lat: 51.001, lon: 4.42, type: "Left" },
+    { name: "Climb", lat: 51.001, lon: 4.43, type: "4th Category" },
+  ] });
+  const t = await readPlacesFile(tcx, "c.tcx");
+  assert.deepEqual(t.layers[0].places.map((p) => [p.name, suggestCategory(p, "c")]), [["Frietkot", "food"]]);
+  await assert.rejects(readPlacesFile(gpxXml([["t", line]]), "none.gpx"), /No waypoints/);
+});
+
+test("a route's file offers its waypoints", async () => {
+  const data = gpxXml([["t", line]], { waypoints: [{ lat: 51.001, lon: 4.401, name: "Kraantje", sym: "Drinking Water" }] });
+  const { routes: [r] } = await svc.importGpx(data, "Route.gpx");
+  const wps = await svc.routeWaypoints(svc.route(r.id));
+  assert.deepEqual(wps.map((w) => [w.name, w.symbol]), [["Kraantje", "Drinking Water"]]);
+});
+
+test("an exported set carries the places along its routes, and adding it merges them", async () => {
+  const start = [51.0, 4.4];
+  const pts = linePoints({ start, lengthM: 10000, stepM: 100, ele: () => 10 });
+  const { routes: [r] } = await svc.importGpx(gpxXml([["t", pts]]), "Route.gpx");
+  const cat = await svc.saveCategory({ label: "Gîtes", symbol: "🏡" });
+  const { list } = await svc.importPlaces({ name: "Stops", layers: [{ name: "x", places: [
+    { name: "Tap", lat: offset(...start, 50, 2000)[0], lon: offset(...start, 50, 2000)[1], description: "cold water" },
+    { name: "Gîte", lat: offset(...start, -80, 6000)[0], lon: offset(...start, -80, 6000)[1] },
+    { name: "Elsewhere", lat: 50.5, lon: 5.5 },
+  ] }] }, { layers: [{ include: true, category: "water" }] });
+  const gite = svc.allPlaces().find((p) => p.name === "Gîte");
+  await svc.updatePlace(gite.id, { category: cat.id });
+
+  const zip = await makeSelection(svc.library(), [r.id], { title: "Set", personal: false });
+  const data = await readBackup(new Uint8Array(await zip.arrayBuffer()));
+  assert.deepEqual(data.docs.filter((d) => d.kind === "poi").map((p) => [p.name, p.notes]).sort(), [["Gîte", null], ["Tap", null]]);
+  assert.deepEqual(data.docs.filter((d) => d.kind === "poi_list").map((l) => l.name), [list.name]);
+  assert.deepEqual(data.categories.map((c) => c.label), ["Gîtes"]);
+  const without = await readBackup(new Uint8Array(await (await makeSelection(svc.library(), [r.id], { places: false })).arrayBuffer()));
+  assert.equal(without.docs.length, 0);
+
+  // Into another library: the places, their list and the category come along, once.
+  const other = await Library.open(new MemoryBackend());
+  const res = await addBackup(other, data);
+  assert.equal(res.places, 2);
+  assert.equal((await addBackup(other, data)).places, 0);
+  assert.deepEqual(other.docsOf("poi_list").map((l) => l.name), ["Stops"]);
+  assert.equal(other.settings.POI_CATEGORIES.find((c) => c.label === "Gîtes").symbol, "🏡");
+  assert.equal(other.docsOf("poi").find((p) => p.name === "Gîte").category, cat.id);
+});
+
+test("OpenStreetMap places along a route: new ones only, and one kept as yours", async () => {
+  const start = [51.0, 4.4];
+  const pts = linePoints({ start, lengthM: 10000, stepM: 100, ele: () => 10 });
+  const { routes: [r] } = await svc.importGpx(gpxXml([["t", pts]]), "Route.gpx");
+  const at = (n, e) => offset(...start, n, e);
+  const mine = await svc.addPlace({ lat: at(30, 4000)[0], lon: at(30, 4000)[1], name: "Tap", category: "water" });
+  const answer = { elements: [
+    { type: "node", id: 1, lat: at(40, 2000)[0], lon: at(40, 2000)[1], tags: { amenity: "drinking_water" } },
+    { type: "node", id: 2, lat: mine.lat, lon: mine.lon, tags: { amenity: "drinking_water", name: "Tap" } }, // already mine
+    { type: "node", id: 3, lat: at(20, 7000)[0], lon: at(20, 7000)[1], tags: { shop: "bicycle", name: "Fietsen Jan" } },
+    { type: "node", id: 4, lat: at(20, 8000)[0], lon: at(20, 8000)[1], tags: { amenity: "cafe", name: "Café" } }, // not asked for
+  ] };
+  let query = null;
+  const fetchFn = async (url, init) => {
+    query = decodeURIComponent(init.body.slice(5));
+    return { ok: true, status: 200, json: async () => answer };
+  };
+  const along = await svc.osmAlongRoute(r.id, { fetchFn });
+  assert.match(query, /^\[out:json\]\[timeout:40\];\(nwr\[/);
+  assert.deepEqual(along.map((a) => [a.place.name, a.km]), [["Drinking water", 2], ["Fietsen Jan", 7]]);
+
+  const kept = await svc.keepOsmPlace(along[1].place);
+  assert.equal(kept.list_id, "osm");
+  assert.equal(kept.osm_id, "node/3");
+  assert.equal((await svc.keepOsmPlace(along[1].place)).id, kept.id, "kept once");
+  assert.deepEqual(svc.placeLists().map((l) => l.name).sort(), ["From OpenStreetMap", "My marks"]);
+
+  await svc.setOsmCategories(["cafe", "nonsense"]);
+  assert.deepEqual(svc.osmCategories(), ["cafe"]);
+  await assert.rejects(svc.osmInArea([50, 4, 51, 5], { fetchFn }), /Zoom in/);
 });

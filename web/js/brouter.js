@@ -67,9 +67,9 @@ function points(feature) {
   return pts;
 }
 
-/** Route between two [lat, lon] points; returns [[lat, lon, ele], ...]. */
-export async function route(start, end, profile, params = null, baseUrl = null) {
-  return points(await request([start, end], profile, params, baseUrl));
+/** Route between two [lat, lon] points (through `via` points, if any); returns [[lat, lon, ele], ...]. */
+export async function route(start, end, profile, params = null, baseUrl = null, via = []) {
+  return points(await request([start, ...via, end], profile, params, baseUrl));
 }
 
 /**

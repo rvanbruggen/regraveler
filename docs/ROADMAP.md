@@ -247,9 +247,15 @@ the along-route computation with km marks.
 server, `docs` in backups); `poi.js`; KML/KMZ + both CSV forms with the per-layer preview
 (checked on Rik's real files: 8 layers of *Central Antwerp*, the 88 *Kroegtijgers*, the
 unquoted comma); the Places tab; markers on every map with a popup editor; ＋ Place;
-"Places along this route". A built-in **Frituur** category was added. **Next for this item:**
-GPX waypoints (and FIT/TCX course points), the OpenStreetMap overlay (Overpass, cached,
-mirrors), routing a connector via a mark in the combiner, places in *Export set*.
+"Places along this route". A built-in **Frituur** category was added.
+
+**Part 2 built (2026-09-28):** waypoints (GPX, FIT/TCX course points) as places; places in
+*Export set* / *Add routes from a zip*; a connector through a place in Combine; places from
+OpenStreetMap along a route or in the map area (Overpass through `osm.js`: servers in turn,
+cache; `/api/overpass` proxy on the server). Measured on the 295 km Diest route: "around" the
+route line timed out (26 s), one bounding box answered in 11 s, so the query uses route boxes
+and filters locally; bus shelters (`shelter_type=public_transport`, 100 of 175 hits) are left
+out.
 
 ---
 

@@ -8,19 +8,23 @@ from __future__ import annotations
 
 import http.client
 import ipaddress
+import json
 import logging
 import re
 import socket
+import time
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import Annotated
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -330,6 +334,48 @@ def fetch_gpx(url: str):
     if not _GPX_START.search(data[:4096]):
         raise HTTPException(422, "That link doesn't lead to a GPX file. Use the link of the file itself, e.g. the site's \"Download GPX\" link.")
     return Response(data, media_type="application/gpx+xml")
+
+
+# ---------------------------------------------------------------- places from OpenStreetMap
+
+_overpass_cache: "OrderedDict[str, tuple[float, bytes]]" = OrderedDict()
+_OVERPASS_CACHE_MAX = 300
+
+
+def _ask_overpass(query: str) -> bytes:
+    problems = []
+    body = urlencode({"data": query}).encode()
+    for url in config.OVERPASS_URLS:
+        req = urllib.request.Request(url, data=body, headers={
+            "User-Agent": f"rerouter/{__version__} (+https://github.com/rvanbruggen/rerouter)",
+            "Content-Type": "application/x-www-form-urlencoded",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=config.OVERPASS_TIMEOUT_S) as resp:
+                data = resp.read()
+            json.loads(data)  # an error page is no answer
+            return data
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            problems.append(f"{urlsplit(url).hostname}: {getattr(exc, 'reason', exc)}")
+    raise HTTPException(503, "OpenStreetMap's place servers are busy right now; try again in a while (" + "; ".join(problems) + ")")
+
+
+@app.post("/api/overpass")
+async def overpass(request: Request):
+    """Pass a places query (Overpass QL, JSON output) on to the Overpass servers, in turn, with
+    rerouter's name, and keep the answers for a day. Only the configured servers are asked."""
+    query = parse_qs((await request.body()).decode("utf-8", "replace")).get("data", [""])[0]
+    if not query.startswith("[out:json]") or len(query) > 200_000:
+        raise HTTPException(400, "Not a places query")
+    hit = _overpass_cache.get(query)
+    if hit and time.time() - hit[0] < config.OVERPASS_CACHE_S:
+        _overpass_cache.move_to_end(query)
+        return Response(hit[1], media_type="application/json")
+    data = await run_in_threadpool(_ask_overpass, query)
+    _overpass_cache[query] = (time.time(), data)
+    while len(_overpass_cache) > _OVERPASS_CACHE_MAX:
+        _overpass_cache.popitem(last=False)
+    return Response(data, media_type="application/json")
 
 
 # ---------------------------------------------------------------- the page

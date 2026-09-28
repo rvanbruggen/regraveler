@@ -261,23 +261,28 @@ export function suggestParts(a, b, pattern = "loop", stepM = 50) {
 /** Is the part ridden in the route's own direction? */
 export const withRoute = (p) => (p.otherWay ? p.startAt > p.endAt : p.startAt <= p.endAt);
 
-async function connector(p, q, router, directJoinM) {
-  if (hyp(p, q) <= directJoinM) return { kind: "connector", xyz: [p, q], routed: false };
-  const routed = fromLatLon(await router(latLonOf(p), latLonOf(q)));
+/** A connector from p to q ([x, y, ele]); `via`: [lat, lon] points it must pass (a place). */
+async function connector(p, q, router, directJoinM, via = []) {
+  if (!via.length && hyp(p, q) <= directJoinM) return { kind: "connector", xyz: [p, q], routed: false };
+  const routed = fromLatLon(await (via.length ? router(latLonOf(p), latLonOf(q), via) : router(latLonOf(p), latLonOf(q))));
   // BRouter snaps to the nearest way; keep the exact cut points at both ends.
   return { kind: "connector", xyz: join([[p], routed, [q]]), routed: true };
 }
 
-/** Legs in riding order: part, connector, part, ... (and a connector back if closed). */
-async function stitch(parts, router, closed, directJoinM) {
+/**
+ * Legs in riding order: part, connector, part, ... (and a connector back if closed).
+ * vias[k]: [lat, lon] points connector k must pass (k = 0 for the first connector).
+ */
+async function stitch(parts, router, closed, directJoinM, vias = []) {
   const ends = parts.map((p) => [pointAt(p.track, p.startAt), pointAt(p.track, p.endAt)]);
   const legs = [];
+  let k = 0;
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
-    if (i) legs.push(await connector(ends[i - 1][1], ends[i][0], router, directJoinM));
+    if (i) legs.push(await connector(ends[i - 1][1], ends[i][0], router, directJoinM, vias[k++] || []));
     legs.push({ kind: partKey(i), xyz: section(p.track, p.startAt, p.endAt, p.otherWay), routed: true });
   }
-  if (closed) legs.push(await connector(ends[ends.length - 1][1], ends[0][0], router, directJoinM));
+  if (closed) legs.push(await connector(ends[ends.length - 1][1], ends[0][0], router, directJoinM, vias[k] || []));
   return legs;
 }
 
@@ -335,7 +340,7 @@ export async function combine(a, b, connections, router, {
  * closed: add a connector from the last part's end back to the first part's start; the
  * result then starts (and ends) at the first part's start point.
  */
-export async function combineParts(parts, router, { closed = true, reverse = false, directJoinM = 25 } = {}) {
+export async function combineParts(parts, router, { closed = true, reverse = false, directJoinM = 25, vias = [] } = {}) {
   if (parts.length < 2) throw new CombineError("Choose at least two routes");
   parts = parts.map((p) => part(p.track, clamp(p.startAt, 0, p.track.length), clamp(p.endAt, 0, p.track.length), p.otherWay));
   parts.forEach((p, i) => {
@@ -343,7 +348,7 @@ export async function combineParts(parts, router, { closed = true, reverse = fal
       throw new CombineError(`The two points on route ${partKey(i).toUpperCase()} must be different`);
     }
   });
-  const legs = await stitch(parts, router, closed, directJoinM);
+  const legs = await stitch(parts, router, closed, directJoinM, vias);
   let pts = join(legs.map((l) => l.xyz));
   if (reverse) pts = reversed(pts);
   return {
@@ -376,9 +381,9 @@ export function connectorsCross(parts, closed = true) {
   return false;
 }
 
-/** Fallback "router": a straight line (no elevation). */
-export async function straightRouter(p, q) {
-  return [[p[0], p[1], null], [q[0], q[1], null]];
+/** Fallback "router": straight lines (no elevation), through the via points if any. */
+export async function straightRouter(p, q, via = []) {
+  return [p, ...via, q].map(([lat, lon]) => [lat, lon, null]);
 }
 
 // ------------------------------------------------------------------ new start point

@@ -56,6 +56,13 @@ export function parseTrackFile(data) {
   return { format: "gpx", kind: null, activity: null, started_at: null, ...parseGpx(data) };
 }
 
+/** Only the waypoints of a route file (a GPX file may have no track at all). */
+export function fileWaypoints(data) {
+  const format = detectFormat(data);
+  if (format === "gpx" || format === null) return parseGpx(data, { waypointsOnly: true }).waypoints;
+  return parseTrackFile(data).waypoints || [];
+}
+
 /** Extension for a stored file: its own format, else gpx. */
 export const extensionOf = (name) => formatOfName(name) || "gpx";
 

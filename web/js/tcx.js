@@ -50,6 +50,21 @@ export function parseTcx(text) {
     kind ??= "course";
     tracks.push({ name: textOf(course, "name"), points: pts });
   }
+  // Course points that are places (not turn instructions or climb categories).
+  const waypoints = [];
+  for (const course of children(child(db, "courses") || { children: [] }, "course")) {
+    for (const cp of children(course, "coursepoint")) {
+      const type = (textOf(cp, "pointtype") || "Generic").toLowerCase();
+      if (/^(left|right|straight|sprint|hors category|\d\w* category)$/.test(type)) continue;
+      const pos = child(cp, "position");
+      const lat = parseFloat(pos && textOf(pos, "latitudedegrees")), lon = parseFloat(pos && textOf(pos, "longitudedegrees"));
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      waypoints.push({
+        name: textOf(cp, "name"), description: textOf(cp, "notes"), lat, lon,
+        symbol: null, type: type === "generic" ? null : type, link: null,
+      });
+    }
+  }
   if (!tracks.length) throw new GpxError("TCX file contains no activity or course with at least two positions");
   return {
     format: "tcx",
@@ -57,6 +72,7 @@ export function parseTcx(text) {
     description: null,
     link: null,
     tracks,
+    waypoints,
     kind,
     activity,
     started_at: started,

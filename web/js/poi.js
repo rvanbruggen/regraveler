@@ -4,6 +4,7 @@
 
 import { closestOnSegment, cumulative, lineToMetric, toMetric } from "./geo.js";
 import { child, children, GpxError, parseXml, textOf } from "./gpx.js";
+import { fileWaypoints, isTrackFileName, unwrapFile } from "./trackfile.js";
 import { readZip } from "./zip.js";
 
 export class PlacesError extends GpxError {}
@@ -15,16 +16,16 @@ export class PlacesError extends GpxError {}
  */
 export const DEFAULT_CATEGORIES = [
   { id: "water", label: "Drinking water", symbol: "💧", color: "#1a73e8", words: ["water", "drinking", "drinkwater", "fontein", "fountain", "kraantje", "bron", "source", "fontaine"] },
-  { id: "toilet", label: "Toilet", symbol: "🚻", color: "#6d4c41", words: ["toilet", "wc", "restroom", "sanitair", "toilette"] },
+  { id: "toilet", label: "Toilet", symbol: "🚻", color: "#6d4c41", words: ["toilet", "wc", "restroom", "sanitair", "toilette", "shower"] },
   { id: "cafe", label: "Café / bar", symbol: "☕", color: "#8e24aa", words: ["café", "cafe", "bar", "bars", "pub", "kroeg", "beer", "bier", "coffee", "koffie", "estaminet", "brasserie", "tavern", "taverne", "herberg"] },
   { id: "food", label: "Restaurant / food", symbol: "🍴", color: "#e65100", words: ["restaurant", "food", "eten", "snack", "bakery", "bakker", "boulangerie", "pizza", "lunch", "fork"] },
   { id: "frituur", label: "Frituur", symbol: "🍟", color: "#f9a825", words: ["frituur", "frit", "frites", "friet", "friterie", "fritkot", "frietkot", "snackbar"] },
   { id: "bike", label: "Bike shop / repair", symbol: "🔧", color: "#2e7d32", words: ["bike", "bikes", "fiets", "bicycle", "velo", "vélo", "repair", "herstel", "cycling"] },
   { id: "station", label: "Train station", symbol: "🚉", color: "#37474f", words: ["station", "train", "trein", "gare", "railway", "spoor"] },
   { id: "sight", label: "Sight / museum", symbol: "🏛", color: "#c62828", words: ["museum", "musea", "sight", "sights", "bezienswaardig", "monument", "church", "kerk", "castle", "kasteel", "attraction", "landmark", "places to see"] },
-  { id: "photo", label: "Photo spot", symbol: "📷", color: "#00838f", words: ["photo", "foto", "view", "uitzicht", "viewpoint", "panorama", "camera"] },
-  { id: "shelter", label: "Shelter / picnic", symbol: "⛺", color: "#558b2f", words: ["shelter", "picnic", "picknick", "schuil", "bench"] },
-  { id: "lodging", label: "Hotel / lodging", symbol: "🛏", color: "#3949ab", words: ["hotel", "hotels", "b&b", "lodging", "camping", "hostel", "overnachten", "bed"] },
+  { id: "photo", label: "Photo spot", symbol: "📷", color: "#00838f", words: ["photo", "foto", "view", "uitzicht", "viewpoint", "panorama", "camera", "scenic", "overlook", "summit"] },
+  { id: "shelter", label: "Shelter / picnic", symbol: "⛺", color: "#558b2f", words: ["shelter", "picnic", "picknick", "schuil", "bench", "rest area"] },
+  { id: "lodging", label: "Hotel / lodging", symbol: "🛏", color: "#3949ab", words: ["hotel", "hotels", "b&b", "lodging", "camping", "campground", "campsite", "hostel", "overnachten", "bed"] },
   { id: "parking", label: "Parking", symbol: "🅿", color: "#546e7a", words: ["parking", "parkeren"] },
   { id: "other", label: "Other", symbol: "📍", color: "#757575", words: [] },
 ];
@@ -251,15 +252,37 @@ export function parsePlacesCsv(text, filename = "places.csv") {
   return { name: m ? m[1] : stem, layers: [{ name: m ? m[2] : stem, places }], skipped };
 }
 
-/** Read a places file by its name: .kml, .kmz or .csv. */
+/**
+ * The waypoints of a route file (GPX <wpt>, FIT or TCX course points) as places: one layer
+ * named after the file (or `name`), same shape as parseKml. The waypoint's symbol and type
+ * ("Drinking Water", "Restroom", "water") go into `category` for suggestCategory.
+ */
+export function waypointPlaces(waypoints, name) {
+  const places = waypoints.map((w) => ({
+    name: w.name || w.type || w.symbol || "Waypoint",
+    description: w.description || null,
+    url: w.link || null,
+    category: [w.symbol, w.type].filter(Boolean).join(" ") || null,
+    lat: w.lat, lon: w.lon, icon: null,
+  }));
+  if (!places.length) throw new PlacesError("No waypoints in this file");
+  return { name, layers: [{ name, places }], skipped: 0 };
+}
+
+/** Read a places file by its name: .kml, .kmz, .csv, or a route file's waypoints. */
 export async function readPlacesFile(bytes, filename) {
   const lower = filename.toLowerCase();
+  if (isTrackFileName(lower)) {
+    const { data, name } = await unwrapFile(bytes, filename);
+    return waypointPlaces(fileWaypoints(data), name.replace(/\.\w+$/, ""));
+  }
   if (lower.endsWith(".kmz")) return parseKmz(bytes);
   if (lower.endsWith(".kml")) return parseKml(bytes);
   if (lower.endsWith(".csv") || lower.endsWith(".txt")) return parsePlacesCsv(bytes, filename);
-  throw new PlacesError("Places can be imported from KML, KMZ (Google My Maps) or CSV files");
+  throw new PlacesError("Places can be imported from KML, KMZ (Google My Maps) or CSV files, or the waypoints of a GPX, TCX or FIT file");
 }
 
+/** Files that are only lists of places (route files can hold waypoints too, see readPlacesFile). */
 export const isPlacesFileName = (name) => /\.(kml|kmz|csv)$/i.test(name);
 
 /**
@@ -321,4 +344,125 @@ export function isDuplicatePlace(p, existing, withinM = 25) {
     const [ex, ey] = toMetric(e.lat, e.lon);
     return Math.hypot(ex - x, ey - y) <= withinM;
   });
+}
+
+/**
+ * Places that a leg from `from` to `to` ([lat, lon]) can pass with a small detour (as the
+ * crow flies: via the place minus straight on): [{place, detour_km}], smallest first. The
+ * allowed detour defaults to 2 km or half the leg, whichever is more.
+ */
+export function placesNearLeg(from, to, places, maxDetourM = null) {
+  const a = toMetric(from[0], from[1]), b = toMetric(to[0], to[1]);
+  const direct = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const max = maxDetourM ?? Math.max(2000, direct / 2);
+  const out = [];
+  for (const place of places) {
+    const [x, y] = toMetric(place.lat, place.lon);
+    const detour = Math.hypot(x - a[0], y - a[1]) + Math.hypot(b[0] - x, b[1] - y) - direct;
+    if (detour <= max) out.push({ place, detour_km: Math.round(detour / 100) / 10 });
+  }
+  return out.sort((p, q) => p.detour_km - q.detour_km);
+}
+
+// ------------------------------------------------------------------ OpenStreetMap
+
+/**
+ * OpenStreetMap tags per category: [key, values regex]. Asked from the Overpass API (osm.js);
+ * parkings and "other" are left out (far too many).
+ */
+export const OSM_TAGS = {
+  water: [["amenity", "drinking_water|water_point"]],
+  toilet: [["amenity", "toilets"]],
+  cafe: [["amenity", "cafe|bar|pub|biergarten"]],
+  food: [["amenity", "restaurant|fast_food"]],
+  frituur: [["amenity", "fast_food"]], // with a chips/friture cuisine, see osmCategory
+  bike: [["shop", "bicycle"], ["amenity", "bicycle_repair_station"]],
+  station: [["railway", "station|halt"]],
+  sight: [["tourism", "attraction|museum"], ["historic", "castle|ruins|monument|archaeological_site"]],
+  photo: [["tourism", "viewpoint"]],
+  shelter: [["amenity", "shelter"], ["tourism", "picnic_site"]],
+  lodging: [["tourism", "hotel|guest_house|hostel|camp_site|chalet|alpine_hut"]],
+};
+export const OSM_DEFAULT_CATEGORIES = ["water", "toilet", "bike", "station", "shelter", "photo"];
+
+const FRIES = /fri(es|te|ture|terie)|chips|friet/i;
+
+/** The category of an OSM element's tags (null: none we show). */
+export function osmCategory(tags = {}) {
+  if (tags.amenity === "fast_food" && FRIES.test(tags.cuisine || "")) return "frituur";
+  if (tags.railway && tags.station === "subway") return null;
+  // Bus stop shelters (most shelters in Belgium) are no place to stop on a ride.
+  if (tags.amenity === "shelter" && /public_transport|bus_stop|tram_stop/.test(tags.shelter_type || "")) return null;
+  for (const [cat, rules] of Object.entries(OSM_TAGS)) {
+    if (cat === "frituur") continue;
+    if (rules.some(([k, v]) => tags[k] && new RegExp(`^(${v})$`).test(tags[k]))) return cat;
+  }
+  return null;
+}
+
+/**
+ * An Overpass QL query for the categories in one or more bounding boxes [south, west, north,
+ * east]. (Bounding boxes, not "around" a route line: Overpass answers those far faster, from
+ * its indexes; the places near the route are picked out afterwards with placesAlong. Tested
+ * on a 295 km route: one box 11 s, "around" the line timed out after 26 s.)
+ */
+export function overpassQuery(categories, { bbox = null, bboxes = null } = {}) {
+  const boxes = bboxes || [bbox];
+  const rules = new Map(); // "key=values" once, even if two categories share it
+  for (const c of categories) {
+    for (const [k, v] of OSM_TAGS[c] || []) rules.set(`${k}\u0000${v}`, [k, v]);
+  }
+  if (!rules.size) throw new PlacesError("Choose at least one category to look for on OpenStreetMap");
+  const parts = boxes.flatMap((b) => [...rules.values()].map(([k, v]) => `nwr["${k}"~"^(${v})$"](${b.map((x) => x.toFixed(5)).join(",")});`));
+  return `[out:json][timeout:40];(${parts.join("")});out center tags;`;
+}
+
+/**
+ * Bounding boxes covering a route with `padM` metres to spare: the route's own box, or for a
+ * long diagonal route, consecutive stretches whose boxes stay under `maxArea` square degrees.
+ */
+export function routeBoxes(geometry, { padM = 250, maxArea = 0.15 } = {}) {
+  const boxOf = (pts) => {
+    let s = Infinity, w = Infinity, n = -Infinity, e = -Infinity;
+    for (const [la, lo] of pts) {
+      s = Math.min(s, la); n = Math.max(n, la); w = Math.min(w, lo); e = Math.max(e, lo);
+    }
+    const dLat = padM / 111320, dLon = padM / (111320 * Math.cos(((s + n) / 2) * Math.PI / 180));
+    return [s - dLat, w - dLon, n + dLat, e + dLon];
+  };
+  const area = (b) => (b[2] - b[0]) * (b[3] - b[1]);
+  const split = (pts) => {
+    const b = boxOf(pts);
+    if (area(b) <= maxArea || pts.length < 4) return [b];
+    const mid = Math.floor(pts.length / 2);
+    return [...split(pts.slice(0, mid + 1)), ...split(pts.slice(mid))];
+  };
+  return split(geometry);
+}
+
+/**
+ * Places from an Overpass answer, for the wanted categories: [{osm_id, name, lat, lon,
+ * category, notes, url, osm_url}]. Unnamed ones get their category's name ("Drinking water").
+ */
+export function osmPlaces(answer, categories, labels = {}) {
+  const wanted = new Set(categories);
+  const out = [];
+  for (const e of answer?.elements || []) {
+    const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon;
+    const tags = e.tags || {};
+    const category = osmCategory(tags);
+    if (lat == null || lon == null || !category || !wanted.has(category)) continue;
+    const notes = [
+      tags.opening_hours && `Open: ${tags.opening_hours}`,
+      tags.cuisine && `Cuisine: ${tags.cuisine.replace(/;/g, ", ")}`,
+      tags.fee && `Fee: ${tags.fee}`,
+      tags.description,
+    ].filter(Boolean).join("\n") || null;
+    const osmUrl = `https://www.openstreetmap.org/${e.type}/${e.id}`;
+    out.push({
+      osm_id: `${e.type}/${e.id}`, name: tags.name || tags.brand || labels[category] || category,
+      lat, lon, category, notes, url: /^https?:\/\//i.test(tags.website || "") ? tags.website : osmUrl, osm_url: osmUrl,
+    });
+  }
+  return out;
 }

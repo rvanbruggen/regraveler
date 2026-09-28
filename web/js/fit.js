@@ -19,6 +19,15 @@ const TIMESTAMP = 253;
 // file_id.type
 const FILE_TYPES = { 4: "activity", 6: "course" };
 
+// course_point.type -> words for a place category (poi.js matches them). Turn instructions
+// (left, right, forks, …), climb categories, sprints and distance markers are no places.
+const COURSE_POINT_WORDS = {
+  0: "", 1: "summit", 2: "valley", 3: "water", 4: "food", 5: "danger", 9: "first aid",
+  27: "camping", 28: "aid station", 29: "rest area", 31: "service", 32: "food", 33: "water",
+  35: "checkpoint", 36: "shelter", 37: "meeting spot", 38: "viewpoint", 39: "toilet",
+  40: "shower", 41: "bike", 44: "tunnel", 45: "bridge", 48: "store", 51: "station", 53: "info",
+};
+
 // Base types: size, reader, invalid value.
 const BASE = {
   0x00: [1, "u8", 0xff], 0x01: [1, "s8", 0x7f], 0x02: [1, "u8", 0xff], 0x07: [1, "str", null],
@@ -161,7 +170,7 @@ const isoTime = (fitSeconds) => (fitSeconds == null ? null : new Date((fitSecond
  *  "course" | null, activity, started_at, crc_ok}. Points are [lat, lon, ele|null].
  */
 export function parseFit(input) {
-  const points = [];
+  const points = [], waypoints = [];
   let kind = null, name = null, sport = null, subSport = null, started = null, firstTime = null;
   const { crcOk } = decodeFit(input, (msg, f) => {
     if (msg === MSG.RECORD) {
@@ -181,6 +190,14 @@ export function parseFit(input) {
       sport ??= f[0] ?? null;
       subSport ??= f[1] ?? null;
       name ??= f[3] ?? null;
+    } else if (msg === MSG.COURSE_POINT) {
+      const type = f[5] ?? 0;
+      if (f[2] == null || f[3] == null || !(type in COURSE_POINT_WORDS)) return;
+      if (type === 0 && !f[6]) return; // a generic point without a name
+      waypoints.push({
+        name: f[6] || null, description: null, lat: f[2] * SEMICIRCLE, lon: f[3] * SEMICIRCLE,
+        symbol: null, type: COURSE_POINT_WORDS[type] || null, link: null,
+      });
     } else if (msg === MSG.COURSE) {
       name = f[5] ?? name;
       sport ??= f[4] ?? null;
@@ -194,6 +211,7 @@ export function parseFit(input) {
     description: null,
     link: null,
     tracks: [{ name, points }],
+    waypoints,
     kind,
     activity: activityOf(sport, subSport),
     started_at: isoTime(started ?? firstTime),

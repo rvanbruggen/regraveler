@@ -135,6 +135,24 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     change the symbol, name and colour.
   - **＋ Place** on the Map: click it, then on the map, and fill in the name, category, notes
     and a link (a photo album, a website). Click a place on any map to see or edit it.
+  - **Waypoints:** the waypoints in a GPX file (and the course points of a FIT or TCX course,
+    not its turn instructions) can be imported as places: drop the file on the Places tab, or
+    *Add the N waypoints in its file to your places…* in a route's panel.
+  - **From OpenStreetMap:** *Also look on OpenStreetMap* in a route's panel lists the places
+    mapped on OpenStreetMap along the route (drawn as rings), and **OSM places here** on the Map
+    looks in the part of the map you see (zoomed in). Which kinds to look for is set on the
+    Places tab (default: water, toilets, bike repair, stations, shelters, viewpoints; bus
+    shelters are left out). They are not stored: *Keep as my place* copies one into the list
+    *From OpenStreetMap*. They come from the free Overpass API, which is often busy: rerouter
+    only asks when you click, tries a few servers in turn, asks for the route's bounding boxes
+    (far quicker than "along a line"), keeps answers for a week (in the browser; a rerouter
+    server passes the questions on and keeps the answers for a day, `OVERPASS_URLS`,
+    `OVERPASS_TIMEOUT_S`, `OVERPASS_CACHE_S`), and says so when none answers.
+  - **Combine through a place:** each connector can be routed through one of your places near
+    it (listed with the extra km), e.g. a café or a water tap on the way back.
+  - **Sets:** *Export set…* includes the places along the chosen routes (with their lists and
+    your own categories; *Include the places along these routes*), and adding a set adds its
+    places (lists with the same name merged, places already there skipped).
 - **Routes near each other:** tick *Highlight routes near each other* and set a distance
   (default 100 m). Routes that overlap or come within that distance of another route stay
   coloured, the rest fade out. Shared stretches are drawn in yellow, and for near misses a
@@ -556,7 +574,9 @@ web/                 the app: one page, runs in the browser (and as a static sit
     service.js       everything the app does: import, filters, combine, duplicates, names, ...
     db.js            the library in memory, stored through a backend: IndexedDB (browser) ...
     remote.js        ... or the rerouter server's storage API (self-hosted)
-    poi.js           places: KML/KMZ and CSV reading, category suggestions, places along a route
+    poi.js           places: KML/KMZ and CSV reading, category suggestions, places along a route,
+                     OpenStreetMap tags and Overpass queries
+    osm.js           asking the Overpass API (servers in turn, cache)
     gpx.js           GPX reading and writing (a small XML reader, also runs in Node and workers)
     tcx.js, fit.js   TCX and FIT reading (own FIT decoder: byte orders, developer fields, compressed timestamps)
     trackfile.js     any route file: recognises GPX / TCX / FIT from the content, unpacks .gz

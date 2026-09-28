@@ -29,3 +29,13 @@ MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", 50_000_000))
 # the server (only from public internet addresses, never from this network).
 LINK_FETCH_TIMEOUT_S = float(os.environ.get("LINK_FETCH_TIMEOUT_S", 20))
 LINK_FETCH_MAX_BYTES = int(os.environ.get("LINK_FETCH_MAX_BYTES", 20_000_000))
+
+# Places from OpenStreetMap: the Overpass API servers the page's questions are passed on to
+# (in turn; comma separated), how long to wait for each, and how long answers are kept.
+OVERPASS_URLS = [u.strip() for u in os.environ.get(
+    "OVERPASS_URLS",
+    "https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,"
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+).split(",") if u.strip()]
+OVERPASS_TIMEOUT_S = float(os.environ.get("OVERPASS_TIMEOUT_S", 40))
+OVERPASS_CACHE_S = float(os.environ.get("OVERPASS_CACHE_S", 86400))
