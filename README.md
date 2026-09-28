@@ -639,7 +639,8 @@ The pytest run includes a check that backups made by the page restore on the ser
 other way round (it needs Node; skipped without it).
 
 The screenshots in this README (`docs/screenshots/*.webp`) are taken by hand of the public site,
-rerouter.eu. `docs/screenshots/take_screenshots.py` (Playwright, driving your installed Chrome)
+rerouter.eu. Their menu bars were redrawn for the 1.4 menu (Import, Library, Map, Places,
+Utilities, About, ⚙) by pasting in the current header, rendered at the same scale. `docs/screenshots/take_screenshots.py` (Playwright, driving your installed Chrome)
 made the earlier automated ones: it drives the page served by two scratch rerouter servers and
 can fill their libraries itself, by importing GPX files through the Import screen (`--seed`) or
 by restoring backups (`--restore`); its docstring explains the setup. It's a docs helper, not
