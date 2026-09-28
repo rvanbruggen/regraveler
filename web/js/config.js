@@ -1,7 +1,7 @@
 // Settings. The defaults below can be changed by the user in Utilities > Settings (stored
 // with the library); `applySettings` copies those over the defaults at start-up.
 
-export const VERSION = "0.17.0";
+export const VERSION = "0.18.0";
 
 export const config = {
   // "browser": the library lives in this browser (a static host such as GitHub Pages);
