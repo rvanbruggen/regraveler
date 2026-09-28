@@ -10,6 +10,7 @@ import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
 import * as osm from "./osm.js";
 import * as poi from "./poi.js";
+import * as share from "./share.js";
 import { bboxOf, duplicatePairs, findSimilar, groupPairs, proximityPairs } from "./similarity.js";
 import { buildProfile } from "./profile.js";
 import { computeStats } from "./stats.js";
@@ -1806,4 +1807,69 @@ export async function backfillRegions() {
   }
   for (let i = 0; i < changed.length; i += 50) await lib.saveRoutes(changed.slice(i, i + 50));
   return changed.length;
+}
+
+// ------------------------------------------------------------------ home and share links
+
+/** Your home: {lat, lon, radius_m} (a setting, never shared), or null. */
+export function home() {
+  const h = lib.settings.HOME;
+  return h && Number.isFinite(h.lat) && Number.isFinite(h.lon) ? { radius_m: config.HOME_PRIVACY_M, ...h } : null;
+}
+
+export async function setHome(h) {
+  if (h == null) return lib.setSetting("HOME", null);
+  const radius = Number(h.radius_m ?? home()?.radius_m ?? config.HOME_PRIVACY_M);
+  if (!(Number.isFinite(h.lat) && Number.isFinite(h.lon))) throw new ServiceError("Home needs a position");
+  if (!(radius >= 0 && radius <= 5000)) throw new ServiceError("The privacy zone is 0 to 5000 m");
+  await lib.setSetting("HOME", { lat: round(h.lat, 5), lon: round(h.lon, 5), radius_m: Math.round(radius) });
+  return home();
+}
+
+/**
+ * A share link for a route: {link, chars, points, tolerance_m, cut_start_m, cut_end_m}.
+ * opts: {privacy (leave out the start and end near home), notes, source, base (the site)}.
+ */
+export async function shareRoute(id, { privacy = true, notes = false, source = false, base = config.PUBLIC_SITE_URL } = {}) {
+  const r = getRoute(id);
+  const file = await lib.getFile(r.file_hash);
+  if (!file) throw new ServiceError("The route's file was not found in the library", 404);
+  let points = parseTrackFile(file.data).tracks[r.track_index || 0].points;
+  let cut = { cut_start_m: 0, cut_end_m: 0 };
+  const h = home();
+  if (privacy && h) {
+    try {
+      ({ points, ...cut } = share.cutPrivacy(points, h, h.radius_m));
+    } catch (err) {
+      throw new ServiceError(err.message);
+    }
+  }
+  const st = computeStats(points); // of what is shared
+  const packed = await share.packShare({
+    name: r.name, activity: r.activity, distance_km: st.distance_km, elevation_gain_m: st.elevation_gain_m,
+    // The surface share of the whole route (a privacy cut of a few hundred metres hardly changes it).
+    is_loop: r.is_loop && !cut.cut_start_m && !cut.cut_end_m, surface: r.surface,
+    notes: notes ? r.notes : null, source_url: source ? r.source_url : null, points,
+  });
+  const link = `${base.replace(/#.*$/, "")}#share=${packed.packed}`;
+  return { link, chars: link.length, points: packed.points, tolerance_m: packed.tolerance_m, ...cut };
+}
+
+/** A route read from a share link (share.unpackShare) as a GPX file: {filename, text}. */
+export function sharedGpx(shared) {
+  const name = shared.name || "Shared route";
+  return { filename: `${slugify(name).slice(0, 150) || "route"}.gpx`, text: writeGpx(name, shared.points, shared.notes) };
+}
+
+/** Add a route from a share link to the library (source "shared link"). */
+export async function addSharedRoute(shared) {
+  const { filename, text } = sharedGpx(shared);
+  const res = await importGpx(new TextEncoder().encode(text), filename, {
+    source_name: "shared link", source_url: shared.source_url, notes: shared.notes,
+    activity: shared.activity && config.ACTIVITIES.includes(shared.activity) ? shared.activity : null,
+    name: shared.name, rename: false,
+  });
+  if (res.status === "duplicate") throw new ServiceError(`You already have this route: ${res.duplicates[0]?.name || "in your library"}`, 409);
+  if (res.status !== "imported") throw new ServiceError(res.message || "Could not add the route", 422);
+  return { id: res.routes[0].id, name: res.routes[0].name };
 }

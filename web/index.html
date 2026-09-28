@@ -252,6 +252,29 @@
     </div>
   </section>
 
+  <!-- A route opened from a share link -->
+  <section id="view-shared" class="view" hidden>
+    <div class="map-layout">
+      <div class="map-side">
+        <p class="muted small">Someone shared this route with you (made with rerouter). It is shown from the link itself:
+          nothing was uploaded.</p>
+        <h2 id="sh-title"></h2>
+        <dl id="sh-stats" class="stats"></dl>
+        <div id="sh-surface" class="surface"></div>
+        <div id="sh-profile" class="profile"></div>
+        <p id="sh-notes" class="small" style="white-space:pre-line" hidden></p>
+        <p id="sh-source" class="small" hidden></p>
+        <div class="actions">
+          <button type="button" id="sh-add">Add to my library</button>
+          <button type="button" id="sh-gpx" class="secondary">Download GPX</button>
+          <button type="button" id="sh-close" class="secondary">Open rerouter</button>
+        </div>
+        <p id="sh-status" class="small"></p>
+      </div>
+      <div id="shared-map"></div>
+    </div>
+  </section>
+
   <!-- Search for places (utility) -->
   <section id="view-findplaces" class="view" hidden>
     <div class="map-layout">
@@ -603,6 +626,18 @@
           </div>
         </form>
       </div>
+      <div class="panel">
+        <h3>Home</h3>
+        <p class="small">Where you live, so that <strong>shared routes</strong> leave out their start and end near it
+          (a route from your front door otherwise shows where that is). It stays in your library and is never
+          shared. Click the map to set it.</p>
+        <div id="home-map" class="home-map"></div>
+        <div class="actions">
+          <label class="inline-label">Privacy zone <input type="number" id="home-radius" min="0" max="5000" step="50" style="width:6em"> m</label>
+          <button type="button" id="home-clear" class="secondary">Clear home</button>
+          <span id="home-status" class="muted small"></span>
+        </div>
+      </div>
       <div class="panel danger-zone">
         <h3>Start over</h3>
         <p class="small">Remove every route and file from this browser. This cannot be undone: download a backup first.</p>
@@ -655,10 +690,29 @@
       <button type="button" id="d-restart" class="secondary" title="Start this loop somewhere else" hidden>Change start…</button>
       <button type="button" id="d-weather" class="secondary" title="The weather along this route on the day you ride it">Weather…</button>
       <button type="button" id="d-findplaces" class="secondary" title="Cafés, water, toilets, … along this route; a route with them">Places…</button>
+      <button type="button" id="d-share" class="secondary" title="A link to this route that anyone can open">Share…</button>
       <button type="button" id="d-delete" class="danger">Remove</button>
       <span id="d-status" class="muted"></span>
     </div>
   </form>
+  <div id="d-share-panel" class="panel share-panel" hidden>
+    <h3>Share this route</h3>
+    <p class="small muted">A link to a page that shows the route (map, stats, elevation profile) with <em>Download GPX</em>
+      and <em>Add to my library</em>. The route is in the link itself: it isn't uploaded or stored anywhere.</p>
+    <label class="check small"><input type="checkbox" id="share-privacy" checked> <span id="share-privacy-text">Leave out the start and end near my home</span></label>
+    <label class="check small"><input type="checkbox" id="share-notes"> Include my notes</label>
+    <label class="check small"><input type="checkbox" id="share-source"> Include the source link</label>
+    <div class="actions"><button type="button" id="share-make">Make the link</button></div>
+    <div id="share-result" hidden>
+      <input id="share-link" readonly aria-label="The share link">
+      <div class="actions">
+        <button type="button" id="share-copy">Copy link</button>
+        <button type="button" id="share-native" class="secondary" hidden>Share…</button>
+        <a id="share-open" class="button secondary" target="_blank" rel="noopener">Open</a>
+      </div>
+      <p id="share-info" class="small muted"></p>
+    </div>
+  </div>
   <p id="d-catalog" class="small"></p>
   <p id="d-rides" class="small" hidden></p>
   <p id="d-derived" class="small" hidden></p>

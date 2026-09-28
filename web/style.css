@@ -155,7 +155,7 @@ td.name { white-space: normal; min-width: 220px; font-weight: 500; }
   display: flex; flex-direction: column; gap: 8px;
 }
 .map-side p { margin: 0; }
-#overview-map, #combine-map, #restart-map, #findplaces-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
+#overview-map, #combine-map, #restart-map, #findplaces-map, #shared-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
 label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
 label.check input { width: auto; }
 /* Leaflet's layer switcher: its labels are not the column-style form labels above. */
@@ -172,7 +172,7 @@ label.check input { width: auto; }
   #rn-table td.proposal input { min-width: 260px; }
   .map-layout { flex-direction: column; height: auto; }
   .map-side { width: auto; max-height: 260px; }
-  #overview-map, #combine-map, #restart-map, #findplaces-map { flex: none; height: 65vh; }
+  #overview-map, #combine-map, #restart-map, #findplaces-map, #shared-map { flex: none; height: 65vh; }
 }
 
 /* Combine */
@@ -470,3 +470,7 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .filter-chip { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
 .filter-chip a { cursor: pointer; margin-left: 4px; font-weight: 700; }
 .area-label { background: none; border: none; box-shadow: none; font-weight: 600; color: #6a1b9a; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.share-panel { margin: 10px 0; }
+.share-panel #share-link { width: 100%; font-size: 12px; }
+.home-map { height: 240px; border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; }
+.inline-label { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; }

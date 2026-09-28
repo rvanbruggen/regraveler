@@ -403,6 +403,21 @@ browser version reads and writes the same format.
 
 ### Sharing routes and example sets
 
+**Share link:** *Share…* in a route's panel makes a link to a page that shows the route (map,
+stats, surface, elevation profile) with *Download GPX* and *Add to my library* (source *shared
+link*). The route is **in the link itself**, after the `#`, which browsers never send to a
+server: nothing is uploaded or stored. The track is simplified (5 m, more for long routes)
+until the link is at most about 7,000 characters (all 173 example routes fit; distances stay
+within 1 %), then compressed. Your notes and the source link go along only when you tick them.
+From a rerouter server the link points to the public site (`PUBLIC_SITE_URL`,
+https://rerouter.eu/), so anyone can open it; on the public site, to itself. On a phone the
+system share sheet can send it.
+
+**Home and privacy:** set your home under *Library & settings › Home* (click the map; a
+privacy zone of 500 m to start with). Shared routes then leave out their start and end within
+that zone (the page says how much was left out); a route that passes home in the middle keeps
+that part. Home stays in your library and is never shared.
+
 *Export set…* (select routes in the library first) writes the same zip format with only those
 routes, a name for the set, and no settings. *Library & settings › Add routes from a zip…*
 adds such a set, or a whole backup, to a library **without replacing it**: the routes get new

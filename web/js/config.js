@@ -22,6 +22,10 @@ export const config = {
   // How far from a route to look for places on OpenStreetMap (a choice in the route panel,
   // remembered in the browser); the default is PLACES_NEAR_ROUTE_M.
   OSM_ROUTE_RANGES_M: [100, 200, 500, 1000, 2000],
+  // Share links point to the public site, so anyone can open them (also from a home server).
+  PUBLIC_SITE_URL: "https://rerouter.eu/",
+  // The privacy zone around home, left out of the start and end of shared routes.
+  HOME_PRIVACY_M: 500,
   // Overpass API servers for places from OpenStreetMap, tried in turn (they are often busy).
   // On a rerouter server the page asks the server (api/overpass), which caches the answers.
   OVERPASS_URLS: [

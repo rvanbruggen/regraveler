@@ -6,7 +6,8 @@ import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
 import { OSM_TAGS, isPlacesFileName, parsePlacesCsv, readAreasFile, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
-import { drawProfile, nearestIndex } from "./profile.js";
+import { buildProfile, drawProfile, nearestIndex } from "./profile.js";
+import { unpackShare } from "./share.js";
 import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
 import { RemoteBackend, detectServer } from "./remote.js";
@@ -105,7 +106,7 @@ function showView(name) {
   $("#utilities .menu-button").classList.toggle("active", UTILITIES.includes(name));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import screen and the utilities.
-  const noFilters = ["import", "rename", "places", ...UTILITIES].includes(name);
+  const noFilters = ["import", "rename", "places", "shared", ...UTILITIES].includes(name);
   $("#filters").hidden = noFilters;
   updateIdsNote();
   if (noFilters) closeDetail();
@@ -117,6 +118,7 @@ function showView(name) {
   if (name === "duplicates") loadDuplicates();
   if (name === "data") showData();
   if (name === "places") renderPlaces();
+  if (name === "shared") showShared();
   updateHash();
 }
 $$("nav [data-view]").forEach((b) =>
@@ -182,6 +184,11 @@ function filterParams() {
 
 /** URL hash = filters + view + proximity setting, so a link restores the whole screen. */
 function updateHash() {
+  if (currentView === "shared" && sharedPacked) {
+    // A shared route: the link stays as it came (only the route in it).
+    history.replaceState(null, "", `#share=${sharedPacked}`);
+    return;
+  }
   const p = filterParams();
   if (currentView !== "library") p.set("view", currentView);
   if ($("#prox-on").checked) p.set("near", $("#prox-distance").value || "0");
@@ -775,6 +782,7 @@ async function openDetail(id) {
   loadPlacesAlong(r);
   offerRouteWaypoints(r);
   renderDetailCatalog(r.id);
+  $("#d-share-panel").hidden = true;
   loadSimilar(r.id);
 }
 
@@ -2141,6 +2149,213 @@ function addAreaControl(map) {
   });
   new Control().addTo(map);
 }
+
+// ------------------------------------------------------------------ share links
+
+let sharedPacked = null; // the route in the link that opened this page (#share=…)
+let shared = null; // … unpacked
+const sh = { map: null, layer: null, marker: null, chart: null };
+
+const shareFromHash = () => /(?:^#|&)share=([A-Za-z0-9_-]+)/.exec(location.hash)?.[1] || null;
+
+async function showShared() {
+  const status = $("#sh-status");
+  status.textContent = "";
+  try {
+    shared = await unpackShare(sharedPacked);
+  } catch (err) {
+    shared = null;
+    $("#sh-title").textContent = "This link can't be opened";
+    status.textContent = err.message;
+    return;
+  }
+  const s = shared;
+  $("#sh-title").textContent = s.name;
+  document.title = `${s.name} · rerouter`;
+  $("#sh-stats").replaceChildren(...[
+    ["Distance", fmt.km(s.distance_km)],
+    ["Elevation gain", fmt.m(s.elevation_gain_m)],
+    ["Type", s.is_loop ? "Loop" : "Point to point"],
+    ["Activity", s.activity ? activityLabel(s.activity) : "–"],
+  ].map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+  const sf = s.surface;
+  const cats = ["paved", "cobbles", "unpaved", "unknown"];
+  const total = sf ? cats.reduce((t, c) => t + (sf[`${c}_km`] || 0), 0) : 0;
+  setChildren($("#sh-surface"), total > 0 ? [
+    el("div", { class: "surface-bar", title: "Surface (estimated from OpenStreetMap)" },
+      cats.filter((c) => sf[`${c}_km`] > 0).map((c) => el("span", { style: `width:${(100 * sf[`${c}_km`]) / total}%;background:${SURFACE_COLORS[c]}` }))),
+    el("div", { class: "surface-legend" }, cats.filter((c) => sf[`${c}_km`] > 0).map((c) =>
+      el("span", {}, el("i", { style: `background:${SURFACE_COLORS[c]}` }), `${SURFACE_LABELS[c]} ${Math.round((100 * sf[`${c}_km`]) / total)}%`))),
+  ] : null);
+  $("#sh-notes").hidden = !s.notes;
+  $("#sh-notes").textContent = s.notes || "";
+  $("#sh-source").hidden = !s.source_url;
+  setChildren($("#sh-source"), s.source_url ? ["Source: ", el("a", { href: s.source_url, target: "_blank", rel: "noopener" }, s.source_url)] : null);
+  $("#sh-add").hidden = !svc.library();
+
+  if (!sh.map) {
+    sh.map = L.map("shared-map");
+    addMapLayers(sh.map);
+    sh.layer = L.layerGroup().addTo(sh.map);
+  }
+  setTimeout(() => sh.map.invalidateSize(), 0);
+  sh.layer.clearLayers();
+  const line = L.polyline(s.points.map(([la, lo]) => [la, lo]), { color: "#b35c1e", weight: 4 }).addTo(sh.layer);
+  L.circleMarker(s.points[0], { radius: 6, color: "#2e7d32", fillOpacity: 1 }).bindTooltip("Start").addTo(sh.layer);
+  if (!s.is_loop) L.circleMarker(s.points[s.points.length - 1], { radius: 6, color: "#b3261e", fillOpacity: 1 }).bindTooltip("End").addTo(sh.layer);
+  sh.map.fitBounds(line.getBounds(), { padding: [20, 20] });
+
+  sh.chart?.destroy();
+  sh.chart = null;
+  const profile = buildProfile(s.points);
+  const box = $("#sh-profile");
+  box.replaceChildren();
+  if (profile) {
+    sh.chart = drawProfile(box, profile, {
+      onHover: (i) => {
+        if (i == null) return sh.marker?.remove(), (sh.marker = null);
+        const ll = [profile.lat[i], profile.lon[i]];
+        if (sh.marker) sh.marker.setLatLng(ll);
+        else sh.marker = L.circleMarker(ll, { radius: 6, color: "#fff", weight: 2, fillColor: "#1a5fb4", fillOpacity: 1, interactive: false }).addTo(sh.map);
+      },
+    });
+  }
+}
+
+$("#sh-gpx").addEventListener("click", () => {
+  if (!shared) return;
+  const f = svc.sharedGpx(shared);
+  downloadBlob(f.text, f.filename);
+});
+$("#sh-add").addEventListener("click", async () => {
+  if (!shared) return;
+  $("#sh-add").disabled = true;
+  try {
+    const res = await svc.addSharedRoute(shared);
+    setChildren($("#sh-status"), "Added to your library as ", routeLink(res.id, res.name), ".");
+    requestPersistence();
+    await Promise.all([refresh(), loadFacets()]);
+  } catch (err) {
+    $("#sh-status").textContent = err.message;
+  } finally {
+    $("#sh-add").disabled = false;
+  }
+});
+$("#sh-close").addEventListener("click", () => {
+  sharedPacked = null;
+  document.title = "rerouter · route manager";
+  showView("library");
+});
+window.addEventListener("hashchange", () => {
+  const packed = shareFromHash();
+  if (packed && packed !== sharedPacked) {
+    sharedPacked = packed;
+    showView("shared");
+  }
+});
+
+// ---- making a link, in the route panel
+
+$("#d-share").addEventListener("click", () => {
+  const panel = $("#d-share-panel");
+  panel.hidden = !panel.hidden;
+  if (panel.hidden) return;
+  const h = svc.home();
+  $("#share-privacy").disabled = !h;
+  $("#share-privacy").checked = !!h;
+  $("#share-privacy-text").textContent = h
+    ? `Leave out the start and end within ${h.radius_m} m of my home`
+    : "Leave out the start and end near my home (set your home first: Utilities › Library & settings)";
+  $("#share-result").hidden = true;
+  panel.scrollIntoView({ block: "nearest" });
+});
+
+$("#share-make").addEventListener("click", async () => {
+  const id = selectedId;
+  const base = onServer() ? config.PUBLIC_SITE_URL : `${location.origin}${location.pathname}`;
+  $("#share-make").disabled = true;
+  try {
+    const res = await svc.shareRoute(id, {
+      privacy: $("#share-privacy").checked, notes: $("#share-notes").checked, source: $("#share-source").checked, base,
+    });
+    if (selectedId !== id) return;
+    $("#share-link").value = res.link;
+    $("#share-open").href = res.link;
+    $("#share-native").hidden = !navigator.share;
+    const ends = [res.cut_start_m && `the first ${(res.cut_start_m / 1000).toFixed(1)} km`, res.cut_end_m && `the last ${(res.cut_end_m / 1000).toFixed(1)} km`].filter(Boolean);
+    const cut = ends.length ? ` Near your home, ${ends.join(" and ")} ${ends.length > 1 ? "are" : "is"} left out.` : "";
+    $("#share-info").textContent = `${res.chars.toLocaleString()} characters (the track to ${res.tolerance_m} m, ${res.points} points).${cut}`;
+    $("#share-result").hidden = false;
+    $("#share-link").select();
+  } catch (err) {
+    $("#share-info").textContent = err.message;
+    $("#share-result").hidden = false;
+  } finally {
+    $("#share-make").disabled = false;
+  }
+});
+$("#share-copy").addEventListener("click", async () => {
+  const link = $("#share-link").value;
+  try {
+    await navigator.clipboard.writeText(link);
+  } catch {
+    $("#share-link").select();
+    document.execCommand("copy");
+  }
+  $("#share-copy").textContent = "Copied ✓";
+  setTimeout(() => ($("#share-copy").textContent = "Copy link"), 2000);
+});
+$("#share-native").addEventListener("click", async () => {
+  const r = svc.route(selectedId);
+  try {
+    await navigator.share({ title: r.name, text: `${r.name} (${fmt.km(r.distance_km)})`, url: $("#share-link").value });
+  } catch { /* cancelled */ }
+});
+
+// ---- home, in Library & settings
+
+const hm = { map: null, layer: null };
+
+function renderHome() {
+  if (!hm.map) {
+    hm.map = L.map("home-map").setView([50.9, 4.5], 8);
+    addMapLayers(hm.map);
+    hm.layer = L.layerGroup().addTo(hm.map);
+    hm.map.on("click", async (e) => {
+      await svc.setHome({ lat: e.latlng.lat, lon: e.latlng.lng, radius_m: Number($("#home-radius").value) || config.HOME_PRIVACY_M });
+      drawHome(false);
+    });
+  }
+  setTimeout(() => hm.map.invalidateSize(), 0);
+  drawHome(true);
+}
+
+function drawHome(fit) {
+  const h = svc.home();
+  hm.layer.clearLayers();
+  $("#home-radius").value = h?.radius_m ?? config.HOME_PRIVACY_M;
+  $("#home-clear").hidden = !h;
+  $("#home-status").textContent = h ? "Home is set: shared routes leave out their start and end within this zone." : "No home set.";
+  if (!h) return;
+  L.circle([h.lat, h.lon], { radius: h.radius_m, color: "#b3261e", weight: 2, fillOpacity: 0.12 }).addTo(hm.layer);
+  L.circleMarker([h.lat, h.lon], { radius: 5, color: "#b3261e", fillOpacity: 1 }).bindTooltip("Home").addTo(hm.layer);
+  if (fit) hm.map.setView([h.lat, h.lon], 13);
+}
+
+$("#home-radius").addEventListener("change", async (e) => {
+  const h = svc.home();
+  if (!h) return;
+  try {
+    await svc.setHome({ ...h, radius_m: Number(e.target.value) });
+    drawHome(false);
+  } catch (err) {
+    $("#home-status").textContent = err.message;
+  }
+});
+$("#home-clear").addEventListener("click", async () => {
+  await svc.setHome(null);
+  drawHome(false);
+});
 
 // ------------------------------------------------------------------ import
 
@@ -4511,6 +4726,7 @@ async function requestPersistence() {
 }
 
 async function showData() {
+  renderHome();
   const lib = svc.library();
   const routes = lib.all();
   const km = routes.reduce((s, r) => s + r.distance_km, 0);
@@ -4843,6 +5059,9 @@ async function startApp() {
     $("#welcome").replaceChildren(el("h2", {}, "This browser does not let rerouter store data"),
       el("p", {}, `rerouter keeps your routes in the browser's storage (IndexedDB), which is not available here (${err.message}). ` +
         "Private windows and some privacy settings block it; try a normal window."));
+    // A shared route can still be shown (without "Add to my library").
+    sharedPacked = shareFromHash();
+    if (sharedPacked) showView("shared");
     return;
   }
   svc.setLibrary(lib);
@@ -4852,7 +5071,8 @@ async function startApp() {
   updateDirectionLabels();
   await loadFacets();
   const view = new URLSearchParams(location.hash.slice(1)).get("view");
-  showView(LINKABLE_VIEWS.includes(view) ? view : "library");
+  sharedPacked = shareFromHash();
+  showView(sharedPacked ? "shared" : LINKABLE_VIEWS.includes(view) ? view : "library");
   watchSurfaceJob();
   loadSeeds();
   loadPlaceSets();
