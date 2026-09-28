@@ -11,6 +11,24 @@
       "title": "Kroegtijgers",
       "category": "cafe",
       "count": 86
+    },
+    {
+      "file": "3-mybrevet-belfries.csv",
+      "title": "MyBrevet.cc – Belfries",
+      "category": "sight",
+      "count": 56
+    },
+    {
+      "file": "4-mybrevet-castles.csv",
+      "title": "MyBrevet.cc – Castles",
+      "category": "sight",
+      "count": 911
+    },
+    {
+      "file": "5-mybrevet-abbeys.csv",
+      "title": "MyBrevet.cc – Abbeys",
+      "category": "sight",
+      "count": 37
     }
   ]
 }

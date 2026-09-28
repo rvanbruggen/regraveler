@@ -435,8 +435,11 @@ already there are skipped). The files are in the Google My Maps layer export for
 |---|---|---|---|
 | `1-fritleeuwen.csv` | Fritleeuwen | frituur | 18 |
 | `2-kroegtijgers.csv` | Kroegtijgers | cafe | 86 |
+| `3-mybrevet-belfries.csv` | MyBrevet.cc – Belfries | sight | 56 |
+| `4-mybrevet-castles.csv` | MyBrevet.cc – Castles | sight | 911 |
+| `5-mybrevet-abbeys.csv` | MyBrevet.cc – Abbeys | sight | 37 |
 
-To publish one: put the CSV in `web/data/place-sets/` (a prefix like `3-` sets the order), give
+To publish one: put the CSV in `web/data/place-sets/` (a prefix like `6-` sets the order), give
 it a title and category in `SETS` in `web/tools/build_place_sets.py` (otherwise the file name
 and *Other*), run
 
