@@ -1791,7 +1791,11 @@ function renderCatalog() {
     return d;
   };
 
-  const collTree = (nodes) => el("ul", {}, nodes.map((c) => el("li", {},
+  // Everything in the panel in alphabetical order: the sections and what is in them.
+  const abc = (items, name = (x) => x.name) =>
+    [...items].sort((a, b) => String(name(a)).localeCompare(String(name(b)), undefined, { sensitivity: "base", numeric: true }));
+
+  const collTree = (nodes) => el("ul", {}, abc(nodes).map((c) => el("li", {},
     catNode({
       label: c.name, count: c.count, active: cur.coll === c.id, onclick: toggle("coll", c.id), title: svc.collectionPath(c.id),
       actions: [
@@ -1802,7 +1806,7 @@ function renderCatalog() {
     }),
     c.children.length ? collTree(c.children) : null)));
 
-  const smartList = el("ul", {}, cat.smart.map((s) => el("li", {}, catNode({
+  const smartList = el("ul", {}, abc(cat.smart).map((s) => el("li", {}, catNode({
     label: s.name, count: s.count, active: filterQueryNow() === s.query, title: `Filter: ${s.query}`,
     onclick: () => applySmart(s),
     actions: [
@@ -1812,7 +1816,7 @@ function renderCatalog() {
   }))));
 
   const areaFile = el("input", { type: "file", accept: ".kml,.kmz", hidden: true, onchange: (e) => importAreasFile(e.target) });
-  const areaList = el("ul", {}, cat.areas.map((a) => el("li", {}, catNode({
+  const areaList = el("ul", {}, abc(cat.areas).map((a) => el("li", {}, catNode({
     label: a.name, count: a.count, active: cur.area === a.id, onclick: toggle("area", a.id),
     title: `${a.name}: routes that start in this area`,
     actions: [
@@ -1821,7 +1825,7 @@ function renderCatalog() {
     ],
   }))));
 
-  const valueList = (items, field, label = (v) => v) => el("ul", {}, items.map((x) => el("li", {},
+  const valueList = (items, field, label = (v) => v) => el("ul", {}, abc(items, (x) => label(x.value)).map((x) => el("li", {},
     catNode({ label: label(x.value), count: x.count, active: cur[field] === String(x.value), onclick: toggle(field, x.value) }))));
   const TAGS_SHOWN = 25;
 
@@ -1830,21 +1834,21 @@ function renderCatalog() {
       label: "All routes", count: cat.total, active: CATALOG_FIELDS.every((k) => !cur[k]),
       onclick: () => setFilters({}, CATALOG_FIELDS),
     }),
-    section("collections", "Collections", cat.collections.length ? collTree(cat.collections) : el("p", { class: "muted small" }, "Groups of routes you make: select routes in the table, then Collection…"),
-      el("a", { class: "cat-add", onclick: () => newCollection(null) }, "＋ new collection")),
-    section("smart", "Smart collections", cat.smart.length ? smartList : el("p", { class: "muted small" }, "Saved filters that keep themselves up to date."),
-      el("a", { class: "cat-add", title: "Save the filters you have set now", onclick: saveCurrentAsSmart }, "＋ save the current filters")),
+    section("activity", "Activity", valueList(cat.activities, "activity", ACT_LABEL)),
     section("areas", "Areas", cat.areas.length ? areaList : el("p", { class: "muted small" }, "Your own regions, e.g. Vlaamse Ardennen: routes that start inside."),
       el("div", {},
         el("a", { class: "cat-add", title: "Draw an area on the Map", onclick: () => { showView("map"); showOverview().then(() => startDrawingArea(overview.map)); } }, "＋ draw on the map"),
         el("label", { class: "cat-add", title: "Areas drawn in Google My Maps (KML/KMZ)" }, "＋ import KML", areaFile))),
-    cat.regions.length ? section("regions", "Regions", el("ul", {}, cat.regions.map((g) => el("li", {},
+    section("collections", "Collections", cat.collections.length ? collTree(cat.collections) : el("p", { class: "muted small" }, "Groups of routes you make: select routes in the table, then Collection…"),
+      el("a", { class: "cat-add", onclick: () => newCollection(null) }, "＋ new collection")),
+    cat.regions.length ? section("regions", "Regions", el("ul", {}, abc(cat.regions).map((g) => el("li", {},
       catNode({ label: g.name, count: g.count, active: cur.region === g.code, onclick: toggle("region", g.code), title: `${g.name}: routes that start there` }),
       g.provinces.length > 1 || g.provinces[0]?.name !== g.name
-        ? el("ul", {}, g.provinces.map((p) => el("li", {},
+        ? el("ul", {}, abc(g.provinces).map((p) => el("li", {},
             catNode({ label: p.name, count: p.count, active: cur.region === p.code, onclick: toggle("region", p.code), title: `${p.name} (${g.name}): routes that start there` }))))
         : null)))) : null,
-    section("activity", "Activity", valueList(cat.activities, "activity", ACT_LABEL)),
+    section("smart", "Smart collections", cat.smart.length ? smartList : el("p", { class: "muted small" }, "Saved filters that keep themselves up to date."),
+      el("a", { class: "cat-add", title: "Save the filters you have set now", onclick: saveCurrentAsSmart }, "＋ save the current filters")),
     cat.sources.length ? section("source", "Source", valueList(cat.sources, "source")) : null,
     cat.tags.length ? section("tags", "Tags", [valueList(cat.tags.slice(0, TAGS_SHOWN), "tags"),
       cat.tags.length > TAGS_SHOWN ? el("p", { class: "muted small" }, `… and ${cat.tags.length - TAGS_SHOWN} more (type them in the Tags filter)`) : null]) : null,
