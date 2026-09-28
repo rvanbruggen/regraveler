@@ -1,0 +1,16 @@
+{
+  "sets": [
+    {
+      "file": "1-fritleeuwen.csv",
+      "title": "Fritleeuwen",
+      "category": "frituur",
+      "count": 18
+    },
+    {
+      "file": "2-kroegtijgers.csv",
+      "title": "Kroegtijgers",
+      "category": "cafe",
+      "count": 86
+    }
+  ]
+}

@@ -5,7 +5,7 @@ import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from 
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
-import { OSM_TAGS, isPlacesFileName, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
+import { OSM_TAGS, isPlacesFileName, parsePlacesCsv, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
 import { drawProfile, nearestIndex } from "./profile.js";
 import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
@@ -1366,6 +1366,7 @@ function renderPlaces() {
   keep(listSel, [el("option", { value: "" }, "all lists"),
     ...lists.map((l) => el("option", { value: l.id }, `${l.name} (${perList.get(l.id) || 0})`))]);
   renderPlacesTable();
+  renderPlaceSets();
 }
 
 function renderPlacesTable() {
@@ -1397,6 +1398,60 @@ function renderPlacesTable() {
         }, "remove"))))),
     shown.length > MAX ? el("tfoot", {}, el("tr", {}, el("td", { colspan: 5, class: "muted small" }, `… and ${shown.length - MAX} more: narrow the search`))) : null,
   );
+}
+
+// ---- example place sets: data/place-sets/index.json lists CSV files published with the site
+// (the list is built by tools/build_place_sets.py; each set has a fixed category).
+
+let placeSets = [];
+
+async function loadPlaceSets() {
+  try {
+    const res = await fetch("data/place-sets/index.json", { cache: "no-cache" });
+    placeSets = res.ok ? (await res.json()).sets || [] : [];
+  } catch (_) {
+    placeSets = [];
+  }
+  renderPlaceSets();
+}
+
+function renderPlaceSets() {
+  const box = $("#place-sets");
+  box.hidden = !placeSets.length;
+  if (box.hidden) return;
+  const status = box.querySelector(".seed-status");
+  const cats = svc.library() ? svc.placeCategories() : [];
+  box.querySelector(".seed-list").replaceChildren(...placeSets.map((s) => {
+    const cat = categoryOf(s.category, cats);
+    return el("div", { class: "seed" },
+      el("div", {},
+        el("p", {}, placeSymbol(cat), " ", el("strong", {}, s.title || s.file)),
+        el("p", { class: "muted small" }, `${s.count} place${s.count === 1 ? "" : "s"} · ${cat.label}`)),
+      el("button", { type: "button", class: "secondary", onclick: (e) => addPlaceSet(s, e.target, status) }, "Add"));
+  }));
+}
+
+async function addPlaceSet(set, button, status) {
+  button.disabled = true;
+  status.textContent = `Adding “${set.title}”…`;
+  try {
+    const res = await fetch(`data/place-sets/${encodeURIComponent(set.file)}`);
+    if (!res.ok) throw new Error(`could not download ${set.file} (${res.status})`);
+    const parsed = parsePlacesCsv(await res.text(), set.file);
+    const out = await svc.importPlaces(parsed, {
+      listName: set.title, source: set.file,
+      layers: parsed.layers.map(() => ({ include: true, category: set.category })),
+    });
+    status.textContent = out.added
+      ? `Added ${out.added} place${out.added === 1 ? "" : "s"} to “${out.list.name}”` + (out.duplicates ? ` (${out.duplicates} already there).` : ".")
+      : `“${out.list.name}” is already complete: nothing new to add.`;
+    setPlacesShown(true);
+    refreshPlaces();
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /** Show a place on the Map (its list is shown then too). */
@@ -3882,6 +3937,7 @@ async function startApp() {
   showView(LINKABLE_VIEWS.includes(view) ? view : "library");
   watchSurfaceJob();
   loadSeeds();
+  loadPlaceSets();
   await loadRoutes();
   // Once, for libraries from before track hashes existed (in the background).
   svc.backfillTrackHashes().catch((err) => console.warn("Track hashes:", err));

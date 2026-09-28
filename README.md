@@ -129,6 +129,8 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     layer or let a layer become a new category; a layer of one place that is nothing known
     (often a home address) is left out unless you tick it. Importing the same file again adds
     only new places.
+  - **Example places:** ready-made lists to add with one click (see *Sharing routes and example
+    sets* below).
   - **Lists** (one per imported map, plus *My marks*): show or hide a whole list, or remove it.
   - **Categories:** built-in ones (drinking water, toilet, café / bar, restaurant, frituur,
     bike shop, train station, sight, photo spot, shelter, hotel, parking, other) and your own;
@@ -370,6 +372,28 @@ python3 web/tools/build_seeds.py
 
 to rebuild `web/data/seeds/index.json` (the list the page reads), and push.
 
+**Example places:** CSV files in `web/data/place-sets/` are offered on the *Places* tab under
+*Example places*, each with an *Add* button. A set goes into a list named after it, every place
+in the set's own category, without the import preview; adding it again adds nothing (places
+already there are skipped). The files are in the Google My Maps layer export format (`WKT`,
+`name`, `description`) or any CSV the Places tab reads. Published now:
+
+| File | Title | Category | Places |
+|---|---|---|---|
+| `1-fritleeuwen.csv` | Fritleeuwen | frituur | 18 |
+| `2-kroegtijgers.csv` | Kroegtijgers | cafe | 86 |
+
+To publish one: put the CSV in `web/data/place-sets/` (a prefix like `3-` sets the order), give
+it a title and category in `SETS` in `web/tools/build_place_sets.py` (otherwise the file name
+and *Other*), run
+
+```bash
+python3 web/tools/build_place_sets.py
+```
+
+to rebuild `web/data/place-sets/index.json` (`{file, title, category, count}` per set), and
+push. The section is hidden when the index is missing or empty.
+
 ## Run as a static site (GitHub Pages)
 
 The `web/` folder is the whole app. Served by any static web server it keeps the library in the
@@ -595,8 +619,10 @@ web/                 the app: one page, runs in the browser (and as a static sit
     config.js        settings and the version
   data/places/       GeoNames place tiles
   data/seeds/        example route sets offered to visitors (+ index.json)
+  data/place-sets/   example place sets (CSV) on the Places tab (+ index.json)
   tools/build_places.py  builds data/places/ from the GeoNames dumps
   tools/build_seeds.py   builds data/seeds/index.json from the zips there
+  tools/build_place_sets.py  builds data/place-sets/index.json from the CSV files there
   tests/             Node tests of the route logic
 app/                 the server (self-hosted version): stores the library, serves web/
   main.py            FastAPI: storage API, backups, /brouter proxy, the page
