@@ -220,6 +220,24 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ![Change start point: the same loop, starting in Duisburg](docs/screenshots/change-start.jpg)
 
+- **Search for places** (Utilities menu, or *Places…* in a route's panel): the places along a
+  route, from **your places** and/or **OpenStreetMap**, within a distance you choose (100 m to
+  2 km) and of the kinds you tick (kinds marked * exist only among your own places). They are
+  listed in riding order (km, and how far off the route) and shown on the map. Select them with
+  tick boxes, *all* / *none* / *mine*, a button per kind, or by clicking them on the map. Then
+  **Show the route** with the selected places:
+  - *Add them as waypoints*: the same track, with the places as GPX waypoints, which a bike
+    computer shows along the way;
+  - *Ride to each place*: for places more than 30 m off the route, the route leaves some way
+    before the place (about twice as far as it lies off the route, 300 m to 3 km) and rejoins
+    it after, routed through the place by BRouter; places close together share one detour.
+
+  The preview gives the distance, the extra km, the climbing and each detour. **Save as new
+  route** (linked to the original; with waypoints only it is the same track, kept out of the
+  duplicates) or **Download GPX**. *Keep the OpenStreetMap ones as my places* stores the
+  selected OpenStreetMap places in a list named after the route. When OpenStreetMap is busy,
+  your own places are still found.
+
 - **Ride weather:** the forecast along a route for the day you ride it. Choose a route (dropdown,
   click it on the map, or *Weather…* in its detail panel), pick the day in the calendar (today
   and the next 15 days, each with its weather, top temperature and a bar for the chance of rain;
