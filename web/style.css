@@ -435,3 +435,5 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 #fp-list { max-height: 45vh; overflow-y: auto; padding-left: 4px; list-style: none; }
 #fp-list li { margin: 2px 0; }
 .poi-icon.sel span { transform: scale(1.35); box-shadow: 0 0 0 3px var(--accent); }
+/* "Grey map" (layer switcher): the base map in grey, lighter, so the routes stand out. */
+.map-grey .base-tiles { filter: grayscale(1) brightness(1.06) contrast(0.9); }

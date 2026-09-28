@@ -579,13 +579,36 @@ function saveMapChoice(choice) {
   } catch { /* not important */ }
 }
 
-function tileLayer(def) {
+function tileLayer(def, className = "") {
   return L.tileLayer(def.url, {
     maxZoom: 19,
     maxNativeZoom: def.maxNativeZoom,
     subdomains: "abc",
     attribution: def.attribution,
+    className,
   });
+}
+
+// "Grey map": the base map in grey, so coloured routes stand out (routes, places and the
+// hiking/cycling overlays keep their colours). Remembered per map; grey at first on the
+// overview Map, where many routes are compared, in colour on the others.
+const GREY_KEY = "rerouter.greyMap.";
+const GREY_BY_DEFAULT = new Set(["overview-map"]);
+
+function greyWanted(id) {
+  try {
+    const v = localStorage.getItem(GREY_KEY + id);
+    if (v !== null) return v === "1";
+  } catch { /* no storage */ }
+  return GREY_BY_DEFAULT.has(id);
+}
+
+function setGrey(entry, on) {
+  const el = entry.map.getContainer();
+  el.classList.toggle("map-grey", on);
+  try {
+    localStorage.setItem(GREY_KEY + el.id, on ? "1" : "0");
+  } catch { /* only for now */ }
 }
 
 /** Show the chosen style and overlays on one map (without firing its switcher events). */
@@ -605,7 +628,7 @@ function applyMapChoice(entry, choice) {
 /** Add the base map and a layer switcher to a new map. */
 function addMapLayers(map) {
   const entry = { map, styles: {}, overlays: {}, applying: false };
-  for (const def of config.MAP_STYLES) entry.styles[def.name] = tileLayer(def);
+  for (const def of config.MAP_STYLES) entry.styles[def.name] = tileLayer(def, "base-tiles");
   for (const def of config.MAP_OVERLAYS) entry.overlays[def.name] = tileLayer(def);
   applyMapChoice(entry, readMapChoice());
   const control = L.control.layers(entry.styles, entry.overlays, { position: "topright" }).addTo(map);
@@ -614,6 +637,15 @@ function addMapLayers(map) {
   control.addOverlay(entry.places, "Places");
   entry.osm = L.layerGroup().addTo(map); // places from OpenStreetMap, when asked for
   if (placesShown()) entry.places.addTo(map);
+  entry.grey = L.layerGroup(); // no content: switches the base map to grey
+  control.addOverlay(entry.grey, "Grey map");
+  if (greyWanted(map.getContainer().id)) {
+    entry.grey.addTo(map);
+    map.getContainer().classList.add("map-grey");
+  }
+  map.on("overlayadd overlayremove", (e) => {
+    if (e.layer === entry.grey) setGrey(entry, e.type === "overlayadd");
+  });
   drawPlaces(entry);
   map.on("overlayadd overlayremove", (e) => {
     if (e.layer !== entry.places || entry.applying) return;

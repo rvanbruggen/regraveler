@@ -118,7 +118,9 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
   CyclOSM (cycling, shows unpaved roads), OpenTopoMap (contour lines), the Belgian NGI topo map
   and Esri satellite, with the signposted hiking and cycling routes of Waymarked Trails as
   optional overlays. All are free and need no key; the choice applies to every map and is
-  remembered in this browser. The list is `MAP_STYLES` / `MAP_OVERLAYS` in `web/js/config.js`.
+  remembered in this browser. **Grey map** (in the same layer button) shows the base map in grey, so
+  the coloured routes, places and overlays stand out; it is set per map (grey at first on the
+  overview Map, in colour on the others, such as a route's panel) and remembered. The list is `MAP_STYLES` / `MAP_OVERLAYS` in `web/js/config.js`.
 - **Places (POIs):** cafés, water taps, stations, photo spots, … on every map (layer button ›
   *Places*) and listed along each route in its panel ("Places along this route": the km where
   you pass it and how far off the route, within 200 m). The **Places** tab:
