@@ -292,6 +292,15 @@ Clicking a node filters the table and the map, and each node shows a count.
 
 ---
 
+**Built (2026-09-28):** decided with Rik: areas by *start inside*, regions as region ›
+province, collections and areas in backups and sets. Part 1: collections (nested), smart
+collections, areas (drawn or KML), browse by activity/source/tag/type, a browse tree beside
+the library. Part 2: regions: the place tiles rebuilt with province codes and `admin.json`
+(Germany as Land › Kreis: the Regierungsbezirk exists in 4 Länder only), each route's start
+region stored on import and backfilled at start-up.
+
+---
+
 ## 5. Share link + privacy zones
 
 **What:**
