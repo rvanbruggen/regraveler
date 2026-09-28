@@ -111,7 +111,7 @@ function showView(name) {
   updateIdsNote();
   if (noFilters) closeDetail();
   // The Browse panel: beside the library table, or at the top of the Map's side panel.
-  if (name === "map") $("#view-map .map-side").prepend($("#catalog"));
+  if (name === "map") $("#map-count").after($("#catalog"));
   if (name === "library") $("#view-library").insertBefore($("#catalog"), $("#view-library .table-head"));
   if (name === "map") showOverview();
   if (name === "combine") showCombine();

@@ -187,11 +187,14 @@
 
   <!-- Map -->
   <section id="view-map" class="view" hidden>
+    <div class="map-bar">
+      <label class="check"><input type="checkbox" id="prox-on"> Highlight routes near each other</label>
+      <label class="inline-label">within <input type="number" id="prox-distance" min="0" step="10" aria-label="Distance in metres"> m</label>
+    </div>
     <div class="map-layout">
       <div class="map-side">
         <p id="map-count" class="muted"></p>
-        <label class="check"><input type="checkbox" id="prox-on"> Highlight routes near each other</label>
-        <label>Within (metres) <input type="number" id="prox-distance" min="0" step="10"></label>
+        <!-- the Browse panel goes here (moved in when the Map is shown) -->
         <p id="prox-status" class="muted small"></p>
         <div id="prox-focus" hidden>
           <p><strong id="prox-focus-name"></strong><br><a class="link small" id="prox-clear">show all routes</a></p>
