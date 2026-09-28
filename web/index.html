@@ -17,10 +17,11 @@
     <span class="tagline">route manager <span id="version"></span></span>
   </h1>
   <nav>
+    <!-- In the order you use them: import, the library, the map, places, the utilities. -->
+    <button class="tab" data-view="import">Import</button>
     <button class="tab active" data-view="library">Library</button>
     <button class="tab" data-view="map">Map</button>
     <button class="tab" data-view="places">Places</button>
-    <button class="tab" data-view="import">Import</button>
     <div class="menu" id="utilities">
       <button type="button" class="tab menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="utilities-menu">Utilities ▾</button>
       <div class="menu-list" id="utilities-menu" role="menu" hidden>
@@ -34,6 +35,7 @@
         <button type="button" role="menuitem" data-view="data">Library &amp; settings<small>Back up, restore, storage and routing server</small></button>
       </div>
     </div>
+    <button class="tab" data-view="about">About</button>
   </nav>
 </header>
 
@@ -253,6 +255,80 @@
         <div class="table-wrap"><table id="places-table"></table></div>
       </div>
     </div>
+  </section>
+
+  <!-- About -->
+  <section id="view-about" class="view about" hidden>
+    <h2>About rerouter</h2>
+    <p class="lead">rerouter is a really easy way to keep a library of your routes (gravel, road, mountain
+      biking, hiking) and to do, in one click, the things riders keep needing and keep doing by hand: combine two
+      routes into a new ride, start a loop somewhere else, check the weather along the way, find the cafés and
+      water taps on a route, or plan a day out with the train.</p>
+    <p>It runs in your browser. Your routes stay with you: in this browser on this device, or on your own
+      rerouter server at home (see <a class="link" data-goto="data">Library &amp; settings</a>). Nothing is uploaded
+      to rerouter; the services it asks for directions, places, weather and trains only get the points they
+      need.</p>
+
+    <h3>How to use it</h3>
+    <ol class="about-steps">
+      <li><strong>Import your routes</strong> (<a class="link" data-goto="import">Import</a>): drop GPX, TCX or FIT
+        files, whole folders or zip files, and set their source, activity and tags. Or paste a link to a route on
+        RideWithGPS, Komoot or Strava (<a class="link" data-goto="link">Utilities › Import from a link</a>). Just
+        looking around? Add a set of example routes under <a class="link" data-goto="data">Library &amp;
+        settings</a>. rerouter works out the distance, the climbing, a name after the places the route visits and,
+        if you like, how much of it is paved.</li>
+      <li><strong>Manage your library</strong> (<a class="link" data-goto="library">Library</a>): filter the table
+        (distance, climbing, paved, quality, tags) and use <em>Browse</em> on the left for activity, source,
+        collections, areas and regions. Click a route for its panel: map, elevation profile, surface, the places
+        along it, rating, tags and notes, and <em>Share…</em>. Tick several routes to tag them, put them in a
+        collection, download or export them. <em>Utilities › Duplicates</em> cleans up routes you have twice.</li>
+      <li><strong>See them on the map</strong> (<a class="link" data-goto="map">Map</a>): every route that matches
+        your filters, in the map style you like (the layer button, top right; <em>Grey map</em> makes the routes
+        stand out). <em>Highlight routes near each other</em> shows where routes meet: good starting points for a
+        combination.</li>
+      <li><strong>Add places</strong> (<a class="link" data-goto="places">Places</a>): import your Google My Maps
+        or a CSV file, add example lists, or click <em>＋ Place</em> on the map. Places show on every map and in each
+        route's panel (<em>Places along this route</em>), where you can also look up more on OpenStreetMap.</li>
+      <li><strong>Use the utilities</strong> (<em>Utilities</em>): <em>Combine routes</em> into a new ride with
+        connectors routed for you, <em>Change start point</em> of a loop, <em>Ride weather</em> for the day you ride,
+        <em>Search for places</em> along a route (and ride past them), and <em>Train rides</em>: a day out with the
+        train, with your routes as the riding part. What you make can be saved as a new route or downloaded as
+        GPX for your bike computer.</li>
+    </ol>
+    <p class="small muted">Keep a backup now and then (<a class="link" data-goto="data">Library &amp; settings ›
+      Download backup</a>), certainly when your library lives in this browser.</p>
+
+    <h3>Who made it</h3>
+    <p>Made by Rik Van Bruggen, a gravel and road cyclist from Antwerp, Belgium, to scratch his own itches:
+      keeping track of routes from many sites, and combining them into new rides.</p>
+    <p>Questions, ideas or something that doesn't work? Open an issue on GitHub:
+      <a href="https://github.com/rvanbruggen/rerouter/issues" target="_blank" rel="noopener">github.com/rvanbruggen/rerouter/issues</a>.</p>
+
+    <h3>Open source, license and disclaimer</h3>
+    <p>rerouter is open source: the code is at
+      <a href="https://github.com/rvanbruggen/rerouter" target="_blank" rel="noopener">github.com/rvanbruggen/rerouter</a>,
+      under the <a href="https://github.com/rvanbruggen/rerouter/blob/main/LICENSE" target="_blank" rel="noopener">MIT
+      License</a> (© 2026 Rik Van Bruggen). You may use, copy, change and share it, including on your own server.</p>
+    <p class="disclaimer"><strong>Disclaimer.</strong> rerouter is provided "as is", without warranty of any kind,
+      express or implied, and no rights of any kind can be derived from it or from anything it shows. Routes,
+      connectors, surface estimates, places, weather forecasts and train times come from software and from open
+      data that can be wrong or out of date: a path may be closed, private or unsafe, a train may not run or not take
+      bikes, the weather may turn. Check before you go, follow local rules and signs, and ride or walk at your own
+      risk. The author accepts no liability for any damage, loss or injury arising from its use.</p>
+
+    <h3>Built with</h3>
+    <ul class="small about-credits">
+      <li>Maps: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        contributors (ODbL), shown with <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a>;
+        map styles from CyclOSM, OpenTopoMap, the Belgian NGI, Esri and Waymarked Trails.</li>
+      <li>Routing and surface: <a href="https://brouter.de/" target="_blank" rel="noopener">BRouter</a>.</li>
+      <li>Place names and regions: <a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a> (CC BY 4.0).</li>
+      <li>Places from OpenStreetMap: the <a href="https://wiki.openstreetmap.org/wiki/Overpass_API" target="_blank" rel="noopener">Overpass API</a>.</li>
+      <li>Weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0).</li>
+      <li>Trains: <a href="https://transitous.org/" target="_blank" rel="noopener">Transitous</a> and
+        <a href="https://irail.be/" target="_blank" rel="noopener">iRail</a> (SNCB/NMBS).</li>
+    </ul>
+    <p class="small muted">rerouter <span class="about-version"></span></p>
   </section>
 
   <!-- Train rides (utility) -->

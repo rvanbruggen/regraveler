@@ -98,7 +98,7 @@ let currentView = "library";
 // Views reached through the Utilities menu.
 const UTILITIES = ["combine", "restart", "weather", "findplaces", "trains", "link", "duplicates", "data"];
 // Views a link (URL hash) can open.
-const LINKABLE_VIEWS = ["library", "map", "places", "import", ...UTILITIES];
+const LINKABLE_VIEWS = ["import", "library", "map", "places", "about", ...UTILITIES];
 
 function showView(name) {
   currentView = name;
@@ -106,7 +106,7 @@ function showView(name) {
   $("#utilities .menu-button").classList.toggle("active", UTILITIES.includes(name));
   $$(".view").forEach((v) => (v.hidden = v.id !== `view-${name}`));
   // The filters apply to the library and the map, not to the import screen and the utilities.
-  const noFilters = ["import", "rename", "places", "shared", ...UTILITIES].includes(name);
+  const noFilters = ["import", "rename", "places", "shared", "about", ...UTILITIES].includes(name);
   $("#filters").hidden = noFilters;
   updateIdsNote();
   if (noFilters) closeDetail();
@@ -125,6 +125,10 @@ function showView(name) {
   if (name === "shared") showShared();
   updateHash();
 }
+// Links to other screens (the About page's manual).
+$$("[data-goto]").forEach((a) => a.addEventListener("click", () => showView(a.dataset.goto)));
+$$(".about-version").forEach((e) => (e.textContent = `v${VERSION}`));
+
 $$("nav [data-view]").forEach((b) =>
   b.addEventListener("click", () => {
     toggleUtilities(false);

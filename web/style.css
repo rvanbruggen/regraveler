@@ -488,3 +488,13 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .map-bar label { margin: 0; }
 .map-bar input[type="number"] { width: 6em; }
 .map-side #map-count { margin-top: 0; }
+
+/* About */
+.about { max-width: 780px; line-height: 1.55; }
+.about h2 { margin-top: 4px; }
+.about h3 { margin: 22px 0 6px; }
+.about .lead { font-size: 16px; }
+.about-steps li { margin: 8px 0; }
+.about .disclaimer { font-size: 13px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+.about-credits li { margin: 3px 0; }
+.about a.link { cursor: pointer; }

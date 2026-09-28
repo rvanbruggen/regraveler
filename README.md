@@ -53,6 +53,11 @@ At a glance:
 Original route files (GPX, TCX, FIT) are never modified: combinations, new starts and routes
 with places are new files.
 
+The menu at the top follows the order you use it in: **Import**, **Library**, **Map**,
+**Places**, **Utilities**, and **About**: what rerouter is for, a short manual, who made it
+(questions and ideas: [GitHub issues](https://github.com/rvanbruggen/rerouter/issues)), the
+license and a disclaimer, and the open data and software it is built with.
+
 ### Importing routes
 
 - **Import** route files by drag and drop: many files at once, whole folders or zip files. On a
@@ -796,6 +801,12 @@ brouter/
   download-segments.sh  downloads BRouter routing data tiles (used by docker-compose)
 .github/workflows/pages.yml  publishes web/ to GitHub Pages
 ```
+
+## License
+
+[MIT](LICENSE) © 2026 Rik Van Bruggen. rerouter is provided as is, without warranty of any kind;
+see the disclaimer on its *About* page. Map data © OpenStreetMap contributors (ODbL); place names
+from GeoNames (CC BY 4.0); weather from Open-Meteo (CC BY 4.0).
 
 ## Version Tracking
 
