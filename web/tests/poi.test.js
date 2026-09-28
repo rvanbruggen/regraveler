@@ -311,3 +311,40 @@ test("OpenStreetMap places along a route: new ones only, and one kept as yours",
   assert.deepEqual(svc.osmCategories(), ["cafe"]);
   await assert.rejects(svc.osmInArea([50, 4, 51, 5], { fetchFn }), /Zoom in/);
 });
+
+test("OpenStreetMap places kept in one go, into a list of your choice", async () => {
+  const found = [
+    { osm_id: "node/1", name: "Tap", lat: 51.0, lon: 4.4, category: "water", notes: null, url: "https://www.openstreetmap.org/node/1" },
+    { osm_id: "node/2", name: "Fietspunt", lat: 51.01, lon: 4.41, category: "bike", notes: "Open: 24/7", url: "https://fietspunt.example" },
+    { osm_id: "way/3", name: "Uitzicht", lat: 51.02, lon: 4.42, category: "photo", notes: null, url: null },
+  ];
+  const first = await svc.keepOsmPlaces(found.slice(0, 2));
+  assert.deepEqual([first.list.name, first.added, first.skipped], ["From OpenStreetMap", 2, 0]);
+  // Again, with one more, into a new list named after a route: only the new one is added.
+  const second = await svc.keepOsmPlaces(found, { listName: "Along the Demer" });
+  assert.deepEqual([second.list.name, second.added, second.skipped], ["Along the Demer", 1, 2]);
+  const third = await svc.keepOsmPlaces([found[2]], { listId: first.list.id });
+  assert.equal(third.added, 0, "already kept");
+  assert.deepEqual(svc.allPlaces().map((p) => [p.name, p.category, p.osm_id]).sort(),
+    [["Fietspunt", "bike", "node/2"], ["Tap", "water", "node/1"], ["Uitzicht", "photo", "way/3"]]);
+  await assert.rejects(svc.keepOsmPlaces(found, { listId: "nope" }), /No such place list/);
+});
+
+test("OpenStreetMap places next to one you kept are still offered, unless the same kind", async () => {
+  const start = [51.0, 4.4];
+  const pts = linePoints({ start, lengthM: 3000, stepM: 100, ele: () => 10 });
+  const { routes: [r] } = await svc.importGpx(gpxXml([["t", pts]]), "Route.gpx");
+  const at = offset(...start, 20, 1500);
+  const near = offset(...start, 25, 1505); // ~7 m away
+  const answer = { elements: [
+    { type: "node", id: 1, lat: at[0], lon: at[1], tags: { amenity: "toilets" } },
+    { type: "node", id: 2, lat: near[0], lon: near[1], tags: { amenity: "shelter", shelter_type: "picnic_shelter" } },
+    { type: "node", id: 3, lat: near[0], lon: near[1], tags: { amenity: "toilets", name: "WC 2" } },
+  ] };
+  const fetchFn = async () => ({ ok: true, status: 200, json: async () => answer });
+  const first = await svc.osmAlongRoute(r.id, { fetchFn });
+  await svc.keepOsmPlaces([first.find((a) => a.place.osm_id === "node/1").place]);
+  const after = await svc.osmAlongRoute(r.id, { fetchFn });
+  // The kept toilet is gone; the shelter 7 m away stays; the second toilet 7 m away is taken for the same one.
+  assert.deepEqual(after.map((a) => a.place.osm_id), ["node/2"]);
+});

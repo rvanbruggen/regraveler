@@ -1072,6 +1072,9 @@ function osmPopup(p, marker, entry) {
 }
 
 let osmShownFor = null; // the route whose OpenStreetMap places are in its panel
+const osmSelected = new Set(); // osm ids ticked in the route panel
+let osmKeepTarget = ""; // where "Keep selected" puts them: "" (From OpenStreetMap), a list id, or "new"
+let osmKeepMessage = "";
 
 /** "Also look on OpenStreetMap" in the route panel (again after a change: then from the cache). */
 async function osmAlongRoute(r) {
@@ -1095,15 +1098,27 @@ async function osmAlongRoute(r) {
   if (selectedId !== r.id) return;
   const cats = svc.placeCategories();
   status.textContent = along.length
-    ? ` ${along.length} more on OpenStreetMap (rings on the map; keep the ones you like):`
+    ? ` ${along.length} more on OpenStreetMap (rings on the map): tick the ones to keep, above the list.`
     : " nothing more on OpenStreetMap along this route.";
   const entry = layeredMaps.find((x) => x.map === ensureMap());
   drawOsm(entry, along.map((a) => a.place));
+  const found = new Set(along.map((a) => a.place.osm_id));
+  for (const id of [...osmSelected]) if (!found.has(id)) osmSelected.delete(id); // kept or gone
   const ul = $("#d-places");
+  renderOsmTools(r, along);
   if (!along.length) return;
   if (ul.querySelector("li:not([data-kind])")?.textContent.startsWith("none")) ul.replaceChildren();
   for (const { place: p, km, off_m } of along) {
-    ul.append(el("li", { "data-kind": "osm" },
+    ul.append(el("li", { "data-kind": "osm", "data-km": km },
+      el("input", {
+        type: "checkbox", class: "osm-pick", "data-osm": p.osm_id, checked: osmSelected.has(p.osm_id),
+        title: "Select to keep as your place",
+        onchange: (e) => {
+          if (e.target.checked) osmSelected.add(p.osm_id);
+          else osmSelected.delete(p.osm_id);
+          updateOsmTools();
+        },
+      }),
       el("a", {
         title: "Show on the map",
         onclick: () => {
@@ -1116,8 +1131,74 @@ async function osmAlongRoute(r) {
       off_m > 30 ? el("span", { class: "small" }, ` (${off_m} m from the route)`) : null));
   }
   // Riding order again, with your own places.
-  const items = [...ul.children].sort((a, b) => parseFloat(a.textContent.slice(3)) - parseFloat(b.textContent.slice(3)));
+  const items = [...ul.children].sort((a, b) => Number(a.dataset.km ?? 0) - Number(b.dataset.km ?? 0));
   ul.replaceChildren(...items);
+}
+
+/**
+ * Above the places along a route: select OpenStreetMap places (all, none, per category) and
+ * keep the selection as your places in one go, into a list of your choice.
+ */
+function renderOsmTools(r, along) {
+  $("#d-osm-tools")?.remove();
+  if (!along.length && !osmKeepMessage) return;
+  const cats = svc.placeCategories();
+  const byCat = new Map();
+  for (const a of along) byCat.set(a.place.category, [...(byCat.get(a.place.category) || []), a.place.osm_id]);
+  const setAll = (ids, on) => {
+    for (const id of ids) on ? osmSelected.add(id) : osmSelected.delete(id);
+    for (const box of $$("#d-places .osm-pick")) box.checked = osmSelected.has(box.dataset.osm);
+    updateOsmTools();
+  };
+  const lists = svc.placeLists().filter((l) => l.id !== "osm");
+  const newName = r.name;
+  if (osmKeepTarget && osmKeepTarget !== "new" && !lists.some((l) => l.id === osmKeepTarget)) osmKeepTarget = "";
+  const target = el("select", { "aria-label": "Keep them in the list", onchange: (e) => (osmKeepTarget = e.target.value) },
+    el("option", { value: "" }, "From OpenStreetMap"),
+    lists.filter((l) => l.name !== newName).map((l) => el("option", { value: l.id, selected: osmKeepTarget === l.id }, l.name)),
+    el("option", { value: "new", selected: osmKeepTarget === "new" }, lists.some((l) => l.name === newName) ? newName : `new list “${newName}”`));
+  const keep = el("button", {
+    type: "button", id: "d-osm-keep",
+    onclick: async () => {
+      const picked = along.map((a) => a.place).filter((p) => osmSelected.has(p.osm_id));
+      if (!picked.length) return;
+      keep.disabled = true;
+      try {
+        const res = await svc.keepOsmPlaces(picked, osmKeepTarget === "new" ? { listName: newName } : { listId: osmKeepTarget || null });
+        osmKeepMessage = `Kept ${res.added} place${res.added === 1 ? "" : "s"} in “${res.list.name}”.`;
+        osmSelected.clear();
+        setPlacesShown(true);
+        refreshPlaces(); // redraws the list; the kept ones are yours now
+      } catch (err) {
+        osmKeepMessage = `Error: ${err.message}`;
+        keep.disabled = false;
+        updateOsmTools();
+      }
+    },
+  });
+  const chips = [...byCat].sort((a, b) => b[1].length - a[1].length).map(([id, ids]) => {
+    const c = categoryOf(id, cats);
+    return el("button", {
+      type: "button", class: "chip", title: `Select or unselect all ${ids.length} × ${c.label}`,
+      onclick: () => setAll(ids, !ids.every((x) => osmSelected.has(x))),
+    }, `${c.symbol} ${ids.length}`);
+  });
+  const tools = el("div", { id: "d-osm-tools", class: "osm-tools small" },
+    along.length ? el("div", { class: "actions" },
+      "Select: ", el("a", { class: "link", onclick: () => setAll(along.map((a) => a.place.osm_id), true) }, "all"),
+      " · ", el("a", { class: "link", onclick: () => setAll([...osmSelected], false) }, "none"), " · ", ...chips) : null,
+    along.length ? el("div", { class: "actions" }, keep, " into ", target) : null,
+    el("div", { class: "muted", id: "d-osm-kept" }, osmKeepMessage));
+  $("#d-places").before(tools);
+  updateOsmTools();
+}
+
+function updateOsmTools() {
+  const keep = $("#d-osm-keep");
+  if (!keep) return;
+  const n = [...$$("#d-places .osm-pick")].filter((b) => b.checked).length;
+  keep.disabled = !n;
+  keep.textContent = n ? `Keep ${n} selected as my places` : "Tick places to keep";
 }
 
 function addOsmControl(map) {
@@ -1163,6 +1244,9 @@ async function offerRouteWaypoints(r) {
   more.replaceChildren();
   layeredMaps.find((x) => x.map === ensureMap())?.osm.clearLayers();
   osmShownFor = null;
+  osmSelected.clear();
+  osmKeepMessage = "";
+  $("#d-osm-tools")?.remove();
   const osmLink = el("a", { class: "link", id: "d-osm-link", title: `Look for ${svc.osmCategories().length} kinds of places (see the Places tab)` }, "Also look on OpenStreetMap");
   osmLink.addEventListener("click", () => osmAlongRoute(r));
   more.append(osmLink, el("span", { id: "d-osm-status", class: "muted" }));
@@ -1194,7 +1278,7 @@ function loadPlacesAlong(r) {
   setChildren(ul, 
     ...(along.length
       ? along.map(({ place: p, km, off_m }) =>
-          el("li", {},
+          el("li", { "data-km": km },
             el("a", {
               title: "Show on the map",
               onclick: () => {

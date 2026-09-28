@@ -144,8 +144,11 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
     mapped on OpenStreetMap along the route (drawn as rings), and **OSM places here** on the Map
     looks in the part of the map you see (zoomed in). Which kinds to look for is set on the
     Places tab (default: water, toilets, bike repair, stations, shelters, viewpoints; bus
-    shelters are left out). They are not stored: *Keep as my place* copies one into the list
-    *From OpenStreetMap*. They come from the free Overpass API, which is often busy: rerouter
+    shelters are left out). They are not stored until you keep them: along a route, tick the
+    ones you want (or use *all*, *none*, or a category button such as 🚻 9 to tick all toilets)
+    and *Keep N selected as my places*, into *From OpenStreetMap*, one of your lists, or a new
+    list named after the route; on a map, *Keep as my place* in a place's popup. Places you
+    kept are not offered again. They come from the free Overpass API, which is often busy: rerouter
     only asks when you click, tries a few servers in turn, asks for the route's bounding boxes
     (far quicker than "along a line"), keeps answers for a week (in the browser; a rerouter
     server passes the questions on and keeps the answers for a day, `OVERPASS_URLS`,

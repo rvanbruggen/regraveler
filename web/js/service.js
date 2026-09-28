@@ -1306,10 +1306,15 @@ export async function setOsmCategories(categories) {
 
 const osmLabels = () => Object.fromEntries(placeCategories().map((c) => [c.id, c.label]));
 
-/** Leave out OSM places you already have (same name within 25 m, or anything within 10 m). */
+/**
+ * Leave out OSM places you already have: kept before (same OpenStreetMap id), the same name
+ * within 25 m, or the same category within 10 m (a toilet next to a shelter stays).
+ */
 function notMine(found) {
   const mine = lib.docsOf("poi");
-  return found.filter((p) => !poi.isDuplicatePlace(p, mine) && !poi.isDuplicatePlace(p, mine.map((m) => ({ ...m, name: p.name })), 10));
+  const kept = new Set(mine.map((m) => m.osm_id).filter(Boolean));
+  return found.filter((p) => !kept.has(p.osm_id) && !poi.isDuplicatePlace(p, mine) &&
+    !poi.isDuplicatePlace(p, mine.filter((m) => m.category === p.category).map((m) => ({ ...m, name: p.name })), 10));
 }
 
 /**
@@ -1327,6 +1332,32 @@ export async function osmInArea(bbox, opts = {}) {
   const [s, w, n, e] = bbox;
   if ((n - s) * (e - w) > 0.25) throw new ServiceError("Zoom in further to look for places on OpenStreetMap");
   return notMine(await osm.placesInArea(bbox, osmCategories(), osmLabels(), opts));
+}
+
+/**
+ * Keep several places found on OpenStreetMap as yours, in one go: into the list `listId`, or a
+ * list called `listName` (made when there is none), else "From OpenStreetMap". Places you
+ * already kept (same OpenStreetMap id) are skipped. Returns {list, added, skipped}.
+ */
+export async function keepOsmPlaces(found, { listId = null, listName = null } = {}) {
+  const list = listId
+    ? lib.getDoc("poi_list", listId)
+    : listName && listName.trim()
+      ? await ensureList(listName.trim(), { source: "OpenStreetMap" })
+      : await ensureList("From OpenStreetMap", { id: "osm", source: "OpenStreetMap" });
+  if (!list) throw new ServiceError("No such place list", 404);
+  const kept = new Set(lib.docsOf("poi").map((x) => x.osm_id).filter(Boolean));
+  const docs = [];
+  for (const p of found) {
+    if (!p.osm_id || kept.has(p.osm_id)) continue;
+    kept.add(p.osm_id);
+    docs.push({
+      kind: "poi", name: p.name, lat: p.lat, lon: p.lon, category: p.category, list_id: list.id,
+      notes: p.notes || null, url: p.url || null, source: "OpenStreetMap", osm_id: p.osm_id,
+    });
+  }
+  for (let i = 0; i < docs.length; i += 200) await lib.saveDocs(docs.slice(i, i + 200));
+  return { list, added: docs.length, skipped: found.length - docs.length };
 }
 
 /** Keep a place found on OpenStreetMap as one of yours (list "From OpenStreetMap"). */

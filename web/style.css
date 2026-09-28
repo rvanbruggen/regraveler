@@ -423,3 +423,9 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .osm-badge { font-size: 9px; font-weight: 700; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; margin-left: 4px; vertical-align: middle; }
 .osm-cats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; }
 .poi-add + .poi-add, .leaflet-control.poi-add { margin-top: 6px; }
+.osm-tools { background: var(--accent-soft); border-radius: 6px; padding: 6px 10px; margin: 4px 0 6px; }
+.osm-tools .actions { margin-top: 2px; gap: 6px; }
+.osm-tools select { width: auto; max-width: 220px; }
+.chip { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 12px; padding: 1px 8px; font-size: 12px; cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.places-along .osm-pick { width: auto; margin: 0 6px 0 0; vertical-align: middle; }
