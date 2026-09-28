@@ -5,6 +5,7 @@ import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from 
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
+import { drawProfile, nearestIndex } from "./profile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
 import { RemoteBackend, detectServer } from "./remote.js";
 import * as svc from "./service.js";
@@ -612,6 +613,8 @@ function ensureMap() {
   if (map) return map;
   map = L.map("d-map");
   addMapLayers(map);
+  map.on("mousemove", onDetailMapMove);
+  map.on("mouseout", () => showProfilePoint(null, true));
   return map;
 }
 
@@ -677,6 +680,7 @@ async function openDetail(id) {
 
   drawDetailMap(r, true);
 
+  loadProfile(r);
   loadSimilar(r.id);
 }
 
@@ -752,6 +756,73 @@ async function estimateOne(id, overwriteManual) {
   }
 }
 
+// ------------------------------------------------------------------ elevation profile
+
+let profileChart = null; // {profile, chart} of the route in the detail panel
+let profileMarker = null; // the position on the detail map while hovering the chart
+
+function clearProfile() {
+  profileChart?.chart.destroy();
+  profileChart = null;
+  profileMarker?.remove();
+  profileMarker = null;
+}
+
+async function loadProfile(r) {
+  const box = $("#d-profile");
+  clearProfile();
+  box.replaceChildren(el("div", { class: "muted small" }, "elevation profile…"));
+  let profile;
+  try {
+    profile = await svc.routeProfile(r);
+  } catch (err) {
+    if (selectedId === r.id) box.replaceChildren(el("div", { class: "muted small" }, `elevation profile: ${err.message}`));
+    return;
+  }
+  if (selectedId !== r.id) return;
+  if (!profile) {
+    box.replaceChildren(el("div", { class: "muted small" }, "No elevation in this file."));
+    return;
+  }
+  box.replaceChildren();
+  const chart = drawProfile(box, profile, { onHover: (i) => showProfilePoint(i, false) });
+  profileChart = { profile, chart };
+}
+
+/** Show grid point `i` of the profile on the detail map (and on the chart when from the map). */
+function showProfilePoint(i, fromMap) {
+  if (!profileChart) return;
+  if (fromMap) profileChart.chart.highlight(i);
+  if (i == null) {
+    profileMarker?.remove();
+    profileMarker = null;
+    return;
+  }
+  const ll = [profileChart.profile.lat[i], profileChart.profile.lon[i]];
+  if (!profileMarker) {
+    profileMarker = L.circleMarker(ll, { radius: 6, color: "#fff", weight: 2, fillColor: "#1a5fb4", fillOpacity: 1, interactive: false }).addTo(ensureMap());
+  } else profileMarker.setLatLng(ll);
+}
+
+// Hovering near the route on the detail map shows that point on the chart.
+let profileMoveQueued = null;
+function onDetailMapMove(e) {
+  if (!profileChart) return;
+  const queued = !!profileMoveQueued;
+  profileMoveQueued = e.latlng;
+  if (queued) return;
+  requestAnimationFrame(() => {
+    const at = profileMoveQueued;
+    profileMoveQueued = null;
+    if (!profileChart || !at) return;
+    const { index, metres } = nearestIndex(profileChart.profile, at.lat, at.lng);
+    const m = ensureMap();
+    // Within ~15 pixels of the route at the current zoom.
+    const metresPerPixel = (40075016 * Math.cos((at.lat * Math.PI) / 180)) / 2 ** (m.getZoom() + 8);
+    showProfilePoint(metres <= 15 * metresPerPixel ? index : null, true);
+  });
+}
+
 async function loadSimilar(id) {
   const list = $("#d-similar");
   list.replaceChildren(el("li", {}, "checking…"));
@@ -776,6 +847,7 @@ async function loadSimilar(id) {
 function closeDetail() {
   detail.hidden = true;
   selectedId = null;
+  clearProfile();
   $$("#routes tbody tr.selected").forEach((tr) => tr.classList.remove("selected"));
   clearFocus({ keepDetail: true });
 }

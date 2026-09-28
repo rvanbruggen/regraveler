@@ -126,6 +126,15 @@ td.name { white-space: normal; min-width: 220px; font-weight: 500; }
 .detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .detail-head h2 { font-size: 17px; margin: 4px 0 10px; }
 #d-map { height: 260px; border: 1px solid var(--border); border-radius: 4px; }
+.profile { margin-top: 8px; min-height: 20px; }
+.profile-svg { display: block; touch-action: pan-y; }
+.profile-grid { stroke: var(--border); stroke-width: 1; }
+.profile-axis { font-size: 10px; fill: var(--muted); }
+.profile-area { fill: var(--accent-soft); }
+.profile-band { opacity: 0.85; }
+.profile-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+.profile-cursor { stroke: #1a5fb4; stroke-width: 1; }
+.profile-label { font-size: 11px; font-weight: 600; fill: var(--text); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 12px; margin: 12px 0; }
 .stats div { display: flex; flex-direction: column; }
 .stats dt { font-size: 11px; color: var(--muted); }

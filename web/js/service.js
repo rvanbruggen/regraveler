@@ -9,6 +9,7 @@ import { round, simplifyLatLon } from "./geo.js";
 import { GpxError, parseGpx, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
 import { bboxOf, duplicatePairs, findSimilar, groupPairs, proximityPairs } from "./similarity.js";
+import { buildProfile } from "./profile.js";
 import { computeStats } from "./stats.js";
 import * as surface from "./surface.js";
 import { makeZip } from "./zip.js";
@@ -25,6 +26,7 @@ let lib = null;
 export const setLibrary = (library) => {
   lib = library;
   trackCache.clear();
+  profileCache.clear();
   mapCache.clear();
 };
 export const library = () => lib;
@@ -328,7 +330,10 @@ export async function setActivity(ids, activity) {
 
 /** Remove routes from the library (with their stored GPX files when nothing else uses them). */
 export async function deleteRoutes(ids) {
-  ids.forEach((id) => trackCache.delete(Number(id)));
+  ids.forEach((id) => {
+    trackCache.delete(Number(id));
+    profileCache.delete(Number(id));
+  });
   return { deleted: await lib.deleteRoutes(ids) };
 }
 
@@ -571,6 +576,20 @@ export async function loadTrack(r) {
   trackCache.set(r.id, { hash: r.file_hash, isLoop: r.is_loop, track });
   if (trackCache.size > 64) trackCache.delete(trackCache.keys().next().value);
   return track;
+}
+
+const profileCache = new Map(); // route id -> {hash, index, profile}
+
+/** Elevation profile of a route (profile.js), or null when its file has no elevation. */
+export async function routeProfile(r) {
+  const hit = profileCache.get(r.id);
+  if (hit && hit.hash === r.file_hash && hit.index === r.track_index) return hit.profile;
+  const file = await lib.getFile(r.file_hash);
+  if (!file) throw new ServiceError(`GPX file of '${r.name}' not found in the library`, 404);
+  const profile = buildProfile(parseGpx(file.data).tracks[r.track_index].points);
+  profileCache.set(r.id, { hash: r.file_hash, index: r.track_index, profile });
+  if (profileCache.size > 32) profileCache.delete(profileCache.keys().next().value);
+  return profile;
 }
 
 const ll = (p) => [round(p[0], 6), round(p[1], 6)];

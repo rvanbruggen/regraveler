@@ -75,6 +75,11 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 - **Route details:** map, stats, edit metadata (name, quality 1–5, paved %, tags, notes,
   source), list of similar/overlapping routes, download of the original GPX, remove from library.
+- **Elevation profile:** the route panel shows the elevation along the route (the same smoothed
+  profile the elevation gain is computed from), with climbs coloured by gradient (3–6 %, 6–9 %,
+  9 % and steeper, measured per 100 m). Hover the chart to see the km, elevation and gradient
+  there and a marker on the map; hover the route on the map to see that point on the chart.
+  Files without elevation show no chart.
 - **Surface from OpenStreetMap:** each route's surface is estimated as *paved*, *cobbles*
   (sett/cobblestones, counted as paved), *unpaved* and *unknown*. The route panel shows the
   breakdown as a bar, colours the map by surface, and has *Estimate again*. The paved % in the
@@ -525,6 +530,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     remote.js        ... or the rerouter server's storage API (self-hosted)
     gpx.js           GPX reading and writing (a small XML reader, also runs in Node and workers)
     stats.js         distance, smoothed elevation gain/loss, loop detection, simplified geometry
+    profile.js       elevation profile of a route (gradient bands, chart in the route panel)
     geo.js           EPSG:3035 projection, WGS84 geodesic distance, line helpers, grid index
     similarity.js    near-duplicates, routes near each other, duplicate groups
     combiner.js      cutting, direction handling and stitching of combined routes; new start points
