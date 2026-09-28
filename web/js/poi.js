@@ -22,7 +22,11 @@ export const DEFAULT_CATEGORIES = [
   { id: "frituur", label: "Frituur", symbol: "🍟", color: "#f9a825", words: ["frituur", "frit", "frites", "friet", "friterie", "fritkot", "frietkot", "snackbar"] },
   { id: "bike", label: "Bike shop / repair", symbol: "🔧", color: "#2e7d32", words: ["bike", "bikes", "fiets", "bicycle", "velo", "vélo", "repair", "herstel", "cycling"] },
   { id: "station", label: "Train station", symbol: "🚉", color: "#37474f", words: ["station", "train", "trein", "gare", "railway", "spoor"] },
-  { id: "sight", label: "Sight / museum", symbol: "🏛", color: "#c62828", words: ["museum", "musea", "sight", "sights", "bezienswaardig", "monument", "church", "kerk", "castle", "kasteel", "attraction", "landmark", "places to see"] },
+  // Typical of the Low Countries: before "sight", so a "Kastelen" layer or an OSM castle lands here.
+  { id: "belfry", label: "Belfry", symbol: "🔔", color: "#bf360c", words: ["belfry", "belfries", "belfort", "belforten", "beffroi", "bell tower", "klokkentoren"] },
+  { id: "castle", label: "Castle", symbol: "🏰", color: "#827717", words: ["castle", "castles", "kasteel", "kastelen", "château", "chateau", "burcht", "slot", "schloss"] },
+  { id: "abbey", label: "Abbey", symbol: "⛪", color: "#880e4f", words: ["abbey", "abbeys", "abdij", "abdijen", "abbaye", "klooster", "monastery", "priory", "priorij", "cloister"] },
+  { id: "sight", label: "Sight / museum", symbol: "🏛", color: "#c62828", words: ["museum", "musea", "sight", "sights", "bezienswaardig", "monument", "church", "kerk", "attraction", "landmark", "places to see"] },
   { id: "photo", label: "Photo spot", symbol: "📷", color: "#00838f", words: ["photo", "foto", "view", "uitzicht", "viewpoint", "panorama", "camera", "scenic", "overlook", "summit"] },
   { id: "shelter", label: "Shelter / picnic", symbol: "⛺", color: "#558b2f", words: ["shelter", "picnic", "picknick", "schuil", "bench", "rest area"] },
   { id: "lodging", label: "Hotel / lodging", symbol: "🛏", color: "#3949ab", words: ["hotel", "hotels", "b&b", "lodging", "camping", "campground", "campsite", "hostel", "overnachten", "bed"] },
@@ -418,7 +422,9 @@ export const OSM_TAGS = {
   frituur: [["amenity", "fast_food"]], // with a chips/friture cuisine, see osmCategory
   bike: [["shop", "bicycle"], ["amenity", "bicycle_repair_station"]],
   station: [["railway", "station|halt"]],
-  sight: [["tourism", "attraction|museum"], ["historic", "castle|ruins|monument|archaeological_site"]],
+  castle: [["historic", "castle"]],
+  abbey: [["historic", "monastery"], ["amenity", "monastery"]],
+  sight: [["tourism", "attraction|museum"], ["historic", "ruins|monument|archaeological_site"]],
   photo: [["tourism", "viewpoint"]],
   shelter: [["amenity", "shelter"], ["tourism", "picnic_site"]],
   lodging: [["tourism", "hotel|guest_house|hostel|camp_site|chalet|alpine_hut"]],

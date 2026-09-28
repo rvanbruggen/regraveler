@@ -31,8 +31,8 @@ for (const set of sets) {
     for (const p of places) {
       assert.ok(p.name && p.name !== "Unnamed place", `a place without a name in ${set.file}`);
       assert.equal(p.description, null, `${p.name}: no descriptions in published sets`);
-      // Belgium and just across its borders (no stray points in Romania or Amsterdam).
-      assert.ok(p.lat > 49.4 && p.lat < 51.6 && p.lon > 2.4 && p.lon < 6.5, `${p.name} lies at ${p.lat}, ${p.lon}`);
+      // Belgium, the south of the Netherlands and the north of France (no stray points in Romania).
+      assert.ok(p.lat > 49.4 && p.lat < 51.9 && p.lon > 1.5 && p.lon < 6.5, `${p.name} lies at ${p.lat}, ${p.lon}`);
     }
 
     svc.setLibrary(await Library.open(new MemoryBackend()));

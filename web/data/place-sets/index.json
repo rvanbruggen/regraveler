@@ -15,19 +15,19 @@
     {
       "file": "3-mybrevet-belfries.csv",
       "title": "MyBrevet.cc – Belfries",
-      "category": "sight",
+      "category": "belfry",
       "count": 56
     },
     {
       "file": "4-mybrevet-castles.csv",
       "title": "MyBrevet.cc – Castles",
-      "category": "sight",
+      "category": "castle",
       "count": 911
     },
     {
       "file": "5-mybrevet-abbeys.csv",
       "title": "MyBrevet.cc – Abbeys",
-      "category": "sight",
+      "category": "abbey",
       "count": 37
     }
   ]

@@ -68,6 +68,9 @@ test("categories are suggested from the icon, then the layer name", () => {
   assert.equal(matchCategory("Kroegtijgers"), "cafe");
   assert.equal(matchCategory("Fritleeuwen"), "frituur");
   assert.equal(matchCategory("Museums / Places to see"), "sight");
+  assert.equal(matchCategory("Kastelen"), "castle");
+  assert.equal(matchCategory("Belforten"), "belfry");
+  assert.equal(matchCategory("Abdijen en kloosters"), "abbey");
   assert.equal(matchCategory("Rebar"), null, "word starts only");
   assert.equal(suggestCategory({ category: "Drinking water" }, "x"), "water");
   assert.equal(categoryId("Gîtes & B&B's"), "gites-b-b-s");

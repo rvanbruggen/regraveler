@@ -250,7 +250,8 @@ license and a disclaimer, and the open data and software it is built with.
     sets* below).
   - **Lists** (one per imported map, plus *My marks*): show or hide a whole list, or remove it.
   - **Categories:** built-in ones (drinking water, toilet, café / bar, restaurant, frituur,
-    bike shop, train station, sight, photo spot, shelter, hotel, parking, other) and your own;
+    bike shop, train station, belfry, castle, abbey, sight, photo spot, shelter, hotel, parking,
+    other) and your own;
     change the symbol, name and colour.
   - **＋ Place** on the Map: click it, then on the map, and fill in the name, category, notes
     and a link (a photo album, a website). Click a place on any map to see or edit it.
@@ -435,9 +436,9 @@ already there are skipped). The files are in the Google My Maps layer export for
 |---|---|---|---|
 | `1-fritleeuwen.csv` | Fritleeuwen | frituur | 18 |
 | `2-kroegtijgers.csv` | Kroegtijgers | cafe | 86 |
-| `3-mybrevet-belfries.csv` | MyBrevet.cc – Belfries | sight | 56 |
-| `4-mybrevet-castles.csv` | MyBrevet.cc – Castles | sight | 911 |
-| `5-mybrevet-abbeys.csv` | MyBrevet.cc – Abbeys | sight | 37 |
+| `3-mybrevet-belfries.csv` | MyBrevet.cc – Belfries | belfry | 56 |
+| `4-mybrevet-castles.csv` | MyBrevet.cc – Castles | castle | 911 |
+| `5-mybrevet-abbeys.csv` | MyBrevet.cc – Abbeys | abbey | 37 |
 
 To publish one: put the CSV in `web/data/place-sets/` (a prefix like `6-` sets the order), give
 it a title and category in `SETS` in `web/tools/build_place_sets.py` (otherwise the file name

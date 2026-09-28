@@ -28,9 +28,9 @@ PLACE_SETS = Path(__file__).resolve().parent.parent / "data" / "place-sets"
 SETS = {
     "fritleeuwen": ("Fritleeuwen", "frituur"),
     "kroegtijgers": ("Kroegtijgers", "cafe"),
-    "mybrevet-belfries": ("MyBrevet.cc – Belfries", "sight"),
-    "mybrevet-castles": ("MyBrevet.cc – Castles", "sight"),
-    "mybrevet-abbeys": ("MyBrevet.cc – Abbeys", "sight"),
+    "mybrevet-belfries": ("MyBrevet.cc – Belfries", "belfry"),
+    "mybrevet-castles": ("MyBrevet.cc – Castles", "castle"),
+    "mybrevet-abbeys": ("MyBrevet.cc – Abbeys", "abbey"),
 }
 
 POINT = re.compile(r"POINT\s*Z?\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)", re.IGNORECASE)

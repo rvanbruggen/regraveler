@@ -19,7 +19,10 @@ test("OSM tags to categories, and places from an answer", () => {
   assert.equal(osmCategory({ amenity: "fast_food", cuisine: "burger;fries" }), "frituur");
   assert.equal(osmCategory({ amenity: "fast_food", cuisine: "pizza" }), "food");
   assert.equal(osmCategory({ shop: "bicycle" }), "bike");
-  assert.equal(osmCategory({ historic: "castle" }), "sight");
+  assert.equal(osmCategory({ historic: "castle" }), "castle");
+  assert.equal(osmCategory({ historic: "castle", tourism: "attraction" }), "castle", "before sight");
+  assert.equal(osmCategory({ amenity: "monastery" }), "abbey");
+  assert.equal(osmCategory({ tourism: "museum" }), "sight");
   assert.equal(osmCategory({ railway: "station", station: "subway" }), null);
   assert.equal(osmCategory({ amenity: "parking" }), null);
   assert.equal(osmCategory({ amenity: "shelter", shelter_type: "public_transport" }), null, "a bus shelter");
