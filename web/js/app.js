@@ -110,6 +110,9 @@ function showView(name) {
   $("#filters").hidden = noFilters;
   updateIdsNote();
   if (noFilters) closeDetail();
+  // The Browse panel: beside the library table, or at the top of the Map's side panel.
+  if (name === "map") $("#view-map .map-side").prepend($("#catalog"));
+  if (name === "library") $("#view-library").insertBefore($("#catalog"), $("#view-library .table-head"));
   if (name === "map") showOverview();
   if (name === "combine") showCombine();
   if (name === "restart") showRestart();
@@ -230,9 +233,7 @@ filterForm.addEventListener("input", () => {
 filterForm.addEventListener("reset", () => {
   state.ids = [];
   // Hidden fields keep their value on a reset: clear them.
-  filterForm.elements.coll.value = "";
-  filterForm.elements.area.value = "";
-  filterForm.elements.region.value = "";
+  for (const k of ["coll", "area", "region", "activity", "source", "loop"]) filterForm.elements[k].value = "";
   setTimeout(refresh, 0);
 });
 filterForm.addEventListener("submit", (e) => e.preventDefault());
@@ -261,7 +262,6 @@ async function loadFacets() {
   activityProfiles = cfg.activity_profiles || {};
   if (!$("#batch-activity").options.length) {
     fillActivitySelects(cfg.activities);
-    filterForm.elements.activity.value = new URLSearchParams(location.hash.slice(1)).get("activity") || "";
   }
   if (!cbEl.profile.options.length) {
     cbEl.profile.replaceChildren(...cfg.brouter_profiles.map((p) => el("option", { value: p }, p)));
@@ -269,10 +269,6 @@ async function loadFacets() {
   const prox = $("#prox-distance");
   prox.max = f.proximity_max_distance_m;
   if (!prox.value) prox.value = f.proximity_distance_m;
-  const sourceSel = filterForm.elements.source;
-  const current = sourceSel.value || new URLSearchParams(location.hash.slice(1)).get("source") || "";
-  sourceSel.replaceChildren(el("option", { value: "" }, "any"), ...f.sources.map((s) => el("option", { value: s }, s)));
-  sourceSel.value = current;
   $("#source-list").replaceChildren(...f.sources.map((s) => el("option", { value: s })));
   $("#tag-list").replaceChildren(...f.tags.map(([t]) => el("option", { value: t })));
 }
@@ -1855,10 +1851,15 @@ function renderCatalog() {
 
 const filterQueryNow = () => svc.filterQuery(filterParams());
 
-/** Chips in the filter bar for the filters that have no field of their own (collection, area). */
+/** Chips in the filter bar for the filters set from Browse (they have no field of their own). */
 function renderFilterChips() {
   const f = filterForm.elements;
   const chips = [];
+  const chip = (text, field, title) => chips.push(el("span", { class: "filter-chip", title },
+    text, el("a", { title: "Remove this filter", onclick: () => setFilters({ [field]: "" }) }, "×")));
+  if (f.activity.value) chip(`Activity: ${activityLabel(f.activity.value)}`, "activity", "Only routes of this activity");
+  if (f.source.value) chip(`Source: ${f.source.value}`, "source", "Only routes from this source");
+  if (f.loop.value) chip(f.loop.value === "true" ? "Loops" : "Point to point", "loop", "Only loops, or only point-to-point routes");
   if (f.coll.value) {
     const c = svc.library()?.getDoc("collection", f.coll.value);
     chips.push(el("span", { class: "filter-chip", title: "Only routes in this collection (and the ones inside it)" },

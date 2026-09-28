@@ -61,13 +61,12 @@
           <option value="4">★ 4+</option><option value="5">★ 5</option>
         </select>
       </label>
-      <label>Activity <select name="activity" class="activity-select" data-any="any"></select></label>
-      <label>Source <select name="source"><option value="">any</option></select></label>
-      <label>Loop
-        <select name="loop"><option value="">any</option><option value="true">loops</option><option value="false">point-to-point</option></select>
-      </label>
       <label class="wide">Tags (all of) <input type="text" name="tags" list="tag-list" placeholder="comma separated"></label>
       <datalist id="tag-list"></datalist>
+      <!-- Set from Browse (beside the library, and on the Map); shown as chips. -->
+      <input type="hidden" name="activity">
+      <input type="hidden" name="source">
+      <input type="hidden" name="loop">
       <input type="hidden" name="coll">
       <input type="hidden" name="area">
       <input type="hidden" name="region">

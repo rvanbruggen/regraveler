@@ -60,8 +60,11 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ![Import: batch source, activity and tags, with per-file overrides](docs/screenshots/import.png)
 
-- **Library:** sortable table with filters on activity, distance, elevation gain, paved %,
-  quality, tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
+- **Library:** sortable table with a filter bar (search, distance, elevation gain, paved %,
+  quality, tags) and the **Browse** panel beside it for activity, source, type (loop or point
+  to point), collections, areas and regions; what is chosen in Browse shows as chips in the
+  filter bar (× removes one, *Clear* all). The Map has the same filter bar and the Browse panel
+  at the top of its side panel. Filters are kept in the URL.
 - **Browse (catalog):** beside the library table (on a phone behind *Browse*), a tree to find
   routes by group; a click filters the table and the map (a chip in the filter bar shows a
   collection or area, × to show all routes again), and each entry shows its number of routes.
