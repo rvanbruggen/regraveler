@@ -92,7 +92,7 @@ license and a disclaimer, and the open data and software it is built with.
   - **Name:** new routes are named after the places they visit (see *Route names*); the name
     from the file is kept at the top of the notes (`Original name: …`).
 
-![Import: batch source, activity and tags, with per-file overrides](docs/screenshots/import.png)
+![Import: a batch of route files with the source, activity and tags for the whole batch, and per-file overrides](docs/screenshots/import.webp)
 
 - **Import from a link:** paste a link and rerouter fetches the route, shows its name and
   distance, and pre-fills the source (the service or site + the link), the activity and the
@@ -167,7 +167,7 @@ license and a disclaimer, and the open data and software it is built with.
   - **Remove:** removes them from the library after one confirmation (on a server the GPX files
     stay in the `gpx/` folder; in the browser version they are removed with the routes).
 
-![Library: filters, activity, estimated paved %, ratings and tags; three routes selected](docs/screenshots/library.png)
+![Library: the filter bar, the Browse panel (collections, smart collections, areas, regions) and the routes](docs/screenshots/library.webp)
 
 - **Duplicates:** all groups of near-duplicate routes in the library (e.g. the same route
   downloaded from two sites), with overlap, source, rating and tags per route, "identical
@@ -176,7 +176,7 @@ license and a disclaimer, and the open data and software it is built with.
   *Not duplicates* (hides the group). Below that, **variants**: routes that lie (almost)
   entirely on a longer route, such as a short loop inside a long one.
 
-![Duplicates: the same routes from two sites, with a suggestion which one to keep](docs/screenshots/duplicates.png)
+![Duplicates: the same routes from two sites, with a suggestion which one to keep](docs/screenshots/duplicates.webp)
 
 ### A route's panel
 
@@ -197,7 +197,7 @@ license and a disclaimer, and the open data and software it is built with.
   the same. Needs BRouter (see Docker); routes outside the downloaded tiles can't be estimated.
   The browser version uses the public BRouter at brouter.de, one request at a time.
 
-![Route panel: stats, the map coloured by surface and the surface breakdown](docs/screenshots/route-panel.png)
+![A route's panel: its map, the elevation profile with the climbs coloured, stats and details](docs/screenshots/route-panel.webp)
 
 - **Route names:** *suggest names…* above the library (or *Rename…* for selected routes) opens
   a review screen with a proposed name per route: the start town, then up to three places the
@@ -206,7 +206,7 @@ license and a disclaimer, and the open data and software it is built with.
   alone, and rename; the current name is kept at the top of the notes (only the first time).
   Routes with the same proposal get the distance added.
 
-![Rename: the original names next to the proposed ones](docs/screenshots/rename.png)
+![Suggest names: the current names next to the proposed ones](docs/screenshots/rename.webp)
 
 - **Share…** makes a link to the route: see [Sharing](#sharing-and-example-sets) below.
 
@@ -232,7 +232,7 @@ license and a disclaimer, and the open data and software it is built with.
 - The filters, the active view and the proximity setting are kept in the URL, so a bookmark
   brings back the same screen.
 
-![Map: routes near each other highlighted, shared stretches in yellow](docs/screenshots/map.jpg)
+![The map: routes of one source on the grey map, the Browse panel beside it and the layer button open](docs/screenshots/map.webp)
 
 ### Places
 
@@ -279,6 +279,8 @@ license and a disclaimer, and the open data and software it is built with.
     your own categories; *Include the places along these routes*), and adding a set adds its
     places (lists with the same name merged, places already there skipped).
 
+![Places: example lists to add, your lists and categories, and the places table](docs/screenshots/places.webp)
+
 ### Utilities
 
 The *Utilities* menu in the header has the operations on routes:
@@ -318,7 +320,7 @@ The *Utilities* menu in the header has the operations on routes:
     the other part of that loop (through its start). *Ride the whole result the other way*
     reverses the direction.
 
-![Combine: a loop from two routes, with gravel connectors routed by BRouter](docs/screenshots/combine.jpg)
+![Combine: route A, then route B (point to point)](docs/screenshots/combine.webp)
 
 - **Change start point** of a loop route: choose a loop (dropdown, click it on the map, or
   *Change start…* in a loop's detail panel), then click where it should start (clicks snap onto
@@ -329,7 +331,7 @@ The *Utilities* menu in the header has the operations on routes:
   rating, paved % and source copied). The new route is marked as "not duplicates" of the
   original, so the Duplicates utility doesn't suggest removing one of them.
 
-![Change start point: the same loop, starting in Duisburg](docs/screenshots/change-start.jpg)
+![Change start point: a 203 km loop, now starting in Rijkevorsel](docs/screenshots/change-start.webp)
 
 - **Ride weather:** the forecast along a route for the day you ride it. Choose a route (dropdown,
   click it on the map, or *Weather…* in its detail panel), pick the day in the calendar (today
@@ -345,6 +347,8 @@ The *Utilities* menu in the header has the operations on routes:
   20:00 (click one to use it). When riding the route the other way round is clearly easier on
   the wind, the panel says so and offers to flip it (⇄ in the table). The forecast comes from
   [Open-Meteo](https://open-meteo.com/) (free, no key); only about 2 to 21 points along the route are sent.
+
+![Ride weather: a calendar with the forecast per day, and the route coloured by head- and tailwind with wind arrows](docs/screenshots/weather.webp)
 
 - **Search for places** (Utilities menu, or *Places…* in a route's panel): the places along a
   route, from **your places** and/or **OpenStreetMap**, within a distance you choose (100 m to
@@ -628,8 +632,9 @@ cd web && npm test
 The pytest run includes a check that backups made by the page restore on the server and the
 other way round (it needs Node; skipped without it).
 
-The screenshots in this README are made with `docs/screenshots/take_screenshots.py` (Playwright,
-driving your installed Chrome). It drives the page served by two scratch rerouter servers and
+The screenshots in this README (`docs/screenshots/*.webp`) are taken by hand of the public site,
+rerouter.eu. `docs/screenshots/take_screenshots.py` (Playwright, driving your installed Chrome)
+made the earlier automated ones: it drives the page served by two scratch rerouter servers and
 can fill their libraries itself, by importing GPX files through the Import screen (`--seed`) or
 by restoring backups (`--restore`); its docstring explains the setup. It's a docs helper, not
 part of the app, so Playwright isn't in the requirements.
