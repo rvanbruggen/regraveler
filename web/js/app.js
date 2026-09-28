@@ -5,7 +5,7 @@ import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from 
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
-import { OSM_TAGS, isPlacesFileName, parsePlacesCsv, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
+import { OSM_TAGS, isPlacesFileName, parsePlacesCsv, readAreasFile, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
 import { drawProfile, nearestIndex } from "./profile.js";
 import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
@@ -36,7 +36,7 @@ function el(tag, attrs = {}, ...children) {
 }
 
 /** Replace a node's children, skipping null / false ones (el() does that for its own children). */
-const setChildren = (node, ...kids) => node.replaceChildren(...kids.flat().filter((c) => c !== null && c !== undefined && c !== false));
+const setChildren = (node, ...kids) => node.replaceChildren(...kids.flat(Infinity).filter((c) => c !== null && c !== undefined && c !== false));
 
 /** Let the browser paint (a status line) before a long computation starts. */
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
@@ -221,6 +221,9 @@ filterForm.addEventListener("input", () => {
 });
 filterForm.addEventListener("reset", () => {
   state.ids = [];
+  // Hidden fields keep their value on a reset: clear them.
+  filterForm.elements.coll.value = "";
+  filterForm.elements.area.value = "";
   setTimeout(refresh, 0);
 });
 filterForm.addEventListener("submit", (e) => e.preventDefault());
@@ -274,7 +277,10 @@ async function refresh() {
   if (currentView === "map") jobs.push((overview.loading = loadMap()));
   await Promise.all(jobs);
   // The library may have been reloaded (restore, clear, a set added): its places too.
-  for (const e of layeredMaps) drawPlaces(e);
+  for (const e of layeredMaps) {
+    drawPlaces(e);
+    drawAreas(e);
+  }
   if (currentView === "places") renderPlaces();
 }
 
@@ -291,6 +297,7 @@ async function loadRoutes() {
   [...checked].forEach((id) => shown.has(id) || checked.delete(id));
   updateIdsNote();
   renderTable();
+  renderCatalog();
 }
 
 function renderTable() {
@@ -348,6 +355,7 @@ function renderSelection() {
   if (n === 0) {
     toggleTagPanel(false);
     toggleExportPanel(false);
+    toggleCollPanel(false);
   }
   else if (!$("#tag-panel").hidden) renderTagPanel();
   $("#sel-count").textContent = `${n} selected`;
@@ -388,6 +396,7 @@ function toggleExportPanel(open) {
   $("#sel-export").setAttribute("aria-expanded", String(open));
   if (open) {
     toggleTagPanel(false);
+    $("#coll-panel").hidden = true;
     $("#export-status").textContent = "";
     $("#export-form").elements.title.focus();
   }
@@ -455,6 +464,7 @@ function toggleTagPanel(open) {
   if (open) {
     $("#export-panel").hidden = true;
     $("#sel-export").setAttribute("aria-expanded", "false");
+    $("#coll-panel").hidden = true;
     renderTagPanel();
     $("#tag-add").focus();
   }
@@ -637,6 +647,13 @@ function addMapLayers(map) {
   control.addOverlay(entry.places, "Places");
   entry.osm = L.layerGroup().addTo(map); // places from OpenStreetMap, when asked for
   if (placesShown()) entry.places.addTo(map);
+  entry.areas = L.layerGroup();
+  control.addOverlay(entry.areas, "Areas");
+  if (areasShown()) entry.areas.addTo(map);
+  drawAreas(entry);
+  map.on("overlayadd overlayremove", (e) => {
+    if (e.layer === entry.areas && !entry.applying) setAreasShown(e.type === "overlayadd");
+  });
   entry.grey = L.layerGroup(); // no content: switches the base map to grey
   control.addOverlay(entry.grey, "Grey map");
   if (greyWanted(map.getContainer().id)) {
@@ -756,6 +773,7 @@ async function openDetail(id) {
   loadProfile(r);
   loadPlacesAlong(r);
   offerRouteWaypoints(r);
+  renderDetailCatalog(r.id);
   loadSimilar(r.id);
 }
 
@@ -1717,6 +1735,391 @@ $("#d-delete").addEventListener("click", async () => {
   }
 });
 
+// ------------------------------------------------------------------ catalog (browse tree)
+// Beside the library table: collections, smart collections, areas, and the routes by activity,
+// source, tag and type. A click filters the table and the map (the filter bar shows it).
+
+const ACT_LABEL = (a) => activityLabel(a);
+
+/** Set filter fields (and clear the given others), then refresh. */
+function setFilters(values, clear = []) {
+  const f = filterForm.elements;
+  for (const k of clear) if (f[k]) f[k].value = "";
+  for (const [k, v] of Object.entries(values)) if (f[k]) f[k].value = v ?? "";
+  state.ids = [];
+  refresh();
+}
+
+const CATALOG_FIELDS = ["coll", "area", "activity", "source", "tags", "loop"];
+
+function catNode({ label, count, active, onclick, actions = [], title = null }) {
+  return el("div", { class: `cat-node${active ? " active" : ""}`, title: title || label, onclick },
+    el("span", { class: "cat-name" }, label),
+    el("span", { class: "cat-count" }, String(count)),
+    actions.length ? el("span", { class: "cat-actions" }, actions.map(([text, tip, fn]) =>
+      el("a", { title: tip, onclick: (e) => { e.stopPropagation(); fn(); } }, text))) : null);
+}
+
+function renderCatalog() {
+  const box = $("#catalog");
+  if (!svc.library()) return;
+  const cat = svc.catalog();
+  const view = $("#view-library");
+  const show = cat.total > 0;
+  box.hidden = !show;
+  view.classList.toggle("with-catalog", show);
+  if (!show) return;
+  const f = filterForm.elements;
+  const cur = { coll: f.coll.value, area: f.area.value, activity: f.activity.value, source: f.source.value, tags: f.tags.value.trim(), loop: f.loop.value };
+  const toggle = (field, value) => () => setFilters({ [field]: cur[field] === String(value) ? "" : value });
+  const openState = (name) => {
+    try { return localStorage.getItem(`rerouter.catalog.${name}`) !== "0"; } catch { return true; }
+  };
+  const section = (name, title, content, extra = null) => {
+    const d = el("details", { open: openState(name) }, el("summary", {}, title), ...[].concat(content), extra);
+    d.addEventListener("toggle", () => { try { localStorage.setItem(`rerouter.catalog.${name}`, d.open ? "1" : "0"); } catch { /* fine */ } });
+    return d;
+  };
+
+  const collTree = (nodes) => el("ul", {}, nodes.map((c) => el("li", {},
+    catNode({
+      label: c.name, count: c.count, active: cur.coll === c.id, onclick: toggle("coll", c.id), title: svc.collectionPath(c.id),
+      actions: [
+        ["＋", "New collection inside this one", () => newCollection(c.id)],
+        ["✎", "Rename", () => renameCollection(c)],
+        ["✕", "Remove this collection (the routes stay)", () => removeCollection(c)],
+      ],
+    }),
+    c.children.length ? collTree(c.children) : null)));
+
+  const smartList = el("ul", {}, cat.smart.map((s) => el("li", {}, catNode({
+    label: s.name, count: s.count, active: filterQueryNow() === s.query, title: `Filter: ${s.query}`,
+    onclick: () => applySmart(s),
+    actions: [
+      ["✎", "Rename, or save the current filters under this name", () => renameSmart(s)],
+      ["✕", "Remove this smart collection", async () => { if (confirm(`Remove the smart collection “${s.name}”?`)) { await svc.deleteSmart(s.id); renderCatalog(); } }],
+    ],
+  }))));
+
+  const areaFile = el("input", { type: "file", accept: ".kml,.kmz", hidden: true, onchange: (e) => importAreasFile(e.target) });
+  const areaList = el("ul", {}, cat.areas.map((a) => el("li", {}, catNode({
+    label: a.name, count: a.count, active: cur.area === a.id, onclick: toggle("area", a.id),
+    title: `${a.name}: routes that start in this area`,
+    actions: [
+      ["✎", "Rename", async () => { const n = prompt("Name of the area", a.name); if (n && n.trim()) { await svc.saveArea({ id: a.id, name: n }); refresh(); } }],
+      ["✕", "Remove this area", async () => { if (confirm(`Remove the area “${a.name}”?`)) { await svc.deleteArea(a.id); if (cur.area === a.id) f.area.value = ""; refresh(); } }],
+    ],
+  }))));
+
+  const valueList = (items, field, label = (v) => v) => el("ul", {}, items.map((x) => el("li", {},
+    catNode({ label: label(x.value), count: x.count, active: cur[field] === String(x.value), onclick: toggle(field, x.value) }))));
+  const TAGS_SHOWN = 25;
+
+  setChildren(box,
+    catNode({
+      label: "All routes", count: cat.total, active: CATALOG_FIELDS.every((k) => !cur[k]),
+      onclick: () => setFilters({}, CATALOG_FIELDS),
+    }),
+    section("collections", "Collections", cat.collections.length ? collTree(cat.collections) : el("p", { class: "muted small" }, "Groups of routes you make: select routes in the table, then Collection…"),
+      el("a", { class: "cat-add", onclick: () => newCollection(null) }, "＋ new collection")),
+    section("smart", "Smart collections", cat.smart.length ? smartList : el("p", { class: "muted small" }, "Saved filters that keep themselves up to date."),
+      el("a", { class: "cat-add", title: "Save the filters you have set now", onclick: saveCurrentAsSmart }, "＋ save the current filters")),
+    section("areas", "Areas", cat.areas.length ? areaList : el("p", { class: "muted small" }, "Your own regions, e.g. Vlaamse Ardennen: routes that start inside."),
+      el("div", {},
+        el("a", { class: "cat-add", title: "Draw an area on the Map", onclick: () => { showView("map"); showOverview().then(() => startDrawingArea(overview.map)); } }, "＋ draw on the map"),
+        el("label", { class: "cat-add", title: "Areas drawn in Google My Maps (KML/KMZ)" }, "＋ import KML", areaFile))),
+    section("activity", "Activity", valueList(cat.activities, "activity", ACT_LABEL)),
+    cat.sources.length ? section("source", "Source", valueList(cat.sources, "source")) : null,
+    cat.tags.length ? section("tags", "Tags", [valueList(cat.tags.slice(0, TAGS_SHOWN), "tags"),
+      cat.tags.length > TAGS_SHOWN ? el("p", { class: "muted small" }, `… and ${cat.tags.length - TAGS_SHOWN} more (type them in the Tags filter)`) : null]) : null,
+    section("type", "Type", valueList(cat.loops.filter((x) => x.count), "loop", (v) => (v === "true" ? "Loops" : "Point to point"))),
+  );
+  renderFilterChips();
+}
+
+const filterQueryNow = () => svc.filterQuery(filterParams());
+
+/** Chips in the filter bar for the filters that have no field of their own (collection, area). */
+function renderFilterChips() {
+  const f = filterForm.elements;
+  const chips = [];
+  if (f.coll.value) {
+    const c = svc.library()?.getDoc("collection", f.coll.value);
+    chips.push(el("span", { class: "filter-chip", title: "Only routes in this collection (and the ones inside it)" },
+      `In: ${c ? svc.collectionPath(c.id) : "a removed collection"}`, el("a", { title: "Show all routes again", onclick: () => setFilters({ coll: "" }) }, "×")));
+  }
+  if (f.area.value) {
+    const a = svc.library()?.getDoc("area", f.area.value);
+    chips.push(el("span", { class: "filter-chip", title: "Only routes that start in this area" },
+      `Starts in: ${a ? a.name : "a removed area"}`, el("a", { title: "Show all routes again", onclick: () => setFilters({ area: "" }) }, "×")));
+  }
+  $("#filter-chips").replaceChildren(...chips);
+}
+
+function applySmart(s) {
+  const p = new URLSearchParams(s.query);
+  const f = filterForm.elements;
+  for (const k of ["q", "min_distance", "max_distance", "min_gain", "max_gain", "min_paved", "max_paved", "min_quality", "source", "loop", "activity", "coll", "area"]) {
+    if (f[k]) f[k].value = p.get(k) ?? "";
+  }
+  f.tags.value = p.getAll("tags").join(", ");
+  state.ids = [];
+  refresh();
+}
+
+async function saveCurrentAsSmart() {
+  const q = filterQueryNow();
+  if (!q) return alert("Set some filters first (distance, activity, tags, …): a smart collection saves them under a name.");
+  const name = prompt("Name for these filters", "");
+  if (!name || !name.trim()) return;
+  try {
+    await svc.saveSmart({ name, query: q });
+    renderCatalog();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function renameSmart(s) {
+  const name = prompt(`Name of the smart collection (its filters: ${s.query})`, s.name);
+  if (!name || !name.trim()) return;
+  const useNow = filterQueryNow() && filterQueryNow() !== s.query && confirm("Also replace its filters with the ones you have set now?");
+  await svc.saveSmart({ id: s.id, name, query: useNow ? filterQueryNow() : s.query });
+  renderCatalog();
+}
+
+/** A collection path "Trips › Ardennes 2026": made where missing; returns the last one. */
+async function collectionFromPath(path, parent = null) {
+  let c = null;
+  for (const part of path.split(/\s*[›>\/]\s*/).map((x) => x.trim()).filter(Boolean)) {
+    c = await svc.createCollection({ name: part, parent_id: parent });
+    parent = c.id;
+  }
+  return c;
+}
+
+async function newCollection(parentId) {
+  const where = parentId ? ` inside “${svc.collectionPath(parentId)}”` : "";
+  const name = prompt(`Name of the new collection${where} (use › for one inside another)`, "");
+  if (!name || !name.trim()) return;
+  await collectionFromPath(name, parentId);
+  renderCatalog();
+}
+
+async function renameCollection(c) {
+  const name = prompt("Name of the collection", c.name);
+  if (!name || !name.trim()) return;
+  await svc.updateCollection(c.id, { name });
+  renderCatalog();
+  renderFilterChips();
+}
+
+async function removeCollection(c) {
+  if (!confirm(`Remove the collection “${svc.collectionPath(c.id)}”? The routes stay in the library` +
+    (c.children.length ? "; the collections inside it move up a level." : "."))) return;
+  await svc.deleteCollection(c.id);
+  if (filterForm.elements.coll.value === c.id) filterForm.elements.coll.value = "";
+  refresh();
+}
+
+async function importAreasFile(input) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  try {
+    const found = await readAreasFile(new Uint8Array(await file.arrayBuffer()), file.name);
+    const res = await svc.importAreas(found);
+    alert(`${file.name}: ${res.added} area${res.added === 1 ? "" : "s"} added` + (res.replaced ? `, ${res.replaced} replaced (same name)` : "") + ".");
+    refresh();
+  } catch (err) {
+    alert(`${file.name}: ${err.message}`);
+  }
+}
+
+$("#catalog-toggle").addEventListener("click", () => {
+  const box = $("#catalog");
+  const open = box.classList.toggle("collapsed") === false;
+  $("#catalog-toggle").setAttribute("aria-expanded", String(open));
+  $("#catalog-toggle").textContent = open ? "Browse ▴" : "Browse ▾";
+});
+if (matchMedia("(max-width: 800px)").matches) $("#catalog").classList.add("collapsed");
+
+// ---- selected routes into a collection
+
+function toggleCollPanel(open) {
+  $("#coll-panel").hidden = !open;
+  $("#sel-coll").setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  toggleTagPanel(false);
+  toggleExportPanel(false);
+  $("#coll-panel").hidden = false;
+  $("#sel-coll").setAttribute("aria-expanded", "true");
+  const colls = svc.collections().map((c) => ({ id: c.id, path: svc.collectionPath(c.id) })).sort((a, b) => a.path.localeCompare(b.path));
+  $("#coll-target").replaceChildren(el("option", { value: "" }, colls.length ? "— choose a collection —" : "— no collections yet —"),
+    ...colls.map((c) => el("option", { value: c.id }, c.path)));
+  const cur = filterForm.elements.coll.value;
+  if (cur) $("#coll-target").value = cur;
+  const rm = $("#coll-remove");
+  rm.hidden = !cur;
+  if (cur) rm.textContent = `Remove from “${svc.collectionPath(cur)}”`;
+  $("#coll-status").textContent = "";
+}
+
+$("#sel-coll").addEventListener("click", () => toggleCollPanel($("#coll-panel").hidden));
+$("#coll-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const ids = [...checked];
+  const newName = $("#coll-new").value.trim();
+  try {
+    const target = newName ? await collectionFromPath(newName) : svc.library().getDoc("collection", $("#coll-target").value);
+    if (!target) return ($("#coll-status").textContent = "Choose a collection, or type the name of a new one.");
+    const res = await svc.addToCollection(target.id, ids);
+    $("#coll-new").value = "";
+    const msg = `${res.added} route${res.added === 1 ? "" : "s"} added to “${svc.collectionPath(target.id)}”` +
+      (ids.length - res.added ? ` (${ids.length - res.added} already in it)` : "") + ".";
+    toggleCollPanel(true); // the list of collections, with a new one in it
+    $("#coll-target").value = target.id;
+    $("#coll-status").textContent = msg;
+    renderCatalog();
+    if (selectedId) renderDetailCatalog(selectedId);
+  } catch (err) {
+    $("#coll-status").textContent = `Error: ${err.message}`;
+  }
+});
+$("#coll-remove").addEventListener("click", async () => {
+  const cur = filterForm.elements.coll.value;
+  if (!cur) return;
+  const res = await svc.removeFromCollection(cur, [...checked]);
+  $("#coll-status").textContent = `${res.removed} route${res.removed === 1 ? "" : "s"} taken out of “${svc.collectionPath(cur)}”.`;
+  checked.clear();
+  await refresh();
+});
+
+// ---- in the route panel
+
+function renderDetailCatalog(id) {
+  const box = $("#d-catalog");
+  const colls = svc.collectionsOf(id);
+  const areasIn = svc.areasOf(id);
+  const all = svc.collections().map((c) => ({ id: c.id, path: svc.collectionPath(c.id) }))
+    .filter((c) => !colls.some((x) => x.id === c.id)).sort((a, b) => a.path.localeCompare(b.path));
+  setChildren(box,
+    el("span", { class: "muted" }, "Collections: "),
+    colls.length ? colls.flatMap((c, i) => [i ? " · " : "",
+      el("a", { class: "link", title: "Show this collection", onclick: () => { showView("library"); setFilters({ coll: c.id }); } }, c.path),
+      el("a", { class: "link", title: "Take the route out of this collection", onclick: async () => { await svc.removeFromCollection(c.id, [id]); renderDetailCatalog(id); refresh(); } }, " ×")])
+      : el("span", { class: "muted" }, "none"),
+    " ",
+    el("select", {
+      class: "osm-range", "aria-label": "Add this route to a collection",
+      onchange: async (e) => {
+        const v = e.target.value;
+        e.target.value = "";
+        if (!v) return;
+        const target = v === "new" ? await (async () => { const n = prompt("Name of the new collection (use › for one inside another)"); return n && n.trim() ? collectionFromPath(n) : null; })()
+          : svc.library().getDoc("collection", v);
+        if (!target) return;
+        await svc.addToCollection(target.id, [id]);
+        renderDetailCatalog(id);
+        refresh();
+      },
+    }, el("option", { value: "" }, "add to…"), all.map((c) => el("option", { value: c.id }, c.path)), el("option", { value: "new" }, "a new collection…")),
+    areasIn.length ? [el("br"), el("span", { class: "muted" }, "Starts in: "),
+      areasIn.flatMap((a, i) => [i ? " · " : "", el("a", { class: "link", onclick: () => { showView("library"); setFilters({ area: a.id }); } }, a.name)])] : null);
+}
+
+// ---- areas on the maps, and drawing one
+
+const AREAS_KEY = "rerouter.showAreas";
+function areasShown() {
+  try { return localStorage.getItem(AREAS_KEY) === "1"; } catch { return false; }
+}
+
+function drawAreas(entry) {
+  if (!entry.areas || !svc.library()) return;
+  entry.areas.clearLayers();
+  const active = filterForm.elements.area.value;
+  for (const a of svc.areas()) {
+    const on = a.id === active;
+    L.polygon(a.polygon, { color: "#6a1b9a", weight: on ? 3 : 2, dashArray: on ? null : "6 4", fillOpacity: on ? 0.08 : 0.04, interactive: false })
+      .bindTooltip(a.name, { permanent: true, direction: "center", className: "area-label" })
+      .addTo(entry.areas);
+  }
+}
+
+let drawing = null; // {map, points, line, button}
+
+function startDrawingArea(map) {
+  if (drawing) return;
+  const entry = layeredMaps.find((x) => x.map === map);
+  const button = entry?.areaButton;
+  const points = [];
+  const line = L.polyline([], { color: "#6a1b9a", weight: 2, dashArray: "4 4" }).addTo(map);
+  const onClick = (e) => {
+    points.push([e.latlng.lat, e.latlng.lng]);
+    line.setLatLngs(points.length > 2 ? [...points, points[0]] : points);
+    if (button) button.textContent = points.length < 3 ? `Click the corners… (${points.length})` : `Finish the area (${points.length} points)`;
+  };
+  drawing = { map, points, line, button, onClick };
+  map.on("click", onClick);
+  map.doubleClickZoom.disable();
+  map.getContainer().classList.add("adding-place");
+  if (button) {
+    button.classList.add("active");
+    button.textContent = "Click the corners… (0)";
+  }
+}
+
+async function finishDrawingArea(save) {
+  if (!drawing) return;
+  const { map, points, line, button, onClick } = drawing;
+  drawing = null;
+  map.off("click", onClick);
+  map.doubleClickZoom.enable();
+  map.getContainer().classList.remove("adding-place");
+  line.remove();
+  if (button) {
+    button.classList.remove("active");
+    button.textContent = "＋ Area";
+  }
+  if (!save || points.length < 3) return;
+  const name = prompt("Name of the area (e.g. Vlaamse Ardennen)", "");
+  if (!name || !name.trim()) return;
+  try {
+    await svc.saveArea({ name, polygon: points });
+    setAreasShown(true);
+    refresh();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && drawing) finishDrawingArea(false); });
+
+function setAreasShown(on) {
+  try { localStorage.setItem(AREAS_KEY, on ? "1" : "0"); } catch { /* only for now */ }
+  for (const e of layeredMaps) {
+    if (!e.areas || e.map.hasLayer(e.areas) === on) continue;
+    e.applying = true;
+    on ? e.areas.addTo(e.map) : e.areas.remove();
+    e.applying = false;
+  }
+}
+
+function addAreaControl(map) {
+  const Control = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const b = el("button", { type: "button", class: "poi-add", title: "Draw an area (a region of your own): click its corners, then click this again" }, "＋ Area");
+      L.DomEvent.disableClickPropagation(b);
+      b.addEventListener("click", () => (drawing ? finishDrawingArea(true) : startDrawingArea(map)));
+      const entry = layeredMaps.find((x) => x.map === map);
+      if (entry) entry.areaButton = b;
+      return b;
+    },
+  });
+  new Control().addTo(map);
+}
+
 // ------------------------------------------------------------------ import
 
 let pending = []; // [{name, path, size, data (bytes), folder, source_name, source_url, activity, tags}]
@@ -2098,9 +2501,10 @@ function showOverview() {
     overview.routeLayer = L.layerGroup().addTo(m);
     overview.proxLayer = L.layerGroup().addTo(m);
     overview.sharedRenderer = L.canvas({ pane: "shared" });
-    m.on("click", () => { if (!addingPlace) clearFocus(); });
+    m.on("click", () => { if (!addingPlace && !drawing) clearFocus(); });
     addPlaceControl(m);
     addOsmControl(m);
+    addAreaControl(m);
     overview.map = m;
   }
   // The container was hidden; let Leaflet measure it again.

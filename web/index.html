@@ -67,6 +67,9 @@
       </label>
       <label class="wide">Tags (all of) <input type="text" name="tags" list="tag-list" placeholder="comma separated"></label>
       <datalist id="tag-list"></datalist>
+      <input type="hidden" name="coll">
+      <input type="hidden" name="area">
+      <span id="filter-chips" class="filter-chips"></span>
       <button type="reset" class="secondary">Clear</button>
     </form>
 
@@ -100,9 +103,11 @@
       </div>
     </div>
     <p id="backup-note" class="backup-note" hidden></p>
+    <aside id="catalog" class="catalog" hidden></aside>
 
     <div class="table-head">
-      <p><span id="count" class="muted"></span> <span id="surface-job" class="muted small"></span>
+      <p><button type="button" id="catalog-toggle" class="secondary small-btn" aria-controls="catalog" aria-expanded="false">Browse ▾</button>
+        <span id="count" class="muted"></span> <span id="surface-job" class="muted small"></span>
         · <a class="link small" id="suggest-names" title="Name routes after their start town and the places they visit">suggest names…</a></p>
       <div id="sel-bar" hidden>
         <strong id="sel-count"></strong>
@@ -112,6 +117,7 @@
         <button type="button" id="sel-surface" class="secondary" title="Estimate paved % from OpenStreetMap (asks the BRouter server; one route at a time)">Estimate surface</button>
         <select id="sel-activity" class="activity-select" data-any="Set activity…" aria-label="Set the activity of the selected routes"></select>
         <button type="button" id="sel-tags" class="secondary" aria-expanded="false" aria-controls="tag-panel">Tags…</button>
+        <button type="button" id="sel-coll" class="secondary" aria-expanded="false" aria-controls="coll-panel">Collection…</button>
         <button type="button" id="sel-rename" class="secondary" title="Name after start town and places visited">Rename…</button>
         <button type="button" id="sel-remove" class="danger">Remove</button>
         <a class="link small" id="sel-clear">clear selection</a>
@@ -131,6 +137,17 @@
         (e.g. for a set you share or publish)</label>
       <label class="check small"><input type="checkbox" name="places" form="export-form" checked> Include the places along these routes</label>
       <span id="export-status" class="muted small"></span>
+    </div>
+    <div id="coll-panel" class="tag-panel" hidden>
+      <form id="coll-form" class="tag-add" autocomplete="off">
+        <label>Add the selected routes to
+          <select id="coll-target"></select>
+        </label>
+        <label>or a new collection <input id="coll-new" placeholder="e.g. Trips › Ardennes 2026"></label>
+        <button type="submit">Add</button>
+        <button type="button" id="coll-remove" class="secondary" hidden></button>
+      </form>
+      <span id="coll-status" class="muted small"></span>
     </div>
     <div id="tag-panel" class="tag-panel" hidden>
       <form id="tag-add-form" class="tag-add" autocomplete="off">
@@ -641,6 +658,7 @@
       <span id="d-status" class="muted"></span>
     </div>
   </form>
+  <p id="d-catalog" class="small"></p>
   <p id="d-rides" class="small" hidden></p>
   <p id="d-derived" class="small" hidden></p>
   <p id="d-file" class="muted small"></p>

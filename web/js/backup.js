@@ -10,6 +10,7 @@
 
 import { VERSION, config } from "./config.js";
 import { newId } from "./db.js";
+import { pointInPolygon } from "./geo.js";
 import { DEFAULT_CATEGORIES, isDuplicatePlace, placesAlong } from "./poi.js";
 import { makeZip, readZip } from "./zip.js";
 import { extensionOf } from "./trackfile.js";
@@ -77,6 +78,7 @@ export async function makeSelection(library, ids, { title = null, description = 
     files: files.map((f) => ({ hash: f.hash, name: f.name })),
     ...(places ? placesOfSet(library, routes, personal) : {}),
   };
+  manifest.docs = [...(manifest.docs || []), ...catalogOfSet(library, routes)];
   return makeZip([
     { name: "library.json", data: JSON.stringify(manifest) },
     ...files.map((f) => ({ name: fileEntry(f), data: f.data })),
@@ -100,6 +102,62 @@ function placesOfSet(library, routes, personal) {
   const builtIn = new Set(DEFAULT_CATEGORIES.map((c) => c.id));
   const saved = Array.isArray(library.settings.POI_CATEGORIES) ? library.settings.POI_CATEGORIES : [];
   return { docs: [...lists, ...places], categories: saved.filter((c) => used.has(c.id) && !builtIn.has(c.id)) };
+}
+
+/**
+ * The collections that hold routes of the set (only those routes; their parent collections
+ * too, for the path) and the areas the set's routes start in.
+ */
+function catalogOfSet(library, routes) {
+  const ids = new Set(routes.map((r) => r.id));
+  const colls = library.docsOf("collection");
+  const byId = new Map(colls.map((c) => [c.id, c]));
+  const keep = new Map();
+  for (const c of colls) {
+    const inSet = c.route_ids.filter((id) => ids.has(id));
+    if (!inSet.length) continue;
+    keep.set(c.id, { ...c, route_ids: inSet });
+    for (let p = byId.get(c.parent_id); p && !keep.has(p.id); p = byId.get(p.parent_id)) keep.set(p.id, { ...p, route_ids: [] });
+  }
+  const areas = library.docsOf("area").filter((a) => routes.some((r) => pointInPolygon(r.start_lat, r.start_lon, a.polygon)));
+  return [...keep.values(), ...areas];
+}
+
+/**
+ * Add the collections and areas of a set (or a backup) to a library: collections with the
+ * same name in the same place are merged (routes by their new ids, `idMap`: id in the set ->
+ * id in the library), areas the library already has (by name) are left as they are.
+ */
+async function addCatalog(library, docs, idMap) {
+  const colls = docs.filter((d) => d.kind === "collection");
+  const byId = new Map(colls.map((c) => [c.id, c]));
+  const depth = (c) => {
+    let n = 0;
+    for (let p = c, seen = new Set(); p?.parent_id && !seen.has(p.id); p = byId.get(p.parent_id)) seen.add(p.id), n++;
+    return n;
+  };
+  const mine = library.docsOf("collection");
+  const target = new Map(); // id in the set -> collection in the library
+  let added = 0;
+  for (const c of [...colls].sort((a, b) => depth(a) - depth(b))) {
+    const parent = c.parent_id ? target.get(c.parent_id)?.id ?? null : null;
+    let t = mine.find((m) => (m.parent_id || null) === parent && m.name.toLowerCase() === String(c.name).toLowerCase());
+    if (!t) {
+      [t] = await library.saveDocs([{ kind: "collection", name: c.name, parent_id: parent, route_ids: [] }]);
+      mine.push(t);
+      added++;
+    }
+    target.set(c.id, t);
+    const more = (c.route_ids || []).map((id) => idMap.get(id)).filter((id) => id != null && !t.route_ids.includes(id));
+    if (more.length) {
+      t.route_ids = [...t.route_ids, ...more];
+      await library.saveDocs([t]);
+    }
+  }
+  const names = new Set(library.docsOf("area").map((a) => a.name.toLowerCase()));
+  const areas = docs.filter((d) => d.kind === "area" && Array.isArray(d.polygon) && !names.has(String(d.name).toLowerCase()));
+  if (areas.length) await library.saveDocs(areas.map((a) => ({ kind: "area", name: a.name, polygon: a.polygon })));
+  return { collections: added, areas: areas.length };
 }
 
 /**
@@ -225,5 +283,9 @@ export async function addBackup(library, data) {
   // Places: those of a set, or of a whole backup (its own categories are in its settings).
   const categories = data.categories?.length ? data.categories : data.settings?.POI_CATEGORIES || [];
   const placesAdded = await addPlaces(library, data.docs || [], categories);
-  return { added: records.length, skipped: data.routes.length - records.length, ids: records.map((r) => r.id), places: placesAdded };
+  const cat = await addCatalog(library, data.docs || [], idMap);
+  return {
+    added: records.length, skipped: data.routes.length - records.length, ids: records.map((r) => r.id),
+    places: placesAdded, collections: cat.collections, areas: cat.areas,
+  };
 }

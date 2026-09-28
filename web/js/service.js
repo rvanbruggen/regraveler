@@ -5,7 +5,7 @@
 import * as brouter from "./brouter.js";
 import * as cb from "./combiner.js";
 import { config } from "./config.js";
-import { round, simplifyLatLon, toMetric } from "./geo.js";
+import { pointInPolygon, round, simplifyLatLon, toMetric } from "./geo.js";
 import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
 import * as osm from "./osm.js";
@@ -133,6 +133,8 @@ export function filtersFrom(params) {
     order: p.get("order") || "asc",
     ids: p.getAll("ids").map(Number).filter(Boolean),
     activity: p.get("activity") || null,
+    coll: p.get("coll") || null, // a collection (with its sub-collections)
+    area: p.get("area") || null, // an area: routes that start inside it
   };
 }
 
@@ -143,6 +145,8 @@ export function filterRoutes(f = {}) {
   const q = f.q ? f.q.toLowerCase() : null;
   const ids = f.ids?.length ? new Set(f.ids) : null;
   const wanted = normaliseTags(f.tags || []);
+  const inColl = f.coll ? new Set(collectionRouteIds(f.coll)) : null;
+  const area = f.area ? lib.getDoc("area", f.area) : null;
   let routes = lib.all().filter((r) =>
     (!q || r.name.toLowerCase().includes(q) || (r.notes || "").toLowerCase().includes(q)) &&
     ge(r.distance_km, f.min_distance) && le(r.distance_km, f.max_distance) &&
@@ -153,6 +157,8 @@ export function filterRoutes(f = {}) {
     (f.loop == null || r.is_loop === f.loop) &&
     (!f.activity || r.activity === f.activity) &&
     (!ids || ids.has(r.id)) &&
+    (!inColl || inColl.has(r.id)) &&
+    (!f.area || (area && startsIn(r, area))) &&
     wanted.every((t) => (r.tags || []).includes(t))
   );
   const sort = SORTABLE.has(f.sort) ? f.sort : "name";
@@ -337,7 +343,13 @@ export async function deleteRoutes(ids) {
     trackCache.delete(Number(id));
     profileCache.delete(Number(id));
   });
-  return { deleted: await lib.deleteRoutes(ids) };
+  const deleted = await lib.deleteRoutes(ids);
+  // Out of the collections too.
+  const gone = new Set(ids.map(Number));
+  const changed = lib.docsOf("collection").filter((c) => c.route_ids.some((id) => gone.has(id)));
+  for (const c of changed) c.route_ids = c.route_ids.filter((id) => !gone.has(id));
+  await lib.saveDocs(changed);
+  return { deleted };
 }
 
 /** The original file of a route (GPX, TCX or FIT, never modified): {filename, data (bytes)}. */
@@ -1542,4 +1554,204 @@ export async function withPlacesSave(req) {
     if (config.SURFACE_AUTO_ESTIMATE) surfaceJob.enqueue([created.id]);
   }
   return { id: created.id, name: created.name };
+}
+
+// ------------------------------------------------------------------ catalog
+// Documents: "collection" {name, parent_id, route_ids} (made by hand, nestable), "smart"
+// {name, query} (a saved filter), "area" {name, polygon: [[lat, lon], ...]} (routes that
+// start inside it). The rest of the catalog (activity, source, tags, loop) comes from the
+// routes themselves.
+
+const byNameCi = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+
+export const collections = () => lib.docsOf("collection").sort(byNameCi);
+export const smartCollections = () => lib.docsOf("smart").sort(byNameCi);
+export const areas = () => lib.docsOf("area").sort(byNameCi);
+
+function getColl(id) {
+  const c = lib.getDoc("collection", id);
+  if (!c) throw new ServiceError("Collection not found", 404);
+  return c;
+}
+
+/** The ids of a collection and all collections below it. */
+function collectionFamily(id) {
+  const all = lib.docsOf("collection");
+  const out = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const c of all) if (c.parent_id && out.has(c.parent_id) && !out.has(c.id)) out.add(c.id), (grew = true);
+  }
+  return out;
+}
+
+/** Route ids in a collection or any collection below it (only routes that still exist). */
+export function collectionRouteIds(id) {
+  const fam = collectionFamily(id);
+  const ids = new Set();
+  for (const c of lib.docsOf("collection")) if (fam.has(c.id)) for (const r of c.route_ids) if (lib.get(r)) ids.add(r);
+  return [...ids];
+}
+
+/** "Trips › Ardennes 2026" */
+export function collectionPath(id) {
+  const names = [];
+  const seen = new Set();
+  for (let c = lib.getDoc("collection", id); c && !seen.has(c.id); c = c.parent_id ? lib.getDoc("collection", c.parent_id) : null) {
+    seen.add(c.id);
+    names.unshift(c.name);
+  }
+  return names.join(" › ");
+}
+
+export async function createCollection({ name, parent_id = null }) {
+  name = String(name || "").trim();
+  if (!name) throw new ServiceError("A collection needs a name");
+  if (parent_id) getColl(parent_id);
+  const twin = lib.docsOf("collection").find((c) => (c.parent_id || null) === (parent_id || null) && c.name.toLowerCase() === name.toLowerCase());
+  if (twin) return twin;
+  const [c] = await lib.saveDocs([{ kind: "collection", name, parent_id: parent_id || null, route_ids: [] }]);
+  return c;
+}
+
+/** Rename and/or move a collection (parent_id null: to the top). */
+export async function updateCollection(id, { name, parent_id } = {}) {
+  const c = getColl(id);
+  if (name != null) {
+    name = String(name).trim();
+    if (!name) throw new ServiceError("A collection needs a name");
+    c.name = name;
+  }
+  if (parent_id !== undefined) {
+    if (parent_id && collectionFamily(id).has(parent_id)) throw new ServiceError("A collection can't go inside itself");
+    if (parent_id) getColl(parent_id);
+    c.parent_id = parent_id || null;
+  }
+  await lib.saveDocs([c]);
+  return c;
+}
+
+/** Remove a collection; the collections below it move up a level; the routes stay. */
+export async function deleteCollection(id) {
+  const c = getColl(id);
+  const kids = lib.docsOf("collection").filter((x) => x.parent_id === id);
+  for (const k of kids) k.parent_id = c.parent_id || null;
+  await lib.saveDocs(kids);
+  await lib.deleteDocs([c]);
+}
+
+export async function addToCollection(id, routeIds) {
+  const c = getColl(id);
+  const have = new Set(c.route_ids);
+  const add = routeIds.map(Number).filter((r) => lib.get(r) && !have.has(r));
+  c.route_ids = [...c.route_ids, ...add];
+  await lib.saveDocs([c]);
+  return { added: add.length };
+}
+
+export async function removeFromCollection(id, routeIds) {
+  const c = getColl(id);
+  const out = new Set(routeIds.map(Number));
+  const before = c.route_ids.length;
+  c.route_ids = c.route_ids.filter((r) => !out.has(r));
+  await lib.saveDocs([c]);
+  return { removed: before - c.route_ids.length };
+}
+
+/** The collections a route is in (directly): [{id, path}]. */
+export function collectionsOf(routeId) {
+  return lib.docsOf("collection").filter((c) => c.route_ids.includes(Number(routeId)))
+    .map((c) => ({ id: c.id, path: collectionPath(c.id) }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+// ---- smart collections: saved filters
+
+const SMART_KEYS = ["q", "min_distance", "max_distance", "min_gain", "max_gain", "min_paved", "max_paved", "min_quality", "tags", "source", "loop", "activity", "coll", "area"];
+
+/** The filter part of a query string (no sorting, views or selections). */
+export function filterQuery(params) {
+  const p = new URLSearchParams(params);
+  const out = new URLSearchParams();
+  for (const k of SMART_KEYS) for (const v of p.getAll(k)) if (v !== "") out.append(k, v);
+  return out.toString();
+}
+
+export async function saveSmart({ id = null, name, query }) {
+  name = String(name || "").trim();
+  if (!name) throw new ServiceError("A smart collection needs a name");
+  const q = filterQuery(query);
+  if (!q) throw new ServiceError("Set some filters first: a smart collection is a saved filter");
+  const doc = id ? lib.getDoc("smart", id) : null;
+  if (id && !doc) throw new ServiceError("Smart collection not found", 404);
+  const [s] = await lib.saveDocs([{ ...(doc || { kind: "smart" }), name, query: q }]);
+  return s;
+}
+
+export async function deleteSmart(id) {
+  await lib.deleteDocs([`smart:${id}`]);
+}
+
+// ---- areas
+
+function startsIn(r, area) {
+  return pointInPolygon(r.start_lat, r.start_lon, area.polygon);
+}
+
+export async function saveArea({ id = null, name, polygon }) {
+  name = String(name || "").trim();
+  if (!name) throw new ServiceError("An area needs a name");
+  const doc = id ? lib.getDoc("area", id) : null;
+  if (id && !doc) throw new ServiceError("Area not found", 404);
+  const poly = polygon ?? doc?.polygon;
+  if (!Array.isArray(poly) || poly.length < 3 || poly.some((p) => !Number.isFinite(p[0]) || !Number.isFinite(p[1]))) {
+    throw new ServiceError("An area needs at least three points");
+  }
+  const [a] = await lib.saveDocs([{ ...(doc || { kind: "area" }), name, polygon: poly.map(([la, lo]) => [round(la, 6), round(lo, 6)]) }]);
+  return a;
+}
+
+export async function deleteArea(id) {
+  await lib.deleteDocs([`area:${id}`]);
+}
+
+/** Import areas (polygons) from a KML/KMZ file read by poi.readAreasFile; same names are replaced. */
+export async function importAreas(found) {
+  const mine = lib.docsOf("area");
+  let added = 0, replaced = 0;
+  for (const a of found) {
+    const same = mine.find((m) => m.name.toLowerCase() === a.name.toLowerCase());
+    await saveArea({ id: same?.id || null, name: a.name, polygon: a.polygon });
+    same ? replaced++ : added++;
+  }
+  return { added, replaced };
+}
+
+/** The areas a route starts in. */
+export const areasOf = (routeId) => lib.docsOf("area").filter((a) => startsIn(getRoute(routeId), a)).sort(byNameCi);
+
+// ---- the whole catalog, with counts (for the browse tree)
+
+export function catalog() {
+  const routes = lib.all();
+  const count = (pred) => routes.filter(pred).length;
+  const tally = (key) => {
+    const m = new Map();
+    for (const r of routes) for (const v of [].concat(r[key] ?? [])) if (v) m.set(v, (m.get(v) || 0) + 1);
+    return [...m].map(([value, n]) => ({ value, count: n }));
+  };
+  const colls = lib.docsOf("collection");
+  const tree = (parent) => colls.filter((c) => (c.parent_id || null) === parent).sort(byNameCi)
+    .map((c) => ({ id: c.id, name: c.name, count: collectionRouteIds(c.id).length, children: tree(c.id) }));
+  return {
+    total: routes.length,
+    collections: tree(null),
+    smart: smartCollections().map((s) => ({ id: s.id, name: s.name, query: s.query, count: filterRoutes(filtersFrom(s.query)).length })),
+    areas: areas().map((a) => ({ id: a.id, name: a.name, count: count((r) => startsIn(r, a)) })),
+    activities: config.ACTIVITIES.map((a) => ({ value: a, count: count((r) => r.activity === a) })).filter((x) => x.count),
+    sources: tally("source_name").sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
+    tags: tally("tags").sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
+    loops: [{ value: "true", count: count((r) => r.is_loop) }, { value: "false", count: count((r) => !r.is_loop) }],
+  };
 }

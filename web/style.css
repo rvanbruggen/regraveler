@@ -437,3 +437,36 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .poi-icon.sel span { transform: scale(1.35); box-shadow: 0 0 0 3px var(--accent); }
 /* "Grey map" (layer switcher): the base map in grey, lighter, so the routes stand out. */
 .map-grey .base-tiles { filter: grayscale(1) brightness(1.06) contrast(0.9); }
+
+/* Catalog: the browse tree beside the library table */
+#view-library.with-catalog { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); column-gap: 18px; align-items: start; }
+#view-library.with-catalog > * { grid-column: 2; }
+#view-library.with-catalog > .catalog { grid-column: 1; grid-row: 1 / span 40; position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; }
+#catalog-toggle { display: none; }
+@media (max-width: 800px) {
+  #view-library.with-catalog { display: block; }
+  #catalog-toggle { display: inline-block; }
+  #view-library.with-catalog > .catalog.collapsed { display: none; }
+}
+.small-btn { padding: 2px 8px; font-size: 12px; }
+.catalog { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+.catalog details { margin: 4px 0 8px; }
+.catalog summary { font-weight: 600; cursor: pointer; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.catalog ul { list-style: none; margin: 2px 0; padding: 0; }
+.catalog ul ul { padding-left: 12px; border-left: 1px solid var(--border); margin-left: 4px; }
+.catalog li { margin: 1px 0; }
+.cat-node { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.cat-node:hover { background: var(--accent-soft); }
+.cat-node.active { background: var(--accent); color: #fff; }
+.cat-node.active .cat-count { color: #fff; }
+.cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-count { color: var(--muted); font-size: 11px; }
+.cat-actions { display: none; gap: 2px; }
+.cat-node:hover .cat-actions, .cat-node.active .cat-actions { display: inline-flex; }
+.cat-actions a { font-size: 11px; padding: 0 2px; color: inherit; opacity: 0.8; cursor: pointer; }
+.cat-add { font-size: 12px; color: var(--accent); cursor: pointer; margin: 2px 4px; display: inline-block; }
+.cat-all { font-weight: 600; }
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: end; }
+.filter-chip { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+.filter-chip a { cursor: pointer; margin-left: 4px; font-weight: 700; }
+.area-label { background: none; border: none; box-shadow: none; font-weight: 600; color: #6a1b9a; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }

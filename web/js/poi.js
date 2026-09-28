@@ -71,6 +71,32 @@ function kmlPoint(text) {
  * document). Only points are places; lines and areas are counted in `skipped`.
  */
 export function parseKml(text) {
+  const d = readKml(text);
+  if (!d.layers.length) throw new PlacesError("No places (points) in this file");
+  return d;
+}
+
+/** The areas (polygons) in a KML document: [{name, polygon: [[lat, lon], ...]}] (outer rings). */
+export function parseKmlAreas(text) {
+  const { areas } = readKml(text);
+  if (!areas.length) throw new PlacesError("No areas (polygons) in this file");
+  return areas;
+}
+
+/** Read the areas of a KML or KMZ file (e.g. drawn in Google My Maps). */
+export async function readAreasFile(bytes, filename) {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".kmz")) {
+    const entries = await readZip(bytes);
+    const kml = entries.find((e) => e.name.toLowerCase() === "doc.kml") || entries.find((e) => /\.kml$/i.test(e.name));
+    if (!kml) throw new PlacesError("No KML document in this KMZ file");
+    return parseKmlAreas(kml.data);
+  }
+  if (lower.endsWith(".kml")) return parseKmlAreas(bytes);
+  throw new PlacesError("Areas can be imported from KML or KMZ files (e.g. from Google My Maps)");
+}
+
+function readKml(text) {
   if (typeof text !== "string") text = new TextDecoder("utf-8").decode(text);
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const kml = child(parseXml(text), "kml");
@@ -98,11 +124,26 @@ export function parseKml(text) {
     return icons.get(id) ?? (id || null);
   };
 
-  const layers = [];
+  const layers = [], areas = [];
   let skipped = 0;
+  const ringOf = (poly) => {
+    const outer = child(poly, "outerboundaryis");
+    const ring = outer && child(outer, "linearring");
+    const coords = ring ? textOf(ring, "coordinates") : null;
+    const pts = (coords || "").trim().split(/\s+/).map((t) => t.split(",").map(Number))
+      .filter(([lon, lat]) => Number.isFinite(lat) && Number.isFinite(lon)).map(([lon, lat]) => [lat, lon]);
+    return pts.length >= 3 ? pts : null;
+  };
   const placesIn = (node) => {
     const out = [];
     for (const pm of children(node, "placemark")) {
+      // Areas: a Polygon, or the polygons of a MultiGeometry (the first one).
+      const multi = child(pm, "multigeometry");
+      const poly = child(pm, "polygon") || (multi && child(multi, "polygon"));
+      if (poly) {
+        const ring = ringOf(poly);
+        if (ring) areas.push({ name: textOf(pm, "name") || "Area", polygon: ring });
+      }
       const point = child(pm, "point");
       const ll = point && kmlPoint(textOf(point, "coordinates"));
       if (!ll) {
@@ -130,8 +171,7 @@ export function parseKml(text) {
     }
   };
   walkFolders(doc, null);
-  if (!layers.length) throw new PlacesError("No places (points) in this file");
-  return { name: docName, layers, skipped };
+  return { name: docName, layers, skipped, areas };
 }
 
 /** Read a KMZ file (a zip with a KML document inside). */

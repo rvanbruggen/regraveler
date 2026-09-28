@@ -62,6 +62,26 @@ the full plan and [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 - **Library:** sortable table with filters on activity, distance, elevation gain, paved %,
   quality, tags, source, loop/point-to-point and a text search. Filters are kept in the URL.
+- **Browse (catalog):** beside the library table (on a phone behind *Browse*), a tree to find
+  routes by group; a click filters the table and the map (a chip in the filter bar shows a
+  collection or area, × to show all routes again), and each entry shows its number of routes.
+  - **Collections:** groups you make, one inside another (*Trips › Ardennes 2026*); a route
+    can be in several. Select routes and use **Collection…** (pick one, or type a new name; `›`
+    makes one inside another), or *add to…* in a route's panel, which lists its collections.
+    A collection shows the routes in it and in the collections inside it. ✎ renames, ✕
+    removes a collection (the routes stay; the collections inside it move up a level).
+  - **Smart collections:** saved filters (*save the current filters*), e.g. "gravel, 60–90 km,
+    paved under 40 %", which keep themselves up to date; a click sets the filters again.
+  - **Areas:** your own regions, such as *Vlaamse Ardennen* or *Kempen*: the routes that
+    **start** inside. Draw one on the Map (**＋ Area**: click its corners, then click the
+    button again, Esc to stop) or import them from a KML/KMZ file (areas drawn in Google My
+    Maps). The *Areas* layer (layer button) shows them on the maps; a route's panel says which
+    areas it starts in.
+  - **Activity, source, tags, type** (loop or point to point), counted from the routes.
+
+  Collections and areas are in backups, and *Export set* takes along the collections of the
+  chosen routes (with their parent collections) and the areas they start in; adding the set
+  merges them (same name in the same place: the same collection).
 - **Activity:** every route is a gravel, road, mountain biking or hiking route (routes from
   before 0.6.0 start as gravel). Change it in the route panel, or for a selection with *Set
   activity…*. The activity also picks the combiner's routing profile (gravel → `gravel`,

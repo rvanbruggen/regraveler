@@ -467,3 +467,13 @@ export function partsWithin(a, gridB, tol) {
   }
   return { length, runs };
 }
+
+/** Is [lat, lon] inside the polygon [[lat, lon], ...] (closed or not; ray casting)? */
+export function pointInPolygon(lat, lon, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [yi, xi] = polygon[i], [yj, xj] = polygon[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
