@@ -10,6 +10,7 @@ import {
 import * as places from "../js/places.js";
 import * as svc from "../js/service.js";
 import { config } from "../js/config.js";
+import { parseGpx } from "../js/gpx.js";
 import { makeZip } from "../js/zip.js";
 import { fitFile, gpxXml, linePoints, offset, tcxXml } from "./helpers.js";
 
@@ -371,4 +372,80 @@ test("OpenStreetMap places along a route within a range of your choice", async (
   const south = (q) => Number(/\(([\d.]+),/.exec(q)[1]);
   assert.ok(south(queries[0]) - south(queries[2]) > 0.006);
   await assert.rejects(svc.osmAlongRoute(r.id, { fetchFn }, 10000), /5 km/);
+});
+
+// ------------------------------------------------------------------ search for places (utility)
+
+test("search for places along a route: your places and OpenStreetMap, by kind and range", async () => {
+  const start = [51.0, 4.4];
+  const pts = linePoints({ start, lengthM: 6000, stepM: 50, ele: () => 10 });
+  const { routes: [r] } = await svc.importGpx(gpxXml([["t", pts]]), "Route.gpx");
+  const at = (n, e) => offset(...start, n, e);
+  await svc.addPlace({ ...ll(at(40, 1000)), name: "My café", category: "cafe" });
+  await svc.addPlace({ ...ll(at(600, 2000)), name: "My far water", category: "water" });
+  await svc.addPlace({ ...ll(at(30, 3000)), name: "My photo", category: "photo" });
+  const answer = { elements: [
+    { type: "node", id: 1, lat: at(100, 4000)[0], lon: at(100, 4000)[1], tags: { amenity: "toilets" } },
+    { type: "node", id: 2, lat: at(20, 5000)[0], lon: at(20, 5000)[1], tags: { amenity: "cafe", name: "OSM café" } },
+  ] };
+  let asked = 0;
+  const fetchFn = async () => { asked++; return { ok: true, status: 200, json: async () => answer }; };
+  const find = async (req) => (await svc.findPlacesAlong({ route_id: r.id, range_m: 200, ...req }, { fetchFn })).found;
+
+  const both = await find({ sources: ["mine", "osm"], categories: ["cafe", "water", "toilet"] });
+  assert.deepEqual(both.map((a) => [a.place.name, a.km, a.source]), [["My café", 1, "mine"], ["Toilet", 4, "osm"], ["OSM café", 5, "osm"]]);
+  assert.deepEqual((await find({ sources: ["mine", "osm"], categories: ["cafe", "water"], range_m: 1000 })).map((a) => a.place.name),
+    ["My café", "My far water", "OSM café"]);
+  const before = asked;
+  assert.deepEqual((await find({ sources: ["mine"], categories: ["photo", "cafe"] })).map((a) => a.place.name), ["My café", "My photo"]);
+  assert.equal(asked, before, "your places only: OpenStreetMap is not asked");
+  await assert.rejects(find({ sources: ["mine"], categories: [] }), /at least one kind/);
+  await assert.rejects(find({ sources: [], categories: ["cafe"] }), /where to look/);
+
+  // OpenStreetMap busy: your own places are still found, with a note why the rest is missing.
+  const busy = async () => ({ ok: false, status: 504, json: async () => ({}) });
+  const res = await svc.findPlacesAlong({ route_id: r.id, range_m: 200, sources: ["mine", "osm"], categories: ["cafe", "toilet"] }, { fetchFn: busy });
+  assert.deepEqual(res.found.map((a) => a.place.name), ["My café"]);
+  assert.match(res.osm_error, /busy/);
+  // OpenStreetMap only: then it is an error.
+  await assert.rejects(svc.findPlacesAlong({ route_id: r.id, sources: ["osm"], categories: ["toilet"] }, { fetchFn: busy }), /busy/);
+});
+
+test("a route with places: as waypoints (same track), or ridden to with detours", async () => {
+  const start = [51.0, 4.4];
+  const pts = linePoints({ start, lengthM: 6000, stepM: 50, ele: () => 10 });
+  const { routes: [r] } = await svc.importGpx(gpxXml([["t", pts]]), "Route.gpx");
+  const at = (n, e) => ll(offset(...start, n, e));
+  const places = [
+    { ...at(10, 1000), name: "On the way", category: "water" }, // passed anyway
+    { ...at(400, 3000), name: "Castle", category: "sight" },
+    { ...at(300, 3300), name: "Café", category: "cafe", notes: "closed on Monday" },
+  ];
+  const req = { route_id: r.id, places, straight: true, name: "With places" };
+
+  const wp = await svc.withPlacesPreview({ ...req, waypoints: true, detours: false });
+  assert.equal(wp.extra_km, 0);
+  assert.equal(wp.waypoints, 3);
+  const gpx = parseGpx((await svc.withPlacesGpx({ ...req, waypoints: true, detours: false })).text);
+  assert.deepEqual(gpx.waypoints.map((w) => w.name), ["On the way", "Castle", "Café"]);
+  assert.equal(gpx.waypoints[2].description, "Café / bar\nclosed on Monday");
+  assert.equal(gpx.tracks[0].points.length, pts.length, "the same track");
+  // Saved as a new route on the same track: allowed, linked to the original, not a duplicate.
+  const saved = await svc.withPlacesSave({ ...req, waypoints: true, detours: false });
+  const s = svc.route(saved.id);
+  assert.deepEqual(s.derived_from, [r.id]);
+  assert.equal(s.track_hash, svc.route(r.id).track_hash);
+  assert.equal(svc.library().isIgnored(r.id, s.id), true);
+
+  // Detours: the castle and the café are close together, so one detour through both.
+  const dt = await svc.withPlacesPreview({ ...req, waypoints: false, detours: true });
+  assert.equal(dt.waypoints, 0);
+  assert.equal(dt.detours.length, 1);
+  assert.deepEqual(dt.detours[0].places, ["Castle", "Café"]);
+  // Straight lines 2.2 km → castle → café → 3.9 km: 0.89 + 0.32 + 0.67 = 1.88 km instead of 1.70.
+  assert.ok(Math.abs(dt.extra_km - 0.18) < 0.02, `extra ${dt.extra_km} km`);
+  const line = parseGpx((await svc.withPlacesGpx({ ...req, waypoints: false, detours: true })).text).tracks[0].points;
+  for (const p of places.slice(1)) assert.ok(line.some(([la, lo]) => Math.abs(la - p.lat) < 1e-6 && Math.abs(lo - p.lon) < 1e-6), p.name);
+  await assert.rejects(svc.withPlacesPreview({ ...req, places: [], waypoints: true }), /at least one place/);
+  await assert.rejects(svc.withPlacesPreview({ ...req, waypoints: false, detours: false }), /waypoints, detours or both/);
 });

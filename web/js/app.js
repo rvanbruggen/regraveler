@@ -95,7 +95,7 @@ function fillActivitySelects(activities) {
 let currentView = "library";
 
 // Views reached through the Utilities menu.
-const UTILITIES = ["combine", "restart", "weather", "link", "duplicates", "data"];
+const UTILITIES = ["combine", "restart", "weather", "findplaces", "link", "duplicates", "data"];
 // Views a link (URL hash) can open.
 const LINKABLE_VIEWS = ["library", "map", "places", "import", ...UTILITIES];
 
@@ -113,6 +113,7 @@ function showView(name) {
   if (name === "combine") showCombine();
   if (name === "restart") showRestart();
   if (name === "weather") showWeather();
+  if (name === "findplaces") showFindPlaces();
   if (name === "duplicates") loadDuplicates();
   if (name === "data") showData();
   if (name === "places") renderPlaces();
@@ -190,6 +191,7 @@ function updateHash() {
     if (cb.mode !== "loop") p.set("pattern", cb.mode);
   }
   if (currentView === "restart" && rs.id) p.set("route", rs.id);
+  if (currentView === "findplaces" && fp.id) p.set("route", fp.id);
   if (currentView === "weather" && wx.id) {
     p.set("route", wx.id);
     if (wx.date) p.set("date", wx.date);
@@ -3497,6 +3499,354 @@ $("#d-weather").addEventListener("click", async () => {
   if (wx.id !== id) await setWeatherRoute(id);
 });
 
+// ------------------------------------------------------------------ search for places (utility)
+// Places along a route, from your places and/or OpenStreetMap, shown on a map; a route with
+// the selected ones (as waypoints, and/or ridden to with detours), saved as a new route.
+
+const FP_CATS_KEY = "rerouter.findPlacesKinds";
+const fp = {
+  map: null, loaded: false, loading: null, initial: null,
+  routes: [], byId: new Map(),
+  id: null, route: null,
+  found: [], // [{place, km, off_m, source}]
+  selected: new Set(), // keys of found places
+  preview: null, token: 0, ptoken: 0, nameTouched: false,
+};
+const fpEl = {
+  route: $("#fp-route"), mine: $("#fp-mine"), osm: $("#fp-osm"), range: $("#fp-range"), cats: $("#fp-cats"),
+  search: $("#fp-search"), status: $("#fp-status"), results: $("#fp-results"), tools: $("#fp-tools"), list: $("#fp-list"),
+  make: $("#fp-make"), waypoints: $("#fp-waypoints"), detours: $("#fp-detours"), previewBtn: $("#fp-preview"), keep: $("#fp-keep"),
+  makeStatus: $("#fp-make-status"), stats: $("#fp-stats"), detourList: $("#fp-detour-list"),
+  save: $("#fp-save"), name: $("#fp-name"), saveBtn: $("#fp-save-btn"), download: $("#fp-download"), saved: $("#fp-saved"),
+};
+const fpKey = (a) => a.place.key || a.place.osm_id;
+
+function showFindPlaces() {
+  if (!fp.map) {
+    const m = L.map("findplaces-map", { renderer: L.canvas({ tolerance: 6 }) }).setView([50.9, 4.5], 9);
+    addMapLayers(m);
+    fp.bgLayer = L.layerGroup().addTo(m);
+    fp.routeLayer = L.layerGroup().addTo(m);
+    fp.resultLayer = L.layerGroup().addTo(m);
+    fp.placeLayer = L.layerGroup().addTo(m);
+    fp.map = m;
+    fp.initial = Number(new URLSearchParams(location.hash.slice(1)).get("route")) || null;
+    fpEl.range.replaceChildren(...config.OSM_ROUTE_RANGES_M.map((v) => el("option", { value: v, selected: v === osmRange() }, fmtRange(v))));
+  }
+  renderFindKinds();
+  setTimeout(() => fp.map.invalidateSize(), 0);
+  if (!fp.loaded) fp.loading = loadFindRoutes();
+  return fp.loading;
+}
+
+async function loadFindRoutes() {
+  fp.loaded = true;
+  try {
+    fp.routes = svc.mapRoutes("", 15);
+  } catch (err) {
+    fpEl.status.textContent = `Error loading routes: ${err.message}`;
+    fp.loaded = false;
+    return;
+  }
+  fp.byId = new Map(fp.routes.map((r) => [r.id, r]));
+  const sorted = [...fp.routes].sort((x, y) => x.name.localeCompare(y.name));
+  fpEl.route.replaceChildren(
+    el("option", { value: "" }, sorted.length ? "— choose a route —" : "no routes in the library"),
+    ...sorted.map((r) => el("option", { value: r.id }, `${r.name} (${fmt.km(r.distance_km)})`)));
+  fp.bgLayer.clearLayers();
+  for (const r of fp.routes) {
+    L.polyline(r.geometry, { color: "#777", weight: 2, opacity: 0.35 })
+      .bindTooltip(r.name, { sticky: true })
+      .on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        if (r.id !== fp.id) setFindRoute(r.id);
+      })
+      .addTo(fp.bgLayer);
+  }
+  const initial = fp.initial;
+  fp.initial = null;
+  if (initial && fp.byId.has(initial)) return setFindRoute(initial);
+  if (fp.id && !fp.byId.has(fp.id)) return setFindRoute(null);
+  fpEl.route.value = fp.id ?? "";
+  if (!fp.id && fp.routes.length) fp.map.fitBounds(L.featureGroup(fp.bgLayer.getLayers()).getBounds(), { padding: [20, 20] });
+  if (!fp.id) fpEl.status.textContent = "Choose a route (or click one on the map).";
+}
+
+/** The kinds of places to look for: remembered, else those looked up on OpenStreetMap plus the kinds you have. */
+function findKinds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FP_CATS_KEY) || "null");
+    if (Array.isArray(saved)) return new Set(saved);
+  } catch { /* none */ }
+  return new Set([...svc.osmCategories(), ...svc.visiblePlaces().map((p) => p.category)]);
+}
+
+function renderFindKinds() {
+  const kinds = findKinds();
+  const cats = svc.placeCategories();
+  fpEl.cats.replaceChildren(...cats.map((c) => el("label", { class: "check", title: c.id in OSM_TAGS ? "" : "Only among your own places (not on OpenStreetMap)" },
+    el("input", {
+      type: "checkbox", value: c.id, checked: kinds.has(c.id),
+      onchange: () => {
+        const on = [...fpEl.cats.querySelectorAll("input:checked")].map((i) => i.value);
+        try { localStorage.setItem(FP_CATS_KEY, JSON.stringify(on)); } catch { /* only for now */ }
+      },
+    }), ` ${c.symbol} ${c.label}${c.id in OSM_TAGS ? "" : " *"}`)),
+    el("span", { class: "muted" }, "* your own places only"));
+}
+
+async function setFindRoute(id) {
+  fp.id = id || null;
+  fp.route = fp.id ? svc.library().get(fp.id) : null;
+  fp.found = [];
+  fp.selected.clear();
+  fp.preview = null;
+  fp.nameTouched = false;
+  fpEl.route.value = fp.id ?? "";
+  fpEl.saved.textContent = "";
+  updateHash();
+  fp.routeLayer.clearLayers();
+  fp.placeLayer.clearLayers();
+  fp.resultLayer.clearLayers();
+  renderFindResults();
+  if (!fp.route) {
+    fpEl.status.textContent = "Choose a route (or click one on the map).";
+    return;
+  }
+  const r = fp.route;
+  L.polyline(r.geometry, { color: "#b35c1e", weight: 4, opacity: 0.9, interactive: false }).addTo(fp.routeLayer);
+  fp.map.fitBounds([[r.min_lat, r.min_lon], [r.max_lat, r.max_lon]], { padding: [30, 30] });
+  fpEl.status.textContent = "Choose where to look, how far and which kinds of places, then Search.";
+}
+
+async function findPlacesSearch() {
+  if (!fp.route) return;
+  const sources = [fpEl.mine.checked && "mine", fpEl.osm.checked && "osm"].filter(Boolean);
+  const categories = [...fpEl.cats.querySelectorAll("input:checked")].map((i) => i.value);
+  const range = Number(fpEl.range.value);
+  try { localStorage.setItem(OSM_RANGE_KEY, String(range)); } catch { /* only for now */ }
+  const token = ++fp.token;
+  fpEl.search.disabled = true;
+  fpEl.status.textContent = sources.includes("osm")
+    ? `Looking within ${fmtRange(range)}… (OpenStreetMap can take half a minute)`
+    : `Looking within ${fmtRange(range)}…`;
+  try {
+    const { found, osm_error: osmError } = await svc.findPlacesAlong({ route_id: fp.id, sources, categories, range_m: range }, osmOpts());
+    if (token !== fp.token) return;
+    fp.found = found;
+    fp.selected = new Set([...fp.selected].filter((k) => found.some((a) => fpKey(a) === k)));
+    fp.preview = null;
+    const mine = found.filter((a) => a.source === "mine").length;
+    fpEl.status.textContent = found.length
+      ? `${found.length} place${found.length === 1 ? "" : "s"} within ${fmtRange(range)}` +
+        (sources.length > 1 ? ` (${mine} of yours, ${found.length - mine} from OpenStreetMap)` : "") +
+        ". Tick the ones for your route, here or by clicking them on the map."
+      : `No places of these kinds within ${fmtRange(range)} of the route.`;
+    if (osmError) fpEl.status.textContent += ` Only your own places: ${osmError}`;
+  } catch (err) {
+    if (token === fp.token) fpEl.status.textContent = err.message;
+  } finally {
+    if (token === fp.token) fpEl.search.disabled = false;
+  }
+  renderFindResults();
+}
+
+function renderFindResults() {
+  const found = fp.found;
+  fpEl.results.hidden = !found.length;
+  fpEl.make.hidden = !found.length;
+  const cats = svc.placeCategories();
+  // The list, in riding order.
+  fpEl.list.replaceChildren(...found.map((a) => {
+    const key = fpKey(a), p = a.place;
+    return el("li", {},
+      el("input", {
+        type: "checkbox", class: "osm-pick", checked: fp.selected.has(key), title: "Select for the route",
+        onchange: (e) => toggleFind(key, e.target.checked),
+      }),
+      el("a", {
+        title: "Show on the map",
+        onclick: () => {
+          fp.map.setView([p.lat, p.lon], Math.max(fp.map.getZoom(), 15));
+          fp.placeLayer.eachLayer((m) => m.fpKey === key && m.openTooltip());
+        },
+      }, `km ${a.km.toFixed(1)} · `, placeSymbol(categoryOf(p.category, cats)), ` ${p.name}`),
+      a.source === "osm" ? el("span", { class: "osm-badge", title: "From OpenStreetMap" }, "OSM") : null,
+      a.off_m > 30 ? el("span", { class: "small" }, ` (${a.off_m} m from the route)`) : null);
+  }));
+  // Select all, none, or a kind.
+  const byCat = new Map();
+  for (const a of found) byCat.set(a.place.category, [...(byCat.get(a.place.category) || []), fpKey(a)]);
+  const setAll = (keys, on) => {
+    for (const k of keys) on ? fp.selected.add(k) : fp.selected.delete(k);
+    selectionChanged();
+  };
+  setChildren(fpEl.tools, el("div", { class: "actions" },
+    "Select: ", el("a", { class: "link", onclick: () => setAll(found.map(fpKey), true) }, "all"),
+    " · ", el("a", { class: "link", onclick: () => setAll([...fp.selected], false) }, "none"),
+    " · ", el("a", { class: "link", title: "All your own places", onclick: () => setAll(found.filter((a) => a.source === "mine").map(fpKey), true) }, "mine"),
+    " · ", ...[...byCat].sort((x, y) => y[1].length - x[1].length).map(([id, keys]) => {
+      const c = categoryOf(id, cats);
+      return el("button", {
+        type: "button", class: "chip", title: `Select or unselect all ${keys.length} × ${c.label}`,
+        onclick: () => setAll(keys, !keys.every((k) => fp.selected.has(k))),
+      }, `${c.symbol} ${keys.length}`);
+    })),
+    el("div", { id: "fp-count", class: "muted" }));
+  drawFindPlaces();
+  renderFindMake();
+}
+
+function toggleFind(key, on) {
+  if (on) fp.selected.add(key);
+  else fp.selected.delete(key);
+  selectionChanged();
+}
+
+/** Selection changed: the list, the map and the route to make follow. */
+function selectionChanged() {
+  fp.preview = null;
+  fp.resultLayer.clearLayers();
+  const boxes = fpEl.list.querySelectorAll(".osm-pick");
+  fp.found.forEach((a, i) => { if (boxes[i]) boxes[i].checked = fp.selected.has(fpKey(a)); });
+  drawFindPlaces();
+  renderFindMake();
+}
+
+function drawFindPlaces() {
+  fp.placeLayer.clearLayers();
+  const cats = svc.placeCategories();
+  for (const a of fp.found) {
+    const p = a.place, key = fpKey(a), cat = categoryOf(p.category, cats), sel = fp.selected.has(key);
+    const html = a.source === "osm"
+      ? el("span", { style: `border-color:${cat.color}` }, cat.symbol)
+      : el("span", { style: `background:${cat.color}` }, cat.symbol);
+    const marker = L.marker([p.lat, p.lon], {
+      icon: L.divIcon({ className: `poi-icon${a.source === "osm" ? " osm" : ""}${sel ? " sel" : ""}`, html, iconSize: [22, 22], iconAnchor: [11, 11] }),
+      zIndexOffset: sel ? 500 : 0,
+    });
+    marker.fpKey = key;
+    marker.bindTooltip(`km ${a.km.toFixed(1)} · ${p.name}${a.source === "osm" ? " (OpenStreetMap)" : ""} — click to ${sel ? "unselect" : "select"}`);
+    marker.on("click", () => toggleFind(key, !fp.selected.has(key)));
+    fp.placeLayer.addLayer(marker);
+  }
+}
+
+function renderFindMake() {
+  const picked = fp.found.filter((a) => fp.selected.has(fpKey(a)));
+  const n = picked.length;
+  const count = $("#fp-count");
+  if (count) count.textContent = n ? `${n} selected` : "Nothing selected yet.";
+  fpEl.previewBtn.disabled = !n;
+  fpEl.previewBtn.textContent = n ? `Show the route with ${n} place${n === 1 ? "" : "s"}` : "Show the route";
+  const osmPicked = picked.filter((a) => a.source === "osm").length;
+  fpEl.keep.hidden = !osmPicked;
+  fpEl.keep.textContent = `Keep the ${osmPicked} OpenStreetMap place${osmPicked === 1 ? "" : "s"} as my places`;
+  const res = fp.preview;
+  fpEl.stats.hidden = !res;
+  fpEl.save.hidden = !res;
+  fpEl.detourList.replaceChildren();
+  if (!res) return;
+  fpEl.stats.replaceChildren(...[
+    ["Distance", fmt.km(res.distance_km)],
+    ["Extra", res.extra_km > 0.05 ? `+${fmt.km(res.extra_km)}` : "none"],
+    ["Elevation gain", fmt.m(res.elevation_gain_m)],
+    ["Waypoints", String(res.waypoints)],
+    ["Detours", String(res.detours.length)],
+  ].map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+  fpEl.detourList.replaceChildren(...res.detours.map((d) =>
+    el("li", {}, `From km ${d.km.toFixed(1)}: +${d.extra_km.toFixed(1)} km through ${d.places.join(", ")}`)));
+  if (!fp.nameTouched) fpEl.name.value = `${fp.route.name} (with places)`;
+}
+
+function findRequest(extra = {}) {
+  return {
+    route_id: fp.id,
+    places: fp.found.filter((a) => fp.selected.has(fpKey(a))).map((a) => a.place),
+    waypoints: fpEl.waypoints.checked,
+    detours: fpEl.detours.checked,
+    ...extra,
+  };
+}
+
+async function findPreview() {
+  const token = ++fp.ptoken;
+  fpEl.makeStatus.textContent = fpEl.detours.checked ? "Routing the detours…" : "Making the route…";
+  fpEl.saved.textContent = "";
+  try {
+    const res = await svc.withPlacesPreview(findRequest());
+    if (token !== fp.ptoken) return;
+    fp.preview = res;
+    fpEl.makeStatus.textContent = res.description;
+    fp.resultLayer.clearLayers();
+    if (res.detours.length) L.polyline(res.geometry, { color: "#1a5fb4", weight: 4, opacity: 0.85, interactive: false }).addTo(fp.resultLayer);
+  } catch (err) {
+    if (token === fp.ptoken) fpEl.makeStatus.textContent = `Error: ${err.message}`;
+    fp.preview = null;
+  }
+  renderFindMake();
+}
+
+fpEl.route.addEventListener("change", () => setFindRoute(Number(fpEl.route.value) || null));
+fpEl.search.addEventListener("click", findPlacesSearch);
+fpEl.previewBtn.addEventListener("click", findPreview);
+for (const box of [fpEl.waypoints, fpEl.detours]) box.addEventListener("change", () => { fp.preview = null; fp.resultLayer.clearLayers(); renderFindMake(); });
+fpEl.name.addEventListener("input", () => (fp.nameTouched = true));
+fpEl.keep.addEventListener("click", async () => {
+  const picked = fp.found.filter((a) => fp.selected.has(fpKey(a)) && a.source === "osm").map((a) => a.place);
+  try {
+    const res = await svc.keepOsmPlaces(picked, { listName: fp.route.name });
+    fpEl.makeStatus.textContent = `Kept ${res.added} place${res.added === 1 ? "" : "s"} in the list “${res.list.name}”.`;
+    // They are yours now: the same places, found as yours.
+    const keys = new Map(picked.map((p) => [p.osm_id, p]));
+    const mine = svc.allPlaces().filter((p) => keys.has(p.osm_id));
+    for (const a of fp.found) {
+      const m = a.source === "osm" && mine.find((p) => p.osm_id === a.place.osm_id);
+      if (!m) continue;
+      const wasSel = fp.selected.delete(fpKey(a));
+      a.place = m;
+      a.source = "mine";
+      if (wasSel) fp.selected.add(fpKey(a));
+    }
+    setPlacesShown(true);
+    refreshPlaces();
+    renderFindResults();
+  } catch (err) {
+    fpEl.makeStatus.textContent = `Error: ${err.message}`;
+  }
+});
+fpEl.saveBtn.addEventListener("click", async () => {
+  const name = fpEl.name.value.trim();
+  if (!name) return (fpEl.saved.textContent = "Give the route a name.");
+  fpEl.saveBtn.disabled = true;
+  try {
+    const res = await svc.withPlacesSave(findRequest({ name }));
+    fpEl.saved.replaceChildren("Saved as ", routeLink(res.id, res.name), ".");
+    fp.loaded = false;
+    await Promise.all([refresh(), loadFacets()]);
+  } catch (err) {
+    fpEl.saved.textContent = `Error: ${err.message}`;
+  } finally {
+    fpEl.saveBtn.disabled = false;
+  }
+});
+fpEl.download.addEventListener("click", async () => {
+  const name = fpEl.name.value.trim() || `${fp.route.name} (with places)`;
+  try {
+    const f = await svc.withPlacesGpx(findRequest({ name }));
+    downloadBlob(f.text, f.filename);
+  } catch (err) {
+    fpEl.saved.textContent = `Error: ${err.message}`;
+  }
+});
+
+$("#d-findplaces").addEventListener("click", async () => {
+  const id = selectedId;
+  showView("findplaces");
+  await fp.loading;
+  if (fp.id !== id) await setFindRoute(id);
+});
+
 // ------------------------------------------------------------------ duplicates
 
 let dupData = null;
@@ -3878,6 +4228,8 @@ async function afterLibraryChange() {
   cb.a = cb.b = null;
   rs.id = null;
   rs.loaded = false;
+  fp.id = null;
+  fp.loaded = false;
   await Promise.all([refresh(), loadFacets()]);
   showData();
 }

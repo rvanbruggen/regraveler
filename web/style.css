@@ -155,7 +155,7 @@ td.name { white-space: normal; min-width: 220px; font-weight: 500; }
   display: flex; flex-direction: column; gap: 8px;
 }
 .map-side p { margin: 0; }
-#overview-map, #combine-map, #restart-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
+#overview-map, #combine-map, #restart-map, #findplaces-map { flex: 1; border: 1px solid var(--border); border-radius: 6px; }
 label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
 label.check input { width: auto; }
 /* Leaflet's layer switcher: its labels are not the column-style form labels above. */
@@ -172,7 +172,7 @@ label.check input { width: auto; }
   #rn-table td.proposal input { min-width: 260px; }
   .map-layout { flex-direction: column; height: auto; }
   .map-side { width: auto; max-height: 260px; }
-  #overview-map, #combine-map, #restart-map { flex: none; height: 65vh; }
+  #overview-map, #combine-map, #restart-map, #findplaces-map { flex: none; height: 65vh; }
 }
 
 /* Combine */
@@ -430,3 +430,8 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .chip:hover { border-color: var(--accent); }
 .places-along .osm-pick { width: auto; margin: 0 6px 0 0; vertical-align: middle; }
 .osm-range { width: auto; padding: 1px 4px; font-size: 12px; }
+.fp-box { border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px 8px; margin: 6px 0; }
+.fp-box legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+#fp-list { max-height: 45vh; overflow-y: auto; padding-left: 4px; list-style: none; }
+#fp-list li { margin: 2px 0; }
+.poi-icon.sel span { transform: scale(1.35); box-shadow: 0 0 0 3px var(--accent); }

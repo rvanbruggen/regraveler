@@ -167,8 +167,11 @@ export function parseGpx(text, opts = {}) {
 const escapeXml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]);
 
-/** A GPX 1.1 file with one track. points: [[lat, lon, ele|null], ...] */
-export function writeGpx(name, points, description = null, creator = "rerouter") {
+/**
+ * A GPX 1.1 file with one track. points: [[lat, lon, ele|null], ...]; waypoints (optional):
+ * [{lat, lon, name, desc, sym, type}] written as <wpt> before the track.
+ */
+export function writeGpx(name, points, description = null, creator = "rerouter", waypoints = []) {
   const out = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd" version="1.1" creator="${escapeXml(creator)}">`,
@@ -176,7 +179,13 @@ export function writeGpx(name, points, description = null, creator = "rerouter")
     `    <name>${escapeXml(name)}</name>`,
   ];
   if (description) out.push(`    <desc>${escapeXml(description)}</desc>`);
-  out.push("  </metadata>", "  <trk>", `    <name>${escapeXml(name)}</name>`);
+  out.push("  </metadata>");
+  for (const w of waypoints) {
+    out.push(`  <wpt lat="${w.lat.toFixed(7)}" lon="${w.lon.toFixed(7)}">`);
+    for (const k of ["name", "desc", "sym", "type"]) if (w[k]) out.push(`    <${k}>${escapeXml(w[k])}</${k}>`);
+    out.push("  </wpt>");
+  }
+  out.push("  <trk>", `    <name>${escapeXml(name)}</name>`);
   if (description) out.push(`    <desc>${escapeXml(description)}</desc>`);
   out.push("    <trkseg>");
   for (const [lat, lon, ele] of points) {

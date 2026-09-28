@@ -5,7 +5,7 @@
 import * as brouter from "./brouter.js";
 import * as cb from "./combiner.js";
 import { config } from "./config.js";
-import { round, simplifyLatLon } from "./geo.js";
+import { round, simplifyLatLon, toMetric } from "./geo.js";
 import { GpxError, writeGpx } from "./gpx.js";
 import * as places from "./places.js";
 import * as osm from "./osm.js";
@@ -436,7 +436,7 @@ async function generatedName(geometry, isLoop) {
 export async function importGpx(data, filename, {
   source_name = null, source_url = null, tags = [], notes = null, activity = null, default_activity = null,
   derived_from = [], check_similar = true, rename = config.AUTO_RENAME_ON_IMPORT, name: forcedName = null,
-  match_rides = false,
+  match_rides = false, same_track_ok = false,
 } = {}) {
   const result = { filename, status: "imported", message: "", routes: [], duplicates: [], similar: [], ride: null };
   let parsed;
@@ -464,7 +464,8 @@ export async function importGpx(data, filename, {
       continue;
     }
     const th = await trackHash(track.points);
-    const twin = all.find((r) => r.track_hash === th);
+    // A variant on the same track (e.g. the route with places as waypoints) may be asked for.
+    const twin = same_track_ok ? null : all.find((r) => r.track_hash === th);
     if (twin) {
       result.duplicates.push({ id: twin.id, name: twin.name });
       sameTrack = true;
@@ -1372,4 +1373,173 @@ export async function keepOsmPlace(p) {
     notes: p.notes || null, url: p.url || null, source: "OpenStreetMap", osm_id: p.osm_id,
   }]);
   return doc;
+}
+
+// ------------------------------------------------------------------ search for places (utility)
+
+/**
+ * Places along a route, from your places (the lists that are shown) and/or OpenStreetMap:
+ * req {route_id, sources: ["mine", "osm"], range_m, categories}. Returns {found: [{place, km,
+ * off_m, source: "mine" | "osm"}] in riding order, osm_error}: when OpenStreetMap doesn't
+ * answer, your own places are still found (osm_error says why the others are missing).
+ * OpenStreetMap only knows the kinds in OSM_TAGS.
+ */
+export async function findPlacesAlong(req, opts = {}) {
+  const r = getRoute(req.route_id);
+  const range = Number(req.range_m) || config.PLACES_NEAR_ROUTE_M;
+  if (!(range > 0 && range <= 5000)) throw new ServiceError("Look for places within 5 km of the route at most");
+  const cats = new Set(req.categories || []);
+  if (!cats.size) throw new ServiceError("Choose at least one kind of place");
+  const sources = new Set(req.sources || ["mine"]);
+  if (!sources.size) throw new ServiceError("Choose where to look: your places and/or OpenStreetMap");
+  const out = [];
+  if (sources.has("mine")) {
+    const mine = visiblePlaces().filter((p) => cats.has(p.category));
+    for (const a of poi.placesAlong(r.geometry, r.distance_km, mine, range)) out.push({ ...a, source: "mine" });
+  }
+  const osmCats = [...cats].filter((c) => c in poi.OSM_TAGS);
+  let osmError = null;
+  if (sources.has("osm") && osmCats.length) {
+    try {
+      const found = await osm.placesAroundRoute(r.geometry, osmCats, osmLabels(), range + 50, opts);
+      for (const a of poi.placesAlong(r.geometry, r.distance_km, notMine(found), range)) out.push({ ...a, source: "osm" });
+    } catch (err) {
+      if (!(err instanceof osm.OverpassUnavailable) || !sources.has("mine")) throw err;
+      osmError = err.message;
+    }
+  }
+  return { found: out.sort((a, b) => a.km - b.km), osm_error: osmError };
+}
+
+const DETOUR_MIN_OFF_M = 30; // places closer to the route than this are passed anyway
+
+/**
+ * The route with places: req {route_id, places: [{lat, lon, name, category, notes, url}],
+ * waypoints (write them into the GPX), detours (ride to each place), straight}. A detour
+ * leaves the route some way before the place and rejoins it after (BRouter through the
+ * place); places close together share one detour.
+ */
+async function runWithPlaces(req) {
+  const r = getRoute(req.route_id);
+  const places = (req.places || []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  if (!places.length) throw new ServiceError("Select at least one place");
+  if (!req.waypoints && !req.detours) throw new ServiceError("Choose waypoints, detours or both");
+  const track = await loadTrack(r);
+  const len = track.length;
+  const located = places.map((p) => {
+    const at = cb.locate(track, p.lat, p.lon);
+    const q = cb.pointAt(track, at);
+    const [x, y] = toMetric(p.lat, p.lon);
+    return { p, at, off: Math.hypot(q[0] - x, q[1] - y) };
+  }).sort((a, b) => a.at - b.at);
+
+  let points = cb.toLatLon(track.xyz);
+  const detours = [];
+  if (req.detours) {
+    // Leave the route about twice as far before the place as it lies off the route.
+    const groups = [];
+    for (const l of located.filter((x) => x.off > DETOUR_MIN_OFF_M)) {
+      const w = Math.min(3000, Math.max(300, 2 * l.off));
+      const from = Math.max(0, l.at - w), to = Math.min(len, l.at + w);
+      const last = groups[groups.length - 1];
+      if (last && from <= last.to) {
+        last.to = Math.max(last.to, to);
+        last.places.push(l);
+      } else groups.push({ from, to, places: [l] });
+    }
+    if (groups.length) {
+      const profile = config.ACTIVITY_PROFILES[r.activity] || config.BROUTER_PROFILES[0];
+      const router = req.straight ? cb.straightRouter : (p, q, via = []) => brouter.route(p, q, profile, null, null, via);
+      const parts = [];
+      let at = 0;
+      try {
+        for (const g of groups) {
+          if (g.from > at) parts.push(cb.section(track, at, g.from));
+          const via = g.places.map((l) => [l.p.lat, l.p.lon]);
+          const routed = await router(cb.latLonOf(cb.pointAt(track, g.from)), cb.latLonOf(cb.pointAt(track, g.to)), via);
+          const xyz = routed.map(([lat, lon, e]) => [...toMetric(lat, lon), e == null ? NaN : e]);
+          parts.push(xyz);
+          detours.push({
+            km: round(g.from / 1000, 1),
+            places: g.places.map((l) => l.p.name),
+            extra_km: round((cb.legLength(xyz) - (g.to - g.from)) / 1000, 2),
+          });
+          at = g.to;
+        }
+      } catch (err) {
+        if (err instanceof brouter.BRouterUnavailable) throw new ServiceError(err.message, 503);
+        if (err instanceof brouter.BRouterError) throw new ServiceError(err.message, 502);
+        throw err;
+      }
+      if (at < len) parts.push(cb.section(track, at, len));
+      points = cb.toLatLon(cb.join(parts));
+    }
+  }
+  const cats = placeCategories();
+  const waypoints = req.waypoints
+    ? located.map(({ p }) => ({
+        lat: p.lat, lon: p.lon, name: p.name,
+        desc: [cats.find((c) => c.id === p.category)?.label, p.notes, p.url].filter(Boolean).join("\n") || null,
+        type: cats.find((c) => c.id === p.category)?.label || null,
+      }))
+    : [];
+  const names = located.map((l) => l.p.name);
+  const description = `${r.name}` +
+    (detours.length ? `, riding to ${detours.reduce((n, d) => n + d.places.length, 0)} place(s)` : "") +
+    (waypoints.length ? `, with ${waypoints.length} place(s) as waypoints` : "") +
+    `: ${names.slice(0, 12).join(", ")}${names.length > 12 ? ", …" : ""}.`;
+  return { route: r, points, waypoints, detours, description };
+}
+
+export async function withPlacesPreview(req) {
+  const { route: r, points, waypoints, detours, description } = await runWithPlaces(req);
+  const stats = computeStats(points);
+  return {
+    description,
+    distance_km: stats.distance_km,
+    extra_km: round(stats.distance_km - r.distance_km, 2),
+    elevation_gain_m: stats.elevation_gain_m,
+    geometry: stats.geometry,
+    detours,
+    waypoints: waypoints.length,
+  };
+}
+
+export async function withPlacesGpx(req) {
+  const { points, waypoints, description } = await runWithPlaces(req);
+  return { filename: `${req.name}.gpx`.replace(/"/g, ""), text: writeGpx(req.name, points, description, "rerouter", waypoints) };
+}
+
+/** Save the route with its places as a new route (the original is left as it is). */
+export async function withPlacesSave(req) {
+  const name = String(req.name || "").trim();
+  if (!name) throw new ServiceError("Give the route a name");
+  const { route: orig, points, waypoints, detours, description } = await runWithPlaces(req);
+  const data = new TextEncoder().encode(writeGpx(name, points, description, "rerouter", waypoints));
+  const notes = description + (orig.notes && orig.notes.trim() ? `\n\n${orig.notes.trim()}` : "");
+  const res = await importGpx(data, `${slugify(name).slice(0, 150)}.gpx`, {
+    source_name: orig.source_name, source_url: orig.source_url, derived_from: [orig.id],
+    tags: [...(orig.tags || [])], notes, activity: orig.activity, name,
+    same_track_ok: !detours.length, // only waypoints added: the same track, on purpose
+  });
+  if (res.status !== "imported") {
+    if (res.status === "duplicate" && res.duplicates.length) {
+      throw new ServiceError(`This route is already saved as '${res.duplicates[0].name}'`, 409);
+    }
+    throw new ServiceError(`Could not save the route: ${res.message}`, 500);
+  }
+  const created = lib.get(res.routes[0].id);
+  created.quality_rating = orig.quality_rating;
+  if (!detours.length) {
+    // The same roads: the same surface too, and not a duplicate to clean up.
+    created.paved_pct = orig.paved_pct;
+    created.paved_source = orig.paved_source;
+    created.surface = orig.surface;
+    await lib.saveRoutes([created]);
+    await lib.ignorePairs([[orig.id, created.id]]);
+  } else {
+    await lib.saveRoutes([created]);
+    if (config.SURFACE_AUTO_ESTIMATE) surfaceJob.enqueue([created.id]);
+  }
+  return { id: created.id, name: created.name };
 }

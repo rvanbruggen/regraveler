@@ -27,6 +27,7 @@
         <button type="button" role="menuitem" data-view="combine">Combine routes<small>Join two routes with routed connectors</small></button>
         <button type="button" role="menuitem" data-view="restart">Change start point<small>Start a loop somewhere else on the loop</small></button>
         <button type="button" role="menuitem" data-view="weather">Ride weather<small>Rain, temperature and wind along a route on the day you ride</small></button>
+        <button type="button" role="menuitem" data-view="findplaces">Search for places<small>Cafés, water, toilets, … along a route; a route with them</small></button>
         <button type="button" role="menuitem" data-view="link">Import from a link<small>A RideWithGPS, Komoot or Strava route, or any GPX file online</small></button>
         <button type="button" role="menuitem" data-view="duplicates">Duplicates<small>Find and clean up (near-)duplicate routes</small></button>
         <button type="button" role="menuitem" data-view="data">Library &amp; settings<small>Back up, restore, storage and routing server</small></button>
@@ -230,6 +231,57 @@
         </div>
         <div class="table-wrap"><table id="places-table"></table></div>
       </div>
+    </div>
+  </section>
+
+  <!-- Search for places (utility) -->
+  <section id="view-findplaces" class="view" hidden>
+    <div class="map-layout">
+      <div class="map-side">
+        <p class="muted small">Places along a route, from your own places and from OpenStreetMap. Select the ones you
+          want, then make a route with them: as waypoints in the GPX, or ridden to with a short detour. The
+          original route is not changed.</p>
+        <label>Route <select id="fp-route"></select></label>
+        <fieldset class="fp-box">
+          <legend>Look in</legend>
+          <label class="check"><input type="checkbox" id="fp-mine" checked> My places</label>
+          <label class="check"><input type="checkbox" id="fp-osm" checked> OpenStreetMap</label>
+        </fieldset>
+        <label>Within <select id="fp-range" class="osm-range"></select> of the route</label>
+        <fieldset class="fp-box">
+          <legend>Kinds of places</legend>
+          <div id="fp-cats" class="osm-cats small"></div>
+        </fieldset>
+        <div class="actions"><button type="button" id="fp-search">Search</button></div>
+        <p id="fp-status" class="muted small"></p>
+        <div id="fp-results" hidden>
+          <div id="fp-tools" class="osm-tools small"></div>
+          <ul id="fp-list" class="muted places-along"></ul>
+        </div>
+        <div id="fp-make" class="panel" hidden>
+          <h3>Route with the selected places</h3>
+          <label class="check"><input type="checkbox" id="fp-waypoints" checked> Add them as waypoints (a bike computer
+            shows them along the way)</label>
+          <label class="check"><input type="checkbox" id="fp-detours"> Ride to each place: a detour routed by BRouter
+            for places more than 30 m off the route (places close together share one)</label>
+          <div class="actions">
+            <button type="button" id="fp-preview">Show the route</button>
+            <button type="button" id="fp-keep" class="secondary" hidden>Keep the OpenStreetMap ones as my places</button>
+          </div>
+          <p id="fp-make-status" class="muted small"></p>
+          <dl id="fp-stats" class="stats" hidden></dl>
+          <ul id="fp-detour-list" class="small"></ul>
+          <div id="fp-save" hidden>
+            <label>Name <input id="fp-name"></label>
+            <div class="actions">
+              <button type="button" id="fp-save-btn">Save as new route</button>
+              <button type="button" id="fp-download" class="secondary">Download GPX</button>
+            </div>
+            <p id="fp-saved" class="small"></p>
+          </div>
+        </div>
+      </div>
+      <div id="findplaces-map"></div>
     </div>
   </section>
 
@@ -584,6 +636,7 @@
       <button type="button" id="d-combine" class="secondary">Combine…</button>
       <button type="button" id="d-restart" class="secondary" title="Start this loop somewhere else" hidden>Change start…</button>
       <button type="button" id="d-weather" class="secondary" title="The weather along this route on the day you ride it">Weather…</button>
+      <button type="button" id="d-findplaces" class="secondary" title="Cafés, water, toilets, … along this route; a route with them">Places…</button>
       <button type="button" id="d-delete" class="danger">Remove</button>
       <span id="d-status" class="muted"></span>
     </div>
