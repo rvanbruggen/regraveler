@@ -199,7 +199,14 @@ async function addPlaces(library, docs = [], categories = []) {
 
 /** Read a backup zip: {routes, ignored, settings, files: [{hash, name, data}], kind, title, description} */
 export async function readBackup(buffer) {
-  const entries = await readZip(buffer);
+  return backupFromEntries(await readZip(buffer));
+}
+
+/** Is this unpacked zip ([{name, data}]) a rerouter backup or exported set? */
+export const isBackupZip = (entries) => entries.some((e) => e.name === "library.json");
+
+/** Read a backup from the entries of its zip (what readZip returns); see readBackup. */
+export function backupFromEntries(entries) {
   const byName = new Map(entries.map((e) => [e.name, e.data]));
   const json = byName.get("library.json");
   if (!json) throw new Error("This is not a rerouter backup (no library.json in the zip)");

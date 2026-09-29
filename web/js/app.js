@@ -1,7 +1,7 @@
 // rerouter, the static version: the UI of the server version, talking to the in-page service
 // (js/service.js) instead of a JSON API. The library lives in the browser (IndexedDB).
 
-import { addBackup, makeBackup, makeSelection, readBackup, restoreBackup } from "./backup.js";
+import { addBackup, backupFromEntries, isBackupZip, makeBackup, makeSelection, readBackup, restoreBackup } from "./backup.js";
 import * as brouter from "./brouter.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
@@ -2373,7 +2373,8 @@ let pending = []; // [{name, path, size, data (bytes), folder, source_name, sour
 
 /**
  * Add files: route files (GPX, TCX, FIT, also .gz), zip files (their route files are added)
- * and files from folders.
+ * and files from folders. A rerouter zip (an exported set or a backup, from this or another
+ * rerouter) is added as a set: its routes keep their details, and nothing is replaced.
  */
 async function addFiles(fileList) {
   // diskPath: the file's path in the server's GPX folder, when it came from there.
@@ -2383,6 +2384,7 @@ async function addFiles(fileList) {
     pending.push({ name, path, size: data.length, data, diskPath, folder: folderOf(path), source_name: "", source_url: "", activity: "", tags: "" });
   };
   const skipped = [];
+  const sets = []; // [{name, data (what backupFromEntries returns)}]
   for (const item of fileList) {
     const file = item.file || item;
     const path = item.path || file.webkitRelativePath || file.name;
@@ -2395,7 +2397,12 @@ async function addFiles(fileList) {
         await openPlacesFile(file);
       }
       else if (lower.endsWith(".zip")) {
-        for (const e of await readZip(await file.arrayBuffer())) {
+        const entries = await readZip(await file.arrayBuffer());
+        if (isBackupZip(entries)) {
+          sets.push({ name: file.name, data: backupFromEntries(entries) });
+          continue;
+        }
+        for (const e of entries) {
           if (!isTrackFileName(e.name) || e.name.split("/").some((x) => x.startsWith("__MACOSX") || x.startsWith("._"))) continue;
           add(e.name.split("/").pop(), `${file.name.replace(/\.zip$/i, "")}/${e.name}`, e.data);
         }
@@ -2407,6 +2414,20 @@ async function addFiles(fileList) {
   pending.sort((a, b) => svc.importOrder()(a.path, b.path));
   renderPending();
   if (skipped.length) $("#import-status").textContent += ` · skipped (not a GPX, TCX or FIT file): ${skipped.slice(0, 5).join(", ")}${skipped.length > 5 ? "…" : ""}`;
+  for (const set of sets) await addSet(set);
+}
+
+/** Add the routes of a rerouter zip dropped on the Import screen (after asking). */
+async function addSet({ name, data }) {
+  const status = $("#import-set-status");
+  try {
+    const res = await addRoutes(data, status);
+    if (!res) return;
+    status.textContent = `${name}: ${status.textContent} `;
+    if (res.ids.length) status.append(el("a", { class: "link", onclick: () => showOnMap(res.ids) }, "Show them on the map"));
+  } catch (err) {
+    status.textContent = `${name}: error: ${err.message}`;
+  }
 }
 
 /** "Folder/Sub/route.gpx" -> "Sub" (the first folder below the chosen or dropped one). */

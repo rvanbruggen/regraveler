@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.4.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.5.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -67,6 +67,9 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
     watches), also gzip-compressed (`.fit.gz`, `.tcx.gz`, as in a Strava bulk export). The
     original file is stored as it is; *Download GPX* in the route panel writes a GPX file for a
     TCX or FIT route, and *Original .fit* / *Original .tcx* gives the original.
+  - **Rerouter zips:** a set made with *Export set…* (or a backup), from this or another
+    rerouter, dropped on the Import screen is added as a set with its details (activity, tags,
+    notes, ratings, places, collections), like *Add routes from a zip…*: nothing is replaced.
   - **Activity from the file:** a FIT or TCX file that says it is a run or walk becomes hiking,
     and a FIT file with the mountain, road or gravel sub-sport becomes that activity. Otherwise
     the batch's activity is used (a per-file override always wins).
@@ -410,7 +413,7 @@ that part. Home stays in your library and is never shared.
 
 *Export set…* (select routes in the library first) writes the same zip format with only those
 routes, a name for the set, and no settings. *Library & settings › Add routes from a zip…*
-adds such a set, or a whole backup, to a library **without replacing it**: the routes get new
+(or dropping the zip on the Import screen) adds such a set, or a whole backup, to a library **without replacing it**: the routes get new
 ids, routes the library already has (the same track) are skipped, and "derived from" links and
 "not duplicates" decisions between routes in the set are kept. This works in both directions
 between the server and the browser version. *Leave out my notes and quality ratings* (on by

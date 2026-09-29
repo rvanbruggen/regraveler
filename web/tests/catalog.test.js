@@ -1,13 +1,14 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { addBackup, makeSelection, readBackup } from "../js/backup.js";
+import { addBackup, backupFromEntries, isBackupZip, makeSelection, readBackup } from "../js/backup.js";
 import { config } from "../js/config.js";
 import { Library, MemoryBackend } from "../js/db.js";
 import { pointInPolygon } from "../js/geo.js";
 import * as places from "../js/places.js";
 import { parseKmlAreas } from "../js/poi.js";
 import * as svc from "../js/service.js";
+import { readZip } from "../js/zip.js";
 import { gpxXml, linePoints, offset } from "./helpers.js";
 
 const START = [51.0, 4.4];
@@ -153,6 +154,27 @@ test("an exported set carries its collections and areas; adding it merges them",
   const again = await addBackup(lib2, data);
   assert.deepEqual([again.added, again.collections, again.areas], [0, 0, 0]);
   assert.equal(lib2.docsOf("collection").find((x) => x.name === "Ardennes").route_ids.length, 2);
+});
+
+test("a rerouter zip is recognised among other zips (for the Import screen) and read from its entries", async () => {
+  const [a, b] = await threeRoutes();
+  await svc.updateRoute(a, { notes: "nice", tags: ["kempen"] });
+  const zip = new Uint8Array(await (await makeSelection(svc.library(), [a, b], { title: "Set", places: false })).arrayBuffer());
+  const entries = await readZip(zip);
+  assert.ok(isBackupZip(entries));
+  assert.ok(!isBackupZip(entries.filter((e) => e.name !== "library.json")), "a zip of GPX files is not a set");
+  const data = backupFromEntries(entries);
+  assert.equal(data.kind, "selection");
+  assert.equal(data.title, "Set");
+  assert.deepEqual(data, await readBackup(zip));
+
+  const lib2 = await Library.open(new MemoryBackend());
+  svc.setLibrary(lib2);
+  const res = await addBackup(lib2, data);
+  assert.equal(res.added, 2);
+  const [ra] = lib2.all().filter((r) => r.name === "A");
+  assert.equal(ra.notes, "nice");
+  assert.deepEqual(ra.tags, ["kempen"]);
 });
 
 test("regions: the region and province of a route's start, in the catalog and as a filter", async () => {
