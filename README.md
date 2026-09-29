@@ -569,6 +569,18 @@ redirects there). In a fork, turn it on once under *Settings › Pages ›
 Build and deployment › Source: GitHub Actions*; the app is then at
 `https://<user>.github.io/<repo>/`.
 
+### Search engines and link previews
+
+`web/robots.txt` lets search engines crawl the site and points them to `web/sitemap.xml`;
+the `<head>` of `web/index.html` has a canonical URL, Open Graph / X (Twitter) tags for link
+previews (with `web/og-image.jpg`, 1200×630) and a schema.org `WebApplication` description.
+All of them name `https://rerouter.eu/`: a fork on another address changes them to its own.
+Shared routes are never indexed: they live after the `#` in the link, which search engines
+leave out. To get the site listed, register it once in
+[Google Search Console](https://search.google.com/search-console) and
+[Bing Webmaster Tools](https://www.bing.com/webmasters) (DuckDuckGo gets most of its results from
+Bing) and submit `https://rerouter.eu/sitemap.xml` in both.
+
 ### Your data in the browser version
 
 Everything stays on the device: the routes and the original GPX files are in the browser's own
@@ -794,6 +806,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     sha256.js        SHA-256 for file hashes where the browser has no crypto.subtle (plain HTTP)
     worker.js        Web Worker for "routes near each other"
     config.js        settings and the version
+  robots.txt, sitemap.xml, og-image.jpg  for search engines and link previews
   data/places/       GeoNames place tiles, admin.json (region and province names)
   data/seeds/        example route sets offered to visitors (+ index.json)
   data/place-sets/   example place sets (CSV) on the Places tab (+ index.json)
