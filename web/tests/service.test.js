@@ -138,17 +138,15 @@ test("zip export holds the original files", async () => {
   assert.deepEqual(entries.map((e) => e.name).sort(), ["A (2).gpx", "A.gpx"]);
 });
 
-test("combine: suggest, preview and save with straight connectors", async () => {
+test("combine: preview and save with straight connectors", async () => {
   config.AUTO_RENAME_ON_IMPORT = false;
   await importOne("A.gpx", east(0, 6000));
   await importOne("B.gpx", east(800, 6000));
   const [a, b] = ["A", "B"].map((n) => svc.listRoutes("").find((r) => r.name === n));
-  const sug = await svc.combineSuggest(a.id, b.id, 2);
-  const [pa, pb] = sug.parts;
   const req = {
     parts: [
-      { route_id: a.id, start: pa.start, end: pa.end },
-      { route_id: b.id, start: pb.start, end: pb.end },
+      { route_id: a.id, start: at(0, 1000), end: at(0, 5000) },
+      { route_id: b.id, start: at(800, 5000), end: at(800, 1000) },
     ],
     closed: true, straight: true,
   };
@@ -335,48 +333,14 @@ test("mountain biking: an activity with its own connector profile", async () => 
     return new Response(JSON.stringify({ features: [{ geometry: { coordinates: coords } }] }));
   };
   try {
-    const [pa, pb] = (await svc.combineSuggest(a.id, b.id, 2)).parts;
     await svc.combinePreview({
-      parts: [{ route_id: a.id, start: pa.start, end: pa.end }, { route_id: b.id, start: pb.start, end: pb.end }],
+      parts: [{ route_id: a.id, start: at(0, 1000), end: at(0, 5000) }, { route_id: b.id, start: at(800, 5000), end: at(800, 1000) }],
       closed: true,
     });
   } finally {
     globalThis.fetch = realFetch;
   }
   assert.deepEqual(profiles, ["mtb", "mtb"]);
-});
-
-test("combine pattern 'out on A, back on B' for two loops from the same start", async () => {
-  config.AUTO_RENAME_ON_IMPORT = false;
-  const square = (sign) => {
-    const corners = [[0, 0], [0, 4000 * sign], [4000, 4000 * sign], [4000, 200 * sign], [0, 0]];
-    const pts = [];
-    for (let k = 0; k < corners.length - 1; k++) {
-      const [n0, e0] = corners[k], [n1, e1] = corners[k + 1];
-      const steps = Math.round(Math.hypot(n1 - n0, e1 - e0) / 50);
-      for (let i = k ? 1 : 0; i <= steps; i++) pts.push([...at(n0 + (i / steps) * (n1 - n0), e0 + (i / steps) * (e1 - e0)), 10]);
-    }
-    return pts;
-  };
-  await importOne("East.gpx", square(1));
-  await importOne("West.gpx", square(-1));
-  const [a, b] = ["East", "West"].map((n) => svc.listRoutes("").find((r) => r.name === n));
-  const sug = await svc.combineSuggest(a.id, b.id, "outback");
-  const [pa, pb] = sug.parts;
-  assert.equal(pa.start_km, 0);
-  assert.equal(pb.end_km, 0);
-  assert.ok(pa.with_route && pb.with_route);
-  const prev = await svc.combinePreview({
-    parts: [
-      { route_id: a.id, start: pa.start, end: pa.end, other_way: pa.other_way },
-      { route_id: b.id, start: pb.start, end: pb.end, other_way: pb.other_way },
-    ],
-    closed: true, straight: true,
-  });
-  assert.equal(prev.is_loop, true);
-  assert.deepEqual(prev.parts.map((p) => p.with_route), [true, true]);
-  assert.equal(prev.connectors[1].routed, false); // back at the shared start already
-  await assert.rejects(svc.combineSuggest(a.id, b.id, "zigzag"), svc.ServiceError);
 });
 
 // ------------------------------------------------------------------ TCX and FIT files
@@ -486,10 +450,8 @@ test("combine: a connector can ride through one of your places", async () => {
   await importOne("A.gpx", east(0, 6000));
   await importOne("B.gpx", east(800, 6000));
   const [a, b] = ["A", "B"].map((n) => svc.listRoutes("").find((r) => r.name === n));
-  const sug = await svc.combineSuggest(a.id, b.id, 2);
-  const [pa, pb] = sug.parts;
   const req = {
-    parts: [{ route_id: a.id, start: pa.start, end: pa.end }, { route_id: b.id, start: pb.start, end: pb.end }],
+    parts: [{ route_id: a.id, start: at(0, 1000), end: at(0, 5000) }, { route_id: b.id, start: at(800, 5000), end: at(800, 1000) }],
     closed: true, straight: true,
   };
   const plain = await svc.combinePreview(req);
@@ -512,4 +474,92 @@ test("combine: a connector can ride through one of your places", async () => {
   assert.ok(pts.some(([la, lo]) => Math.abs(la - cafe.lat) < 1e-6 && Math.abs(lo - cafe.lon) < 1e-6));
   await svc.deletePlaces([cafe.id]);
   await assert.rejects(svc.combinePreview({ ...req, vias: [cafe.id] }), /was removed/);
+});
+
+// ------------------------------------------------------------------ combine: connections one by one
+
+async function threeLines() {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  await importOne("A.gpx", east(0, 6000));
+  await importOne("B.gpx", east(800, 6000));
+  await importOne("C.gpx", east(1600, 6000));
+  return ["A", "B", "C"].map((n) => svc.listRoutes("").find((r) => r.name === n));
+}
+const partOf = (r, fromM, toM) => ({ route_id: r.id, start: at(fromM.n, fromM.e), end: at(toM.n, toM.e) });
+
+test("combine: route one connection, then use it as approved", async () => {
+  const [a, b] = await threeLines();
+  const parts = [partOf(a, { n: 0, e: 0 }, { n: 0, e: 3000 }), partOf(b, { n: 800, e: 3000 }, { n: 800, e: 6000 })];
+  const conn = await svc.combineConnector({ from_part: parts[0], to_part: parts[1], straight: true });
+  approx(conn.distance_km, 0.8, { abs: 0.01 });
+  assert.equal(conn.routed, false, "a straight line");
+  assert.equal(conn.how, "straight lines");
+  assert.equal(conn.alternative, 0);
+  approx(conn.from[0], at(0, 3000)[0], { abs: 1e-5 });
+  approx(conn.to[0], at(800, 3000)[0], { abs: 1e-5 });
+
+  // Not the straight line: the approved route goes round by the east.
+  const bend = [...at(400, 3500), null];
+  const approved = { ...conn, points: [conn.points[0], bend, conn.points[conn.points.length - 1]] };
+  const prev = await svc.combinePreview({ parts, closed: false, straight: true, connectors: [approved] });
+  assert.equal(prev.connectors[0].approved, true);
+  assert.equal(prev.connectors[0].routed, false);
+  // The description says how the approved connectors were made, not the request's profile.
+  const routedLike = { ...approved, routed: true, how: "BRouter (gravel)" };
+  const prev2 = await svc.combinePreview({ parts, closed: false, connectors: [routedLike] });
+  assert.match(prev2.description, /via BRouter \(gravel\)\./);
+  assert.equal(prev2.connectors[0].routed, true);
+  approx(prev.connectors[0].distance_km, 2 * Math.hypot(0.4, 0.5), { abs: 0.01 });
+  const gpx = parseGpx((await svc.combineGpx({ parts, closed: false, straight: true, connectors: [approved], name: "x" })).text);
+  assert.ok(gpx.tracks[0].points.some(([la, lo]) => Math.abs(la - bend[0]) < 1e-6 && Math.abs(lo - bend[1]) < 1e-6));
+
+  // A part moved: the approved connection no longer fits.
+  const moved = [partOf(a, { n: 0, e: 0 }, { n: 0, e: 2500 }), parts[1]];
+  await assert.rejects(svc.combinePreview({ parts: moved, closed: false, straight: true, connectors: [approved] }), /no longer fits/);
+  await assert.rejects(svc.combinePreview({ parts, closed: false, straight: true, connectors: "x" }), /must be a list/);
+});
+
+test("combine: a connection asks BRouter for the alternative chosen", async () => {
+  const [a, b] = await threeLines();
+  const parts = [partOf(a, { n: 0, e: 0 }, { n: 0, e: 3000 }), partOf(b, { n: 800, e: 3000 }, { n: 800, e: 6000 })];
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const q = new URL(url).searchParams;
+    asked.push(q.get("alternativeidx"));
+    const coords = q.get("lonlats").split("|").map((c) => [...c.split(",").map(Number), 10]);
+    return new Response(JSON.stringify({ features: [{ geometry: { coordinates: coords } }] }));
+  };
+  try {
+    await svc.combineConnector({ from_part: parts[0], to_part: parts[1] });
+    const alt = await svc.combineConnector({ from_part: parts[0], to_part: parts[1], alternative: 2 });
+    assert.equal(alt.alternative, 2);
+    await assert.rejects(svc.combineConnector({ from_part: parts[0], to_part: parts[1], alternative: 4 }), /alternative from 0 to 3/);
+    await assert.rejects(svc.combineConnector({ from_part: parts[0] }), /needs the part it leaves and the part it joins/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(asked, ["0", "2"]);
+});
+
+test("combine: several parts of one route; at most 4 routes and 6 parts", async () => {
+  const [a, b, c] = await threeLines();
+  const req = {
+    parts: [
+      partOf(a, { n: 0, e: 0 }, { n: 0, e: 2000 }),
+      partOf(b, { n: 800, e: 2000 }, { n: 800, e: 4000 }),
+      partOf(a, { n: 0, e: 4000 }, { n: 0, e: 6000 }),
+    ],
+    closed: false, straight: true,
+  };
+  const prev = await svc.combinePreview(req);
+  assert.equal(prev.parts.length, 3);
+  approx(prev.distance_km, 2 + 0.8 + 2 + 0.8 + 2, { abs: 0.05 });
+
+  await importOne("D.gpx", east(2400, 6000));
+  await importOne("E.gpx", east(3200, 6000));
+  const [d, e] = ["D", "E"].map((n) => svc.listRoutes("").find((r) => r.name === n));
+  const one = (r, i) => partOf(r, { n: 0, e: i * 1000 }, { n: 0, e: i * 1000 + 500 });
+  await assert.rejects(svc.combinePreview({ parts: [a, b, c, d, e].map(one), straight: true }), /at most 4 routes/);
+  await assert.rejects(svc.combinePreview({ parts: [a, b, c, a, b, c, a].map(one), straight: true }), /Use 2 to 6 parts/);
 });

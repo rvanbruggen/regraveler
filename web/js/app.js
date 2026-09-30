@@ -3,11 +3,13 @@
 
 import { addBackup, backupFromEntries, isBackupZip, makeBackup, makeSelection, readBackup, restoreBackup } from "./backup.js";
 import * as brouter from "./brouter.js";
+import * as comb from "./combiner.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
 import { OSM_TAGS, isPlacesFileName, parsePlacesCsv, readAreasFile, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
 import { buildProfile, drawProfile, nearestIndex } from "./profile.js";
 import { unpackShare } from "./share.js";
+import { toMetric } from "./geo.js";
 import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
 import { RemoteBackend, detectServer } from "./remote.js";
@@ -200,11 +202,7 @@ function updateHash() {
   const p = filterParams();
   if (currentView !== "library") p.set("view", currentView);
   if ($("#prox-on").checked) p.set("near", $("#prox-distance").value || "0");
-  if (currentView === "combine") {
-    if (cb.a) p.set("a", cb.a);
-    if (cb.b) p.set("b", cb.b);
-    if (cb.mode !== "loop") p.set("pattern", cb.mode);
-  }
+  if (currentView === "combine") combineHash(p);
   if (currentView === "restart" && rs.id) p.set("route", rs.id);
   if (currentView === "findplaces" && fp.id) p.set("route", fp.id);
   if (currentView === "weather" && wx.id) {
@@ -368,6 +366,10 @@ function renderSelection() {
   }
   else if (!$("#tag-panel").hidden) renderTagPanel();
   $("#sel-count").textContent = `${n} selected`;
+  const combine = $("#sel-combine");
+  combine.disabled = n < 2 || n > 4;
+  combine.title = n < 2 ? "Select 2 to 4 routes to combine them" : n > 4 ? "Combine at most 4 routes: select fewer"
+    : "Combine parts of the selected routes into a new route";
   const all = $("#sel-all");
   all.checked = n > 0 && n === routes.length;
   all.indeterminate = n > 0 && n < routes.length;
@@ -437,6 +439,10 @@ $("#sel-map").addEventListener("click", () => {
   state.ids = [...checked];
   showView("map");
   refresh();
+});
+
+$("#sel-combine").addEventListener("click", () => {
+  if (checked.size >= 2 && checked.size <= 4) openCombiner([...checked]);
 });
 
 $("#sel-remove").addEventListener("click", async () => {
@@ -1781,7 +1787,26 @@ function renderCatalog() {
   if (!show) return;
   const f = filterForm.elements;
   const cur = { coll: f.coll.value, area: f.area.value, region: f.region.value, activity: f.activity.value, source: f.source.value, tags: f.tags.value.trim(), loop: f.loop.value };
-  const toggle = (field, value) => () => setFilters({ [field]: cur[field] === String(value) ? "" : value });
+  setChildren(box, catalogNodes(cat, {
+    cur,
+    toggle: (field, value) => () => setFilters({ [field]: cur[field] === String(value) ? "" : value }),
+    clearAll: () => setFilters({}, CATALOG_FIELDS),
+    smartActive: (s) => filterQueryNow() === s.query,
+    applySmart,
+    manage: true,
+  }));
+  renderFilterChips();
+}
+
+/**
+ * The Browse panel's contents. ctx: {cur: the Browse filters set now (by field), toggle(field,
+ * value) -> click handler, clearAll(), smartActive(s), applySmart(s), manage: show the buttons
+ * that add, rename and remove collections, areas and smart collections}.
+ */
+function catalogNodes(cat, { cur, toggle, clearAll, smartActive, applySmart: onSmart, manage }) {
+  const f = filterForm.elements;
+  const act = (list) => (manage ? list : []);
+  const add = (node) => (manage ? node : null);
   const openState = (name) => {
     try { return localStorage.getItem(`rerouter.catalog.${name}`) !== "0"; } catch { return true; }
   };
@@ -1798,49 +1823,49 @@ function renderCatalog() {
   const collTree = (nodes) => el("ul", {}, abc(nodes).map((c) => el("li", {},
     catNode({
       label: c.name, count: c.count, active: cur.coll === c.id, onclick: toggle("coll", c.id), title: svc.collectionPath(c.id),
-      actions: [
+      actions: act([
         ["＋", "New collection inside this one", () => newCollection(c.id)],
         ["✎", "Rename", () => renameCollection(c)],
         ["✕", "Remove this collection (the routes stay)", () => removeCollection(c)],
-      ],
+      ]),
     }),
     c.children.length ? collTree(c.children) : null)));
 
   const smartList = el("ul", {}, abc(cat.smart).map((s) => el("li", {}, catNode({
-    label: s.name, count: s.count, active: filterQueryNow() === s.query, title: `Filter: ${s.query}`,
-    onclick: () => applySmart(s),
-    actions: [
+    label: s.name, count: s.count, active: smartActive(s), title: `Filter: ${s.query}`,
+    onclick: () => onSmart(s),
+    actions: act([
       ["✎", "Rename, or save the current filters under this name", () => renameSmart(s)],
       ["✕", "Remove this smart collection", async () => { if (confirm(`Remove the smart collection “${s.name}”?`)) { await svc.deleteSmart(s.id); renderCatalog(); } }],
-    ],
+    ]),
   }))));
 
   const areaFile = el("input", { type: "file", accept: ".kml,.kmz", hidden: true, onchange: (e) => importAreasFile(e.target) });
   const areaList = el("ul", {}, abc(cat.areas).map((a) => el("li", {}, catNode({
     label: a.name, count: a.count, active: cur.area === a.id, onclick: toggle("area", a.id),
     title: `${a.name}: routes that start in this area`,
-    actions: [
+    actions: act([
       ["✎", "Rename", async () => { const n = prompt("Name of the area", a.name); if (n && n.trim()) { await svc.saveArea({ id: a.id, name: n }); refresh(); } }],
       ["✕", "Remove this area", async () => { if (confirm(`Remove the area “${a.name}”?`)) { await svc.deleteArea(a.id); if (cur.area === a.id) f.area.value = ""; refresh(); } }],
-    ],
+    ]),
   }))));
 
   const valueList = (items, field, label = (v) => v) => el("ul", {}, abc(items, (x) => label(x.value)).map((x) => el("li", {},
     catNode({ label: label(x.value), count: x.count, active: cur[field] === String(x.value), onclick: toggle(field, x.value) }))));
   const TAGS_SHOWN = 25;
 
-  setChildren(box,
+  return [
     catNode({
       label: "All routes", count: cat.total, active: CATALOG_FIELDS.every((k) => !cur[k]),
-      onclick: () => setFilters({}, CATALOG_FIELDS),
+      onclick: clearAll,
     }),
     section("activity", "Activity", valueList(cat.activities, "activity", ACT_LABEL)),
     section("areas", "Areas", cat.areas.length ? areaList : el("p", { class: "muted small" }, "Your own regions, e.g. Vlaamse Ardennen: routes that start inside."),
-      el("div", {},
+      add(el("div", {},
         el("a", { class: "cat-add", title: "Draw an area on the Map", onclick: () => { showView("map"); showOverview().then(() => startDrawingArea(overview.map)); } }, "＋ draw on the map"),
-        el("label", { class: "cat-add", title: "Areas drawn in Google My Maps (KML/KMZ)" }, "＋ import KML", areaFile))),
+        el("label", { class: "cat-add", title: "Areas drawn in Google My Maps (KML/KMZ)" }, "＋ import KML", areaFile)))),
     section("collections", "Collections", cat.collections.length ? collTree(cat.collections) : el("p", { class: "muted small" }, "Groups of routes you make: select routes in the table, then Collection…"),
-      el("a", { class: "cat-add", onclick: () => newCollection(null) }, "＋ new collection")),
+      add(el("a", { class: "cat-add", onclick: () => newCollection(null) }, "＋ new collection"))),
     cat.regions.length ? section("regions", "Regions", el("ul", {}, abc(cat.regions).map((g) => el("li", {},
       catNode({ label: g.name, count: g.count, active: cur.region === g.code, onclick: toggle("region", g.code), title: `${g.name}: routes that start there` }),
       g.provinces.length > 1 || g.provinces[0]?.name !== g.name
@@ -1848,13 +1873,12 @@ function renderCatalog() {
             catNode({ label: p.name, count: p.count, active: cur.region === p.code, onclick: toggle("region", p.code), title: `${p.name} (${g.name}): routes that start there` }))))
         : null)))) : null,
     section("smart", "Smart collections", cat.smart.length ? smartList : el("p", { class: "muted small" }, "Saved filters that keep themselves up to date."),
-      el("a", { class: "cat-add", title: "Save the filters you have set now", onclick: saveCurrentAsSmart }, "＋ save the current filters")),
+      add(el("a", { class: "cat-add", title: "Save the filters you have set now", onclick: saveCurrentAsSmart }, "＋ save the current filters"))),
     cat.sources.length ? section("source", "Source", valueList(cat.sources, "source")) : null,
     cat.tags.length ? section("tags", "Tags", [valueList(cat.tags.slice(0, TAGS_SHOWN), "tags"),
       cat.tags.length > TAGS_SHOWN ? el("p", { class: "muted small" }, `… and ${cat.tags.length - TAGS_SHOWN} more (type them in the Tags filter)`) : null]) : null,
     section("type", "Type", valueList(cat.loops.filter((x) => x.count), "loop", (v) => (v === "true" ? "Loops" : "Point to point"))),
-  );
-  renderFilterChips();
+  ];
 }
 
 const filterQueryNow = () => svc.filterQuery(filterParams());
@@ -2959,7 +2983,7 @@ function renderPairList() {
           " ↔ ",
           el("span", { class: "swatch", style: `background:${colorFor(p.b_id)}` }), name(p.b_id)),
         el("div", { class: "pair-info" }, describePair(p), " · ",
-          el("a", { class: "link", onclick: (e) => { e.stopPropagation(); openCombiner(p.a_id, p.b_id); } }, "combine")))
+          el("a", { class: "link", onclick: (e) => { e.stopPropagation(); openCombiner([p.a_id, p.b_id]); } }, "combine")))
     )
   );
 }
@@ -2992,40 +3016,108 @@ $("#prox-distance").addEventListener("input", () => {
 });
 
 // ------------------------------------------------------------------ combiner
+// A wizard in four steps: 1 choose 2 to 4 routes, 2 mark the parts of them to keep, 3 connect
+// the end of one part to the start of the next, 4 the combined ride (connectors routed with
+// BRouter), to save or download. On the map, points are placed on the routes' simplified
+// geometry; the service cuts the full-resolution tracks.
 
-const COLOR_A = "#2f6fd6";
-const COLOR_B = "#d62f4b";
+const COLOR_A = "#2f6fd6"; // also the route colour in Change start and Ride weather
+const ROUTE_COLORS = [COLOR_A, "#d62f4b", "#2e8b57", "#8e44ad"]; // per chosen route
 const COLOR_CONNECTOR = "#b35c1e"; // the logo's "new line" orange
+const CB_STEPS = ["routes", "parts", "connect", "ride"];
+const MAX_SNAP_M = 1500; // clicks further from the route than this are refused
+const CB_LIST_MAX = 300;
+const MIN_PART_KM = 0.02; // shorter parts have their start and end in the same place // routes listed in step 1 (the rest: narrow the list down)
 
 const cb = {
   map: null,
   loaded: false,
   loading: Promise.resolve(),
+  initial: null, // state from the link, applied once the routes are loaded
   routes: [], // all routes, from svc.mapRoutes
   byId: new Map(),
-  a: null,
-  b: null,
-  mode: "loop", // "outback" (out on A, back on B), "loop" (two crossings) or "open" (A then B)
-  modeTouched: false, // pattern chosen by the user (otherwise picked from the routes' starts)
-  points: { a1: null, a2: null, b1: null, b2: null }, // [lat, lon] each
-  pointsTouched: false, // placed or moved by the user (not just suggested)
-  placing: [], // point keys still to click, in order
+  tracks: new Map(), // route id -> combiner track of its simplified geometry
+  query: "", // Browse filters for the list in step 1 (a filter query)
+  search: "", // name search for that list
+  routeIds: [], // the chosen routes, in the order chosen (their colour)
+  parts: [], // {route_id, start, end, other_way}: start / end [lat, lon], null while placing
+  placing: null, // {part, end: "start" | "end"}: the point to click next
+  links: [], // {from, to}: from the end of part `from` to the start of part `to`
+  pending: null, // step 3: the part end clicked first, {part, end}
+  step: "routes",
+  order: null, // {order, closed} from the links, or null
+  orderError: "",
   preview: null,
   token: 0,
   nameTouched: false,
-  vias: [], // per connector: the id of a place it must pass, or null
+  vias: [], // per connector (riding order): the id of a place it must pass, or null
+  conns: new Map(), // connection key (see connGaps) -> its routes and the user's choice
+  altsOpen: null, // step 4: the connection whose options are shown
 };
-
-const POINT_KEYS = ["a1", "a2", "b1", "b2"];
-const POINT_HINTS = { a1: "join route A", a2: "leave route A", b1: "join route B", b2: "leave route B" };
-const MAX_SNAP_M = 1500; // clicks further from the route than this are refused
 
 const cbEl = {
-  a: $("#cb-a"), b: $("#cb-b"), revA: $("#cb-rev-a"), revB: $("#cb-rev-b"), rev: $("#cb-rev"),
-  profile: $("#cb-profile"), unpaved: $("#cb-unpaved"), straight: $("#cb-straight"),
+  rev: $("#cb-rev"), profile: $("#cb-profile"), unpaved: $("#cb-unpaved"), straight: $("#cb-straight"),
   status: $("#cb-status"), stats: $("#cb-stats"), save: $("#cb-save"), name: $("#cb-name"), saved: $("#cb-saved"),
-  points: $("#cb-points"),
+  back: $("#cb-back"), next: $("#cb-next"),
 };
+
+const partLetter = (i) => String.fromCharCode(65 + i);
+const routeColor = (id) => ROUTE_COLORS[Math.max(0, cb.routeIds.indexOf(id))];
+const partColor = (i) => routeColor(cb.parts[i]?.route_id);
+const partDone = (p) => !!(p.start && p.end);
+
+function cbTrack(id) {
+  let t = cb.tracks.get(id);
+  if (!t) {
+    const r = cb.byId.get(id);
+    t = comb.makeTrack(r.geometry.map(([lat, lon]) => [lat, lon, null]), r.is_loop);
+    cb.tracks.set(id, t);
+  }
+  return t;
+}
+
+/** A finished part as a combiner part (on the simplified geometry: for drawing and ordering). */
+function cbPart(p) {
+  const t = cbTrack(p.route_id);
+  return comb.part(t, comb.locate(t, ...p.start), comb.locate(t, ...p.end), !!p.other_way);
+}
+
+const partKm = (p) => {
+  const q = cbPart(p);
+  return { start: q.startAt / 1000, end: q.endAt / 1000, length: comb.legLength(comb.section(q.track, q.startAt, q.endAt, q.otherWay)) / 1000 };
+};
+
+function partLine(p) {
+  const q = cbPart(p);
+  return comb.toLatLon(comb.section(q.track, q.startAt, q.endAt, q.otherWay)).map(([lat, lon]) => [lat, lon]);
+}
+
+// ---- the link (URL hash): routes, parts, connections and step
+
+function combineHash(p) {
+  if (cb.routeIds.length) p.set("routes", cb.routeIds.join(","));
+  for (const q of cb.parts.filter(partDone)) {
+    const pt = ([lat, lon]) => `${lat.toFixed(6)},${lon.toFixed(6)}`;
+    p.append("part", `${q.route_id}:${pt(q.start)}:${pt(q.end)}${q.other_way ? ":o" : ""}`);
+  }
+  if (cb.links.length) p.set("links", cb.links.map((l) => `${l.from}-${l.to}`).join(","));
+  if (cb.step !== "routes") p.set("step", cb.step);
+}
+
+function combineFromHash(p) {
+  const num = (v) => Number(v) || null;
+  const routeIds = (p.get("routes") || [p.get("a"), p.get("b")].filter(Boolean).join(",")).split(",").map(num).filter(Boolean);
+  const parts = p.getAll("part").map((s) => {
+    const [id, a, b, o] = s.split(":");
+    const ll = (v) => (v || "").split(",").map(Number);
+    return { route_id: num(id), start: ll(a), end: ll(b), other_way: o === "o" };
+  }).filter((q) => q.route_id && q.start.length === 2 && q.end.length === 2 && [...q.start, ...q.end].every(Number.isFinite));
+  const links = (p.get("links") || "").split(",").filter(Boolean).map((s) => s.split("-").map(Number))
+    .filter(([f, t]) => Number.isInteger(f) && Number.isInteger(t)).map(([from, to]) => ({ from, to }));
+  return { routeIds, parts, links, step: CB_STEPS.includes(p.get("step")) ? p.get("step") : null };
+}
+
+// ---- loading
 
 function showCombine() {
   if (!cb.map) {
@@ -3035,15 +3127,9 @@ function showCombine() {
     cb.routeLayer = L.layerGroup().addTo(m);
     cb.resultLayer = L.layerGroup().addTo(m);
     cb.markerLayer = L.layerGroup().addTo(m);
-    m.on("click", (e) => { if (cb.placing.length) placeAt(e.latlng); });
+    m.on("click", (e) => { if (cb.placing) placeAt(e.latlng); });
     cb.map = m;
-    const p = new URLSearchParams(location.hash.slice(1));
-    const pattern = p.get("pattern") || (p.get("open") === "1" ? "open" : null);
-    if (["outback", "loop", "open"].includes(pattern)) {
-      setMode(pattern);
-      cb.modeTouched = true;
-    }
-    cb.initial = { a: Number(p.get("a")) || null, b: Number(p.get("b")) || null };
+    cb.initial = combineFromHash(new URLSearchParams(location.hash.slice(1)));
   }
   setTimeout(() => cb.map.invalidateSize(), 0);
   if (!cb.loaded) cb.loading = loadCombineRoutes();
@@ -3060,158 +3146,870 @@ async function loadCombineRoutes() {
     return;
   }
   cb.byId = new Map(cb.routes.map((r) => [r.id, r]));
-  const sorted = [...cb.routes].sort((x, y) => x.name.localeCompare(y.name));
-  for (const sel of [cbEl.a, cbEl.b]) {
-    sel.replaceChildren(el("option", { value: "" }, "— choose —"), ...sorted.map((r) => el("option", { value: r.id }, r.name)));
+  cb.tracks.clear();
+  const init = cb.initial;
+  cb.initial = null;
+  if (init) {
+    cb.routeIds = init.routeIds.filter((id) => cb.byId.has(id)).slice(0, 4);
+    cb.parts = init.parts.filter((q) => cb.routeIds.includes(q.route_id));
+    cb.links = init.parts.length === cb.parts.length ? init.links.filter((l) => l.from < cb.parts.length && l.to < cb.parts.length) : [];
+    if (cb.routeIds.length && !cb.parts.length && !init.step) cb.step = cb.routeIds.length >= 2 ? "parts" : "routes";
+  } else {
+    // Routes removed from the library meanwhile drop out (with their parts).
+    const keep = cb.routeIds.filter((id) => cb.byId.has(id));
+    if (keep.length !== cb.routeIds.length) {
+      cb.routeIds = keep;
+      cb.parts = cb.parts.filter((q) => keep.includes(q.route_id));
+      cb.links = [];
+    }
   }
+  computeOrder();
+  const step = init?.step || cb.step;
+  cb.step = "routes";
+  while (CB_STEPS.indexOf(cb.step) < CB_STEPS.indexOf(step) && canGo(CB_STEPS[CB_STEPS.indexOf(cb.step) + 1])) {
+    cb.step = CB_STEPS[CB_STEPS.indexOf(cb.step) + 1];
+  }
+  drawCombineBackground();
+  renderCombine();
+  fitCombine();
+  if (cb.step === "ride" && !cb.preview) runPreview();
+}
+
+function fitCombine() {
+  const lines = (cb.routeIds.length ? cb.routeIds : []).map((id) => L.polyline(cb.byId.get(id).geometry));
+  const group = lines.length ? L.featureGroup(lines) : L.featureGroup(cb.bgLayer.getLayers());
+  if (group.getLayers().length) cb.map.fitBounds(group.getBounds(), { padding: [30, 30] });
+}
+
+// ---- steps
+
+function computeOrder() {
+  try {
+    cb.order = comb.orderParts(cb.parts.length, cb.links);
+    cb.orderError = "";
+  } catch (err) {
+    cb.order = null;
+    cb.orderError = err.message;
+  }
+}
+
+function canGo(step) {
+  if (step === "routes") return true;
+  if (step === "parts") return cb.routeIds.length >= 2;
+  const done = cb.parts.filter(partDone);
+  const partsOk = canGo("parts") && done.length >= 2 && done.length === cb.parts.length &&
+    new Set(done.map((q) => q.route_id)).size >= 2 && done.every((q) => partKm(q).length >= MIN_PART_KM);
+  if (step === "connect") return partsOk;
+  return partsOk && !!cb.order;
+}
+
+/** Why the next step can't be reached yet (for the status line). */
+function whyNot(step) {
+  if (step === "parts") return "Choose at least two routes.";
+  if (step === "connect") {
+    if (cb.parts.length < 2) return "Mark at least two parts.";
+    if (!cb.parts.every(partDone)) return "Finish the part you are marking (or remove it).";
+    const short = cb.parts.findIndex((q) => partKm(q).length < MIN_PART_KM);
+    if (short >= 0) return `Part ${partLetter(short)} is too short: its start and end are in the same place.`;
+    return "Use parts of at least two different routes.";
+  }
+  if (step === "ride") return cb.orderError ? `${cb.orderError}.`.replace(/\.\.$/, ".") : "Connect the parts.";
+  return "";
+}
+
+function goStep(step) {
+  if (!canGo(step)) return;
+  stopPlacing(false);
+  cb.pending = null;
+  cb.altsOpen = null;
+  cb.step = step;
+  if (step !== "ride") {
+    cb.preview = null;
+    cb.token++;
+  }
+  renderCombine();
+  if (step === "ride") runPreview();
+}
+
+function renderCombine() {
+  const i = CB_STEPS.indexOf(cb.step);
+  $$("#cb-stepbar button").forEach((b) => {
+    b.disabled = !canGo(b.dataset.step);
+    b.classList.toggle("active", b.dataset.step === cb.step);
+  });
+  $$("#cb-side .cb-step").forEach((d) => (d.hidden = d.dataset.step !== cb.step));
+  cbEl.back.disabled = i === 0;
+  const next = CB_STEPS[i + 1];
+  cbEl.next.hidden = !next;
+  if (next) {
+    cbEl.next.disabled = !canGo(next);
+    cbEl.next.textContent = { parts: "Next: mark the parts ›", connect: "Next: connect them ›", ride: "Next: your ride ›" }[next];
+  }
+  if (cb.step === "routes") cb.bgLayer.addTo(cb.map);
+  else cb.bgLayer.remove();
+  if (cb.step === "routes") renderPicker();
+  if (cb.step === "parts") renderParts();
+  if (cb.step === "connect") renderLinks();
+  if (cb.step !== "ride") cbEl.status.textContent = cb.placing ? placingHint() : next && !canGo(next) ? whyNot(next) : "";
+  drawCombineRoutes();
+  drawCombineResult();
+  updateHash();
+}
+
+// ---- step 1: routes
+
+function pickQuery() {
+  const q = new URLSearchParams(cb.query);
+  if (cb.search.trim()) q.set("q", cb.search.trim());
+  else q.delete("q");
+  return q;
+}
+
+function renderPicker() {
+  // Chosen routes, each in its colour.
+  setChildren($("#cb-chosen"), cb.routeIds.length
+    ? cb.routeIds.map((id) => el("span", { class: "cb-chip" },
+        el("span", { class: "swatch", style: `background:${routeColor(id)}` }), cb.byId.get(id).name,
+        el("a", { title: "Leave this route out", onclick: () => toggleRoute(id) }, "×")))
+    : el("span", { class: "muted small" }, "No routes chosen yet."));
+  // Browse, choosing what the list shows (not the library's filters).
+  const q = new URLSearchParams(cb.query);
+  const cur = Object.fromEntries(CATALOG_FIELDS.map((k) => [k, k === "tags" ? q.getAll("tags").join(", ") : q.get(k) ?? ""]));
+  const setQuery = (query) => {
+    cb.query = query;
+    drawCombineBackground();
+    renderPicker();
+  };
+  setChildren($("#cb-catalog"), catalogNodes(svc.catalog(), {
+    cur,
+    toggle: (field, value) => () => {
+      const p = new URLSearchParams(cb.query);
+      if (cur[field] === String(value)) p.delete(field);
+      else p.set(field, value);
+      setQuery(p.toString());
+    },
+    clearAll: () => setQuery(""),
+    smartActive: (s) => svc.filterQuery(cb.query) === s.query,
+    applySmart: (s) => setQuery(s.query),
+    manage: false,
+  }));
+  const shown = svc.mapRoutes(pickQuery(), 15).sort((a, b) => a.name.localeCompare(b.name));
+  const full = cb.routeIds.length >= 4;
+  $("#cb-list-count").textContent = `${shown.length} route${shown.length === 1 ? "" : "s"}` +
+    (shown.length > CB_LIST_MAX ? ` (the first ${CB_LIST_MAX}: narrow the list down with Browse or a search)` : "") +
+    (full ? " · 4 chosen, the most there can be" : "");
+  setChildren($("#cb-list"), shown.slice(0, CB_LIST_MAX).map((r) => {
+    const on = cb.routeIds.includes(r.id);
+    return el("li", { class: on ? "on" : "" },
+      el("label", { class: "check" },
+        el("input", { type: "checkbox", checked: on, disabled: full && !on, onchange: () => toggleRoute(r.id) }),
+        on ? el("span", { class: "swatch", style: `background:${routeColor(r.id)}` }) : null,
+        el("span", { class: "cb-name" }, r.name),
+        el("span", { class: "muted small" }, fmt.km(r.distance_km))));
+  }));
+}
+
+function toggleRoute(id) {
+  if (cb.routeIds.includes(id)) {
+    cb.routeIds = cb.routeIds.filter((x) => x !== id);
+    [...cb.parts.keys()].reverse().forEach((i) => { if (cb.parts[i].route_id === id) removePart(i, false); });
+  } else {
+    if (cb.routeIds.length >= 4) {
+      cbEl.status.textContent = "Combine at most 4 routes: leave one out first.";
+      return;
+    }
+    cb.routeIds.push(id);
+  }
+  // Connector profile that fits the activity (gravel -> gravel, road -> fastbike, ...).
+  const acts = new Set(cb.routeIds.map((x) => cb.byId.get(x)?.activity));
+  const profile = acts.size === 1 ? activityProfiles[[...acts][0]] : null;
+  if (profile && [...cbEl.profile.options].some((o) => o.value === profile)) cbEl.profile.value = profile;
+  cb.nameTouched = false;
+  cbEl.saved.textContent = "";
+  renderCombine();
+  if (cb.routeIds.length) fitCombine();
+}
+
+/** The routes in the step-1 list, grey on the map; a click chooses one. */
+function drawCombineBackground() {
   cb.bgLayer.clearLayers();
+  const ids = new Set(svc.mapRoutes(pickQuery(), 15).map((r) => r.id));
   for (const r of cb.routes) {
+    if (!ids.has(r.id)) continue;
     L.polyline(r.geometry, { color: "#777", weight: 2, opacity: 0.35 })
       .bindTooltip(r.name, { sticky: true })
       .on("click", (e) => {
         L.DomEvent.stopPropagation(e);
-        if (cb.placing.length) placeAt(e.latlng);
-        else pickRoute(r.id);
+        if (cb.placing) placeAt(e.latlng);
+        else if (cb.step === "routes") toggleRoute(r.id);
       })
       .addTo(cb.bgLayer);
   }
-  if (cb.initial) {
-    const { a, b } = cb.initial;
-    cb.initial = null;
-    if (a || b) return setRoutes(cb.byId.has(a) ? a : null, cb.byId.has(b) ? b : null);
-  }
-  if (!cb.a && !cb.b && cb.routes.length) {
-    cb.map.fitBounds(L.featureGroup(cb.bgLayer.getLayers()).getBounds(), { padding: [20, 20] });
-  }
-  syncSelects();
-  renderPoints();
 }
 
-function syncSelects() {
-  cbEl.a.value = cb.a ?? "";
-  cbEl.b.value = cb.b ?? "";
+// ---- step 2: parts
+
+function renderParts() {
+  const box = $("#cb-parts");
+  const full = cb.parts.length >= 6;
+  setChildren(box, cb.routeIds.map((id) => {
+    const r = cb.byId.get(id);
+    const rows = [...cb.parts.keys()].filter((i) => cb.parts[i].route_id === id).map((i) => {
+      const p = cb.parts[i];
+      let what;
+      if (cb.placing?.part === i) what = el("strong", {}, cb.placing.end === "start" ? "click where it starts…" : "click where it ends…");
+      else if (partDone(p)) {
+        const k = partKm(p);
+        what = `km ${k.start.toFixed(1)} → km ${k.end.toFixed(1)} · ${fmt.km(k.length)}`;
+      } else what = "not placed";
+      return el("div", { class: `cb-part${cb.placing?.part === i ? " placing" : ""}` },
+        el("span", { class: "cb-badge", style: `border-color:${partColor(i)};color:${partColor(i)}` }, partLetter(i)),
+        el("span", { class: "where" }, what),
+        r.is_loop && partDone(p) ? el("label", { class: "check small", title: "Ride the other way round the loop, through its start" },
+          el("input", { type: "checkbox", checked: !!p.other_way, onchange: (e) => { p.other_way = e.target.checked; partChanged(); } }), "long way") : null,
+        el("button", { type: "button", class: "secondary", title: "Ride this part the other way", disabled: !partDone(p),
+          onclick: () => { [p.start, p.end] = [p.end, p.start]; partChanged(); } }, "⇄"),
+        el("button", { type: "button", class: "secondary", title: "Place its start and end again", onclick: () => startPlacing(i, "start") }, "Redo"),
+        el("button", { type: "button", class: "secondary", title: "Remove this part", onclick: () => removePart(i) }, "✕"));
+    });
+    return el("div", { class: "cb-route" },
+      el("div", { class: "cb-route-name" }, el("span", { class: "swatch", style: `background:${routeColor(id)}` }), r.name,
+        el("span", { class: "muted small" }, ` ${fmt.km(r.distance_km)}${r.is_loop ? ", loop" : ""}`)),
+      rows,
+      el("div", { class: "actions" },
+        el("button", { type: "button", class: "secondary", disabled: full, title: full ? "At most 6 parts" : "Click its start and end on the map",
+          onclick: () => addPart(id) }, "＋ Part"),
+        r.is_loop ? null : el("button", { type: "button", class: "secondary", disabled: full, title: "From its start to its end",
+          onclick: () => addPart(id, true) }, "Whole route")));
+  }));
 }
 
-function pickRoute(id) {
-  if (!cb.a) setRoutes(id, cb.b === id ? null : cb.b);
-  else if (id !== cb.a) setRoutes(cb.a, id);
+function addPart(id, whole = false) {
+  if (cb.parts.length >= 6) return;
+  const g = cb.byId.get(id).geometry;
+  cb.parts.push({ route_id: id, start: whole ? g[0] : null, end: whole ? g[g.length - 1] : null, other_way: false });
+  if (whole) partChanged();
+  else startPlacing(cb.parts.length - 1, "start");
 }
 
-async function setRoutes(a, b) {
-  cb.a = a || null;
-  cb.b = b && b !== a ? b : null;
-  cb.points = { a1: null, a2: null, b1: null, b2: null };
-  cb.pointsTouched = false;
+/** Remove part i; the connections to it go, the others follow the renumbering. */
+function removePart(i, render = true) {
+  const n = (k) => (k > i ? k - 1 : k);
+  if (cb.placing?.part === i) {
+    cb.placing = null;
+    cb.map?.getContainer().classList.remove("placing");
+  } else if (cb.placing) cb.placing.part = n(cb.placing.part);
+  cb.parts.splice(i, 1);
+  cb.links = cb.links.filter((l) => l.from !== i && l.to !== i).map((l) => ({ from: n(l.from), to: n(l.to) }));
   cb.vias = [];
-  stopPlacing();
-  cb.preview = null;
-  cb.nameTouched = false;
-  cbEl.saved.textContent = "";
-  syncSelects();
-  // Connector profile that fits the activity (gravel -> gravel, road -> fastbike, mtb -> mtb,
-  // hiking -> hiking-mountain).
-  const acts = new Set([cb.a, cb.b].filter(Boolean).map((id) => cb.byId.get(id)?.activity));
-  const profile = acts.size === 1 ? activityProfiles[[...acts][0]] : null;
-  if (profile && [...cbEl.profile.options].some((o) => o.value === profile)) cbEl.profile.value = profile;
-  updateHash();
-  updateDirectionLabels();
-  drawCombineRoutes();
-  drawCombineResult();
-  const lines = [cb.a, cb.b].filter(Boolean).map((id) => L.polyline(cb.byId.get(id).geometry));
-  if (lines.length) cb.map.fitBounds(L.featureGroup(lines).getBounds(), { padding: [30, 30] });
-  if (cb.a && cb.b) {
-    // Routes that start in the same place: out on A, back on B; otherwise two crossings.
-    if (!cb.modeTouched) setMode(startsNear(cb.a, cb.b) ? "outback" : "loop");
-    updateHash();
-    await suggestPoints();
-  } else cbEl.status.textContent = cb.a ? "Now choose route B (or click it on the map)." : "Choose route A (or click it on the map).";
+  computeOrder();
+  if (render) renderCombine();
 }
 
-/** Do routes a and b start within 1 km of each other? */
-function startsNear(a, b) {
-  const [p, q] = [a, b].map((id) => cb.byId.get(id)?.geometry?.[0]);
-  if (!p || !q) return false;
-  const dy = (q[0] - p[0]) * 111320;
-  const dx = (q[1] - p[1]) * 111320 * Math.cos((p[0] * Math.PI) / 180);
-  return Math.hypot(dx, dy) <= 1000;
+function partChanged() {
+  cb.preview = null;
+  cb.vias = [];
+  computeOrder();
+  renderCombine();
+}
+
+function startPlacing(part, end) {
+  const p = cb.parts[part];
+  // Redo keeps the old points until the new ones are placed (Esc puts them back).
+  cb.placing = { part, end, before: partDone(p) ? { start: p.start, end: p.end } : null };
+  if (end === "start") {
+    cb.parts[part].start = null;
+    cb.parts[part].end = null;
+  }
+  cb.map.getContainer().classList.add("placing");
+  renderCombine();
+}
+
+function stopPlacing(render = true) {
+  const pl = cb.placing;
+  cb.placing = null;
+  cb.map?.getContainer().classList.remove("placing");
+  // A part left half placed gets its old points back, or is dropped.
+  const p = pl && cb.parts[pl.part];
+  if (p && !partDone(p)) {
+    if (pl.before) Object.assign(p, pl.before);
+    else removePart(pl.part, false);
+  }
+  if (render) renderCombine();
+}
+
+function placingHint() {
+  const { part, end } = cb.placing;
+  const r = cb.byId.get(cb.parts[part].route_id);
+  return `Click where part ${partLetter(part)} ${end === "start" ? "starts" : "ends"} on “${r.name}”. Esc cancels.`;
+}
+
+/** The point on route `id` nearest to latlng, or null when it is further than MAX_SNAP_M. */
+function snapTo(id, latlng) {
+  const t = cbTrack(id);
+  const at = comb.locate(t, latlng.lat, latlng.lng);
+  const p = comb.pointAt(t, at);
+  const [x, y] = toMetric(latlng.lat, latlng.lng);
+  const d = Math.hypot(p[0] - x, p[1] - y);
+  return d > MAX_SNAP_M ? { d } : { d, point: comb.latLonOf(p) };
+}
+
+function placeAt(latlng) {
+  const { part, end } = cb.placing;
+  const p = cb.parts[part];
+  const snap = snapTo(p.route_id, latlng);
+  if (!snap.point) {
+    cbEl.status.textContent = `That is ${(snap.d / 1000).toFixed(1)} km from “${cb.byId.get(p.route_id).name}”; click closer to it (or press Esc).`;
+    return;
+  }
+  p[end] = snap.point;
+  if (end === "start") {
+    cb.placing = { ...cb.placing, end: "end" };
+    return renderCombine();
+  }
+  cb.placing = null;
+  cb.map.getContainer().classList.remove("placing");
+  partChanged();
+}
+
+// ---- step 3: connections
+
+function renderLinks() {
+  const ends = partEnds();
+  setChildren($("#cb-links"), cb.links.map((l, k) => el("li", {},
+    el("span", { class: "cb-badge", style: `border-color:${partColor(l.from)};color:${partColor(l.from)}` }, `${partLetter(l.from)}■`),
+    " → ",
+    el("span", { class: "cb-badge", style: `border-color:${partColor(l.to)};color:${partColor(l.to)}` }, `${partLetter(l.to)}▶`),
+    el("span", { class: "muted small" }, ` ${fmt.km(gapKm(ends, l))} apart`),
+    el("a", { class: "link", title: "Remove this connection", onclick: () => { cb.links.splice(k, 1); linksChanged(); } }, " ×"))));
+  const box = $("#cb-order");
+  if (cb.order) {
+    const names = cb.order.order.map(partLetter);
+    const cross = comb.connectorsCross(cb.order.order.map((i) => cbPart(cb.parts[i])), cb.order.closed);
+    setChildren(box,
+      el("strong", {}, cb.order.closed ? "A loop: " : "Point to point: "),
+      [...names, ...(cb.order.closed ? [`back to ${names[0]}`] : [])].join(" → "), ".",
+      cross ? [el("br"), el("span", { class: "cb-warn" }, "The connections cross each other: a part may be better ridden the other way (⇄ in step 2).")] : null);
+  } else setChildren(box, el("span", { class: "muted" }, cb.links.length ? `${cb.orderError}.`.replace(/\.\.$/, ".") : ""));
+  if (cb.pending) {
+    const { part, end } = cb.pending;
+    cbEl.status.textContent = `Now click the ${end === "end" ? "start (▶) of the part that follows" : "end (■) of the part before"} ${partLetter(part)}.`;
+  }
+}
+
+const partEnds = () => cb.parts.map((p) => {
+  const q = cbPart(p);
+  return [comb.pointAt(q.track, q.startAt), comb.pointAt(q.track, q.endAt)];
+});
+const gapKm = (ends, l) => Math.hypot(ends[l.to][0][0] - ends[l.from][1][0], ends[l.to][0][1] - ends[l.from][1][1]) / 1000;
+
+function connectClick(part, end) {
+  const pend = cb.pending;
+  if (!pend || pend.part === part || pend.end === end) {
+    // First click, or a click that can't finish the connection: (re)select this end.
+    cb.pending = pend && pend.part === part && pend.end === end ? null : { part, end };
+    return renderCombine();
+  }
+  const from = end === "start" ? pend.part : part;
+  const to = end === "start" ? part : pend.part;
+  // An end joins one connection: a new one replaces the old.
+  cb.links = cb.links.filter((l) => l.from !== from && l.to !== to);
+  cb.links.push({ from, to });
+  cb.pending = null;
+  linksChanged();
+}
+
+function linksChanged() {
+  cb.vias = [];
+  cb.preview = null;
+  computeOrder();
+  renderCombine();
+}
+
+function autoConnect(closed) {
+  try {
+    cb.links = comb.suggestOrder(cb.parts.map(cbPart), closed);
+  } catch (err) {
+    cbEl.status.textContent = err.message;
+    return;
+  }
+  cb.pending = null;
+  linksChanged();
+}
+
+// ---- drawing
+
+function markerIcon(label, color, extra = "") {
+  return L.divIcon({ className: `cb-marker ${extra}`, html: `<span style="border-color:${color};color:${color}">${label}</span>`, iconSize: [30, 22], iconAnchor: [15, 11] });
 }
 
 function drawCombineRoutes() {
   cb.routeLayer.clearLayers();
-  for (const [id, color] of [[cb.a, COLOR_A], [cb.b, COLOR_B]]) {
-    if (!id) continue;
-    L.polyline(cb.byId.get(id).geometry, { color, weight: 3, opacity: cb.preview ? 0.35 : 0.9, interactive: false })
+  const faded = cb.step !== "routes";
+  for (const id of cb.routeIds) {
+    L.polyline(cb.byId.get(id).geometry, { color: routeColor(id), weight: 3, opacity: faded ? 0.45 : 0.9, interactive: cb.step === "parts" })
+      .on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        if (cb.placing) placeAt(e.latlng);
+      })
       .addTo(cb.routeLayer);
+  }
+  if (cb.step !== "parts" && cb.step !== "connect") return;
+  // The parts, thick, with their start (▶) and end (■).
+  cb.parts.forEach((p, i) => {
+    if (!partDone(p)) {
+      if (p.start) L.marker(p.start, { icon: markerIcon(`${partLetter(i)}▶`, partColor(i)), interactive: false }).addTo(cb.routeLayer);
+      return;
+    }
+    L.polyline(partLine(p), { color: partColor(i), weight: 7, opacity: 0.9, interactive: false }).addTo(cb.routeLayer);
+    for (const end of ["start", "end"]) {
+      const label = `${partLetter(i)}${end === "start" ? "▶" : "■"}`;
+      const pending = cb.pending?.part === i && cb.pending.end === end;
+      const m = L.marker(p[end], {
+        icon: markerIcon(label, partColor(i), pending ? "pending" : ""), zIndexOffset: 1000, draggable: cb.step === "parts",
+      }).bindTooltip(`${end === "start" ? "Start" : "End"} of part ${partLetter(i)}${cb.step === "parts" ? " (drag along the route)" : ""}`);
+      if (cb.step === "parts") {
+        m.on("dragend", (e) => {
+          const snap = snapTo(p.route_id, e.target.getLatLng());
+          if (snap.point) p[end] = snap.point;
+          partChanged();
+        });
+      } else m.on("click", () => connectClick(i, end));
+      m.addTo(cb.routeLayer);
+    }
+  });
+  if (cb.step === "connect") {
+    const ends = partEnds();
+    for (const l of cb.links) {
+      L.polyline([comb.latLonOf(ends[l.from][1]), comb.latLonOf(ends[l.to][0])], { color: COLOR_CONNECTOR, weight: 3, dashArray: "6 6", interactive: false })
+        .addTo(cb.routeLayer);
+    }
   }
 }
 
-function setMode(mode) {
-  cb.mode = mode;
-  $$('input[name="cb-mode"]').forEach((r) => (r.checked = r.value === mode));
-  updateDirectionLabels();
+// ---- step 4: the ride
+
+// A connection is routed on its own (svc.combineConnector) and used as the user chose it: the
+// preview, the GPX and the saved route all take those exact lines (approved connectors), so
+// nothing is routed again behind the user's back.
+
+const CONN_ALTS = [0, 1, 2, 3]; // BRouter's best route and its alternatives
+
+const routingKey = () => [cbEl.profile.value, cbEl.unpaved.checked && cbEl.profile.value === "gravel", cbEl.straight.checked];
+
+/**
+ * The gaps to bridge in riding order: {from, to (part indices), from_part, to_part, via, key}.
+ * The key changes when anything that changes the connection does (the part ends it joins,
+ * the place to ride through, the routing options); a connection keeps its routes and the
+ * user's choice as long as its key stays the same.
+ */
+function connGaps() {
+  if (!cb.order) return [];
+  const { order, closed } = cb.order;
+  const pairs = [];
+  for (let k = 1; k < order.length; k++) pairs.push([order[k - 1], order[k]]);
+  if (closed) pairs.push([order[order.length - 1], order[0]]);
+  return pairs.map(([i, j], k) => {
+    const from_part = { ...cb.parts[i] }, to_part = { ...cb.parts[j] };
+    const via = cb.vias[k] || null;
+    const key = JSON.stringify([from_part.route_id, from_part.end, to_part.route_id, to_part.start, via, routingKey()]);
+    return { from: i, to: j, from_part, to_part, via, key };
+  });
 }
 
-function updateDirectionLabels() {
-  const a = cb.byId.get(cb.a), b = cb.byId.get(cb.b);
-  const set = (input, label, text, enabled) => {
-    label.querySelector("span").textContent = text;
-    input.disabled = !enabled;
-    if (!enabled) input.checked = false;
-    label.classList.toggle("muted", !enabled);
+/** {choice: 0-3 or "s" (straight), results: {choice: connector}, errors: {choice: message}, accepted, direct}. */
+function connState(gap) {
+  let st = cb.conns.get(gap.key);
+  if (!st) {
+    st = { choice: cbEl.straight.checked ? "s" : 0, results: {}, errors: {}, accepted: false, direct: false };
+    cb.conns.set(gap.key, st);
+  }
+  return st;
+}
+
+/** Route one option of a connection (once; the result is kept). */
+async function fetchConn(gap, st, choice) {
+  if (st.results[choice] || st.errors[choice]) return;
+  const straight = choice === "s" || cbEl.straight.checked;
+  try {
+    const res = await svc.combineConnector({
+      from_part: gap.from_part, to_part: gap.to_part, via: gap.via,
+      profile: cbEl.profile.value, prefer_unpaved: cbEl.unpaved.checked, straight,
+      alternative: choice === "s" ? 0 : choice,
+    });
+    st.results[choice] = res;
+    // Parts less than 25 m apart are joined directly: nothing to choose there.
+    if (choice === 0 && !straight && !res.routed) st.direct = st.accepted = true;
+  } catch (err) {
+    // An alternative BRouter doesn't have, next to a best route it does have.
+    st.errors[choice] = choice !== 0 && choice !== "s" && st.results[0] ? "BRouter has no such alternative here" : err.message;
+  }
+}
+
+const chosenConn = (gap) => {
+  const st = connState(gap);
+  return st.results[st.choice] || null;
+};
+
+function combineRequest(extra = {}) {
+  return {
+    parts: cb.order.order.map((i) => ({ ...cb.parts[i] })),
+    closed: cb.order.closed,
+    reverse: cbEl.rev.checked,
+    profile: cbEl.profile.value,
+    prefer_unpaved: cbEl.unpaved.checked,
+    straight: cbEl.straight.checked,
+    vias: cb.vias,
+    connectors: connGaps().map(chosenConn),
+    ...extra,
   };
-  set(cbEl.revA, $("#cb-rev-a-label"), a && !a.is_loop ? "Other way round A (A is not a loop)" : "Other way round A (through its start)", !!a?.is_loop);
-  set(cbEl.revB, $("#cb-rev-b-label"), b && !b.is_loop ? "Other way round B (B is not a loop)" : "Other way round B (through its start)", !!b?.is_loop);
-  const gravel = cbEl.profile.value === "gravel" && !cbEl.straight.checked;
-  $("#cb-unpaved-label").hidden = !gravel;
+}
+
+function updateRoutingOptions() {
+  $("#cb-unpaved-label").hidden = !(cbEl.profile.value === "gravel" && !cbEl.straight.checked);
   cbEl.profile.disabled = cbEl.straight.checked;
 }
 
-// ---- the four points
+async function runPreview() {
+  if (cb.step !== "ride" || !cb.order) return;
+  updateRoutingOptions();
+  const token = ++cb.token;
+  cb.preview = null;
+  drawCombineResult();
+  const gaps = connGaps();
+  for (const [k, g] of gaps.entries()) {
+    const st = connState(g);
+    if (st.results[st.choice] || st.errors[st.choice]) continue;
+    cbEl.status.textContent = `Routing connection ${k + 1} of ${gaps.length}…`;
+    await fetchConn(g, st, st.choice);
+    if (token !== cb.token) return; // something changed meanwhile: a newer run is on its way
+    renderConns();
+  }
+  const failed = gaps.findIndex((g) => !chosenConn(g));
+  if (failed >= 0) {
+    const st = connState(gaps[failed]);
+    cbEl.status.textContent = `Connection ${failed + 1} could not be routed: ${st.errors[st.choice]} Pick a straight line or another option for it.`;
+    openConnOptions(failed);
+    return;
+  }
+  let res;
+  try {
+    res = await svc.combinePreview(combineRequest());
+  } catch (err) {
+    if (token !== cb.token) return;
+    cbEl.status.textContent = `Error: ${err.message}`;
+    return;
+  }
+  if (token !== cb.token) return; // a newer preview is on its way
+  cb.preview = res;
+  if (!cb.nameTouched) {
+    const names = [...new Set(cb.order.order.map((i) => cb.byId.get(cb.parts[i].route_id).name))];
+    cbEl.name.value = names.join(" + ");
+  }
+  cbEl.status.replaceChildren(res.description);
+  drawCombineRoutes();
+  drawCombineResult();
+}
 
-const routeOfPoint = (key) => (key[0] === "a" ? cb.a : cb.b);
-const pointLabel = (key) => key.toUpperCase();
+/** Pick an option for connection k; the route is previewed with it (not yet accepted). */
+async function chooseConn(k, choice) {
+  const g = connGaps()[k];
+  const st = connState(g);
+  st.choice = choice;
+  st.accepted = false;
+  await runPreview();
+}
 
-function renderPoints() {
-  const parts = cb.preview?.parts || [];
-  cbEl.points.replaceChildren(...POINT_KEYS.map((key) => {
-    const part = parts[key[0] === "a" ? 0 : 1];
-    let where;
-    if (cb.placing[0] === key) where = "click it on the map…";
-    else if (part && cb.points[key]) where = `${fmt.km(key[1] === "1" ? part.start_km : part.end_km)} along route ${key[0].toUpperCase()}`;
-    else where = cb.points[key] ? "placed" : "not placed";
-    return el("div", { class: `cb-point${cb.placing[0] === key ? " placing" : ""}` },
-      el("span", { class: `cb-marker ${key[0]}` }, pointLabel(key)),
-      el("span", { class: "where", title: POINT_HINTS[key] }, where),
-      el("button", {
-        type: "button", class: "secondary", disabled: !routeOfPoint(key),
-        onclick: () => startPlacing([key]),
-      }, "Place"));
+/** Show (or hide) the options of connection k. */
+function toggleConnOptions(k) {
+  if (cb.altsOpen !== k) return openConnOptions(k);
+  cb.altsOpen = null;
+  renderConns();
+  drawCombineResult();
+}
+
+/** Show the options of connection k, routing the ones not asked for yet. */
+async function openConnOptions(k) {
+  cb.altsOpen = k;
+  renderConns();
+  drawCombineResult();
+  const g = connGaps()[k];
+  const st = connState(g);
+  for (const choice of [...(cbEl.straight.checked ? [] : CONN_ALTS), "s"]) {
+    if (st.results[choice] || st.errors[choice]) continue;
+    await fetchConn(g, st, choice);
+    if (cb.altsOpen !== k || cb.step !== "ride") return;
+    renderConns();
+    drawCombineResult();
+  }
+}
+
+/** The option an alternative duplicates (BRouter may give the same route twice), or null. */
+function sameAs(st, choice) {
+  const r = st.results[choice];
+  if (!r || choice === "s") return null;
+  for (const c of CONN_ALTS) {
+    if (c === choice) return null;
+    const q = st.results[c];
+    if (q && q.points.length === r.points.length && q.distance_km === r.distance_km) return c;
+  }
+  return null;
+}
+
+function choiceName(choice) {
+  if (choice === "s" || cbEl.straight.checked) return "straight line";
+  return choice === 0 ? "BRouter's best route" : `BRouter's route ${choice + 1}`;
+}
+
+const partBadge = (i, mark) => el("span", { class: "cb-badge", style: `border-color:${partColor(i)};color:${partColor(i)}` }, `${partLetter(i)}${mark}`);
+
+/** Step 4: per connection its route, Accept, and the other options (routes, straight, a place). */
+function renderConns() {
+  const gaps = cb.step === "ride" ? connGaps() : [];
+  $("#cb-conns-box").hidden = !gaps.length;
+  const cats = svc.placeCategories();
+  setChildren($("#cb-conns"), gaps.map((g, k) => {
+    const st = connState(g);
+    const res = st.results[st.choice];
+    const err = st.errors[st.choice];
+    const what = err ? el("span", { class: "err" }, err)
+      : !res ? el("span", { class: "muted" }, "routing…")
+      : st.direct ? `${fmt.km(res.distance_km)}: the parts touch, joined directly`
+      : `${fmt.km(res.distance_km)}, ${choiceName(st.choice)}${res.via ? `, through ${res.via.name}` : ""}`;
+    const head = el("div", { class: "cb-conn-head" },
+      partBadge(g.from, "■"), "→", partBadge(g.to, "▶"),
+      el("span", { class: "what" }, what),
+      st.direct ? null
+        : st.accepted ? el("span", { class: "cb-ok" }, "✓ accepted ",
+            el("a", { class: "link small", title: "Take the acceptance back", onclick: () => { st.accepted = false; renderConns(); } }, "undo"))
+        : el("button", { type: "button", disabled: !res || !cb.preview, onclick: () => { st.accepted = true; renderConns(); } }, "Accept"),
+      st.direct ? null : el("button", { type: "button", class: "secondary", onclick: () => toggleConnOptions(k) },
+        cb.altsOpen === k ? "Hide options" : "Other options…"));
+    if (cb.altsOpen !== k || st.direct) return el("li", {}, head);
+    const option = (choice) => {
+      const r = st.results[choice], e = st.errors[choice], dup = sameAs(st, choice);
+      const label = choice === "s" ? "Straight line" : `Route ${choice + 1}${choice === 0 ? " (BRouter's best)" : ""}`;
+      const info = e ? `: ${e}` : !r ? ": routing…" : dup != null ? `: the same as route ${dup + 1}` : `: ${fmt.km(r.distance_km)}`;
+      return el("label", { class: "check" },
+        el("input", { type: "radio", name: `cb-conn-${k}`, checked: st.choice === choice, disabled: !r || dup != null,
+          onchange: () => chooseConn(k, choice) }),
+        `${label}${info}`);
+    };
+    // Through one of your places near the connection (a café, water, a viewpoint, …).
+    let via = null;
+    const ends = res || Object.values(st.results)[0];
+    if (svc.visiblePlaces().length && ends) {
+      const options = svc.placesForConnector(ends.from, ends.to);
+      const chosen = g.via ? svc.place(g.via) : null;
+      if (chosen && !options.some((o) => o.place.id === chosen.id)) options.unshift({ place: chosen, detour_km: null });
+      via = el("label", {}, "Through a place ",
+        el("select", {
+          onchange: (e) => {
+            cb.vias[k] = e.target.value || null;
+            runPreview();
+          },
+        },
+          el("option", { value: "" }, options.length ? "— none —" : "— no places near this connection —"),
+          options.map(({ place: p, detour_km }) => el("option", { value: p.id, selected: chosen?.id === p.id },
+            `${categoryOf(p.category, cats).symbol} ${p.name}${detour_km != null ? ` (+${detour_km.toFixed(1)} km)` : ""}`))));
+    }
+    return el("li", {}, head, el("div", { class: "cb-alts" },
+      cbEl.straight.checked ? null : CONN_ALTS.map(option), option("s"), via));
   }));
-  $("#cb-click-all").disabled = !(cb.a && cb.b);
-  $("#cb-suggest").disabled = !(cb.a && cb.b);
-  $("#cb-swap-a").disabled = !(cb.points.a1 && cb.points.a2);
-  $("#cb-swap-b").disabled = !(cb.points.b1 && cb.points.b2);
+  updateSaveState(gaps);
 }
 
-function startPlacing(keys) {
-  cb.placing = keys.filter((k) => routeOfPoint(k));
-  if (!cb.placing.length) return;
-  cb.map.getContainer().classList.add("placing");
-  promptPlacing();
+/** Save and download once every connection is accepted (parts that touch need nothing). */
+function updateSaveState(gaps = connGaps()) {
+  const open = gaps.filter((g) => {
+    const st = connState(g);
+    return !st.accepted && !st.direct;
+  }).length;
+  const ready = !!cb.preview && !open;
+  $("#cb-save-btn").disabled = !ready;
+  $("#cb-download").disabled = !ready;
+  $("#cb-accept-all").disabled = !cb.preview || !open;
+  const hint = $("#cb-accept-hint");
+  hint.hidden = !cb.preview || !open;
+  hint.textContent = open === 1 ? "Accept the last connection to save or download the route."
+    : `Accept the ${open} connections to save or download the route.`;
 }
 
-function stopPlacing() {
-  cb.placing = [];
-  cb.map?.getContainer().classList.remove("placing");
-  renderPoints();
+/** "Your ride": the combined route in words, step by step. */
+function renderRide(res) {
+  $("#cb-ride").hidden = !res;
+  if (!res) return;
+  const order = cb.order.order;
+  const letter = (k) => partLetter(order[k]);
+  const routeOf = (k) => cb.byId.get(res.parts[k].route_id);
+  // Where a point lies on its route, in words: "the start", "km 37.6", ...
+  const where = (route, km) => {
+    const len = route?.distance_km ?? Infinity;
+    if (km < 0.05) return route?.is_loop ? "the start/finish" : "the start";
+    if (km > len - 0.05) return route?.is_loop ? "the start/finish" : "the end";
+    return `km ${km.toFixed(1)}`;
+  };
+  const direction = (p) => (p.with_route ? "in the route's own direction" : el("span", { class: "against" }, "against the route's direction (backwards)"));
+  // A connector step: routed, a short straight join, or none at all (the parts touch).
+  const connector = (c, to, touching) => (!c.routed && c.distance_km < 0.03 && !c.via ? touching
+    : `Connector to ${to}${c.via ? `, through ${c.via.name}` : ""}: ${fmt.km(c.distance_km)}` +
+      `${c.routed ? ", routed along roads and paths" : ", joined in a straight line"}.`);
+  const steps = [[`Start at the start of part ${letter(0)}: ${where(routeOf(0), res.parts[0].start_km)} of “${routeOf(0).name}”.`]];
+  res.parts.forEach((p, k) => {
+    if (k) {
+      steps.push([connector(res.connectors[k - 1], `part ${letter(k)}`,
+        `Part ${letter(k)} starts right there, on “${routeOf(k).name}”.`)]);
+    }
+    steps.push([`Ride part ${letter(k)} along “${routeOf(k).name}” to ${where(routeOf(k), p.end_km)}: ${fmt.km(p.distance_km)}, `, direction(p), "."]);
+  });
+  if (cb.order.closed) {
+    steps.push([connector(res.connectors[res.connectors.length - 1], `the start of part ${letter(0)}, where you started`,
+      "You're back where you started: no connector needed.")]);
+  }
+  steps.push([`${res.is_loop ? "A loop" : "Point to point"} of ${fmt.km(res.distance_km)} with ${fmt.m(res.elevation_gain_m)} of climbing.`]);
+  setChildren($("#cb-ride-steps"), steps.map((parts) => el("li", {}, ...parts.filter((x) => x !== null && x !== ""))));
 }
 
-function promptPlacing() {
-  const key = cb.placing[0];
-  const route = key[0].toUpperCase();
-  cbEl.status.textContent = `Click ${pointLabel(key)} on route ${route} (${route === "A" ? "blue" : "red"}): where you ${POINT_HINTS[key]}. Esc cancels.`;
-  renderPoints();
+function drawCombineResult() {
+  cb.resultLayer.clearLayers();
+  cb.markerLayer.clearLayers();
+  const res = cb.step === "ride" ? cb.preview : null;
+  cbEl.stats.hidden = !res;
+  cbEl.save.hidden = !res;
+  renderRide(res);
+  renderConns();
+  // The other options of the connection whose options are shown: click one to pick it.
+  if (cb.step === "ride" && cb.altsOpen != null) {
+    const g = connGaps()[cb.altsOpen];
+    const st = g && connState(g);
+    for (const [choice, r] of Object.entries(st?.results || {})) {
+      const c = choice === "s" ? "s" : Number(choice);
+      if (c === st.choice || sameAs(st, c) != null) continue;
+      L.polyline(r.points.map(([lat, lon]) => [lat, lon]), { color: COLOR_CONNECTOR, weight: 4, opacity: 0.55, dashArray: "2 8" })
+        .bindTooltip(`${c === "s" ? "Straight line" : `Route ${c + 1}`}: ${fmt.km(r.distance_km)} (click to pick it)`, { sticky: true })
+        .on("click", () => chooseConn(cb.altsOpen, c))
+        .addTo(cb.resultLayer);
+    }
+  }
+  if (!res) return;
+  const order = cb.order.order;
+  for (const leg of res.legs) {
+    const k = leg.kind === "connector" ? -1 : leg.kind.charCodeAt(0) - 97;
+    L.polyline(leg.geometry, {
+      color: k < 0 ? COLOR_CONNECTOR : partColor(order[k]), weight: k < 0 ? 5 : 6, opacity: 0.9, interactive: false,
+      dashArray: k < 0 && !leg.routed ? "6 6" : null,
+    }).addTo(cb.resultLayer);
+  }
+  L.marker(res.start, { icon: L.divIcon({ className: "cb-start", html: "Start", iconSize: [42, 20], iconAnchor: [21, 26] }), interactive: false })
+    .addTo(cb.markerLayer);
+  res.parts.forEach((p, k) => {
+    L.marker(p.start, { icon: markerIcon(`${partLetter(order[k])}▶`, partColor(order[k])), interactive: false }).addTo(cb.markerLayer);
+  });
+  const stats = [
+    ["Distance", fmt.km(res.distance_km)],
+    ["Elevation gain", fmt.m(res.elevation_gain_m)],
+    ["Type", res.is_loop ? "Loop" : "Point to point"],
+    ["On the routes", fmt.km(res.parts.reduce((s, p) => s + p.distance_km, 0))],
+    ["Connectors", res.connectors.length ? res.connectors.map((c, i) => `${i + 1}: ${c.distance_km.toFixed(1)} km${c.routed ? "" : " (joined)"}`).join(", ") : "none"],
+  ];
+  cbEl.stats.replaceChildren(...stats.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
 }
+
+// ---- events
+
+$$("#cb-stepbar button").forEach((b) => b.addEventListener("click", () => goStep(b.dataset.step)));
+cbEl.back.addEventListener("click", () => goStep(CB_STEPS[Math.max(0, CB_STEPS.indexOf(cb.step) - 1)]));
+cbEl.next.addEventListener("click", () => goStep(CB_STEPS[CB_STEPS.indexOf(cb.step) + 1]));
+$("#cb-search").addEventListener("input", (e) => {
+  cb.search = e.target.value;
+  drawCombineBackground();
+  renderPicker();
+});
+$("#cb-auto-loop").addEventListener("click", () => autoConnect(true));
+$("#cb-auto-open").addEventListener("click", () => autoConnect(false));
+$("#cb-clear-links").addEventListener("click", () => {
+  cb.links = [];
+  cb.pending = null;
+  linksChanged();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || currentView !== "combine") return;
+  if (cb.placing) stopPlacing();
+  else if (cb.pending) {
+    cb.pending = null;
+    renderCombine();
+  }
+});
+[cbEl.rev, cbEl.unpaved, cbEl.profile, cbEl.straight].forEach((c) => c.addEventListener("change", () => {
+  updateRoutingOptions();
+  runPreview();
+}));
+cbEl.name.addEventListener("input", () => (cb.nameTouched = true));
+$("#cb-accept-all").addEventListener("click", () => {
+  for (const g of connGaps()) {
+    const st = connState(g);
+    if (st.results[st.choice]) st.accepted = true;
+  }
+  renderConns();
+});
+
+$("#cb-save-btn").addEventListener("click", async () => {
+  const name = cbEl.name.value.trim();
+  if (!name) return cbEl.name.focus();
+  cbEl.saved.textContent = "saving…";
+  try {
+    const res = await svc.combineSave(combineRequest({ name }));
+    cbEl.saved.replaceChildren(
+      "Saved as ",
+      el("a", { onclick: () => { showView("library"); openDetail(res.id); } }, res.name),
+      res.similar.length ? ` (very similar to ${res.similar.map((s) => s.other_name).join(", ")})` : ""
+    );
+    await Promise.all([refresh(), loadFacets()]);
+    await showCombine();
+  } catch (err) {
+    cbEl.saved.textContent = `Error: ${err.message}`;
+  }
+});
+
+$("#cb-download").addEventListener("click", async () => {
+  const name = cbEl.name.value.trim() || "combined route";
+  try {
+    const f = await svc.combineGpx(combineRequest({ name }));
+    downloadBlob(f.text, f.filename);
+  } catch (err) {
+    cbEl.saved.textContent = `Error: ${err.message}`;
+  }
+});
+
+/** Open the combiner with these routes chosen (and nothing marked yet). */
+async function openCombiner(ids) {
+  showView("combine");
+  await cb.loading;
+  stopPlacing(false);
+  cb.routeIds = [...new Set(ids.filter((id) => cb.byId.has(id)))].slice(0, 4);
+  cb.parts = [];
+  cb.links = [];
+  cb.vias = [];
+  cb.conns.clear();
+  cb.altsOpen = null;
+  cb.preview = null;
+  cb.nameTouched = false;
+  cbEl.saved.textContent = "";
+  computeOrder();
+  cb.step = cb.routeIds.length >= 2 ? "parts" : "routes";
+  renderCombine();
+  fitCombine();
+}
+
+$("#d-combine").addEventListener("click", async () => {
+  // Add the route to the routes chosen now (at most 4); what is marked on them stays.
+  const id = selectedId;
+  showView("combine");
+  await cb.loading;
+  if (!cb.byId.has(id) || cb.routeIds.includes(id)) return;
+  if (cb.step === "ride") goStep("parts");
+  toggleRoute(id);
+});
 
 /** Nearest point on a [lat, lon] polyline, with its distance in metres. */
 function snapToLine(line, ll) {
@@ -3231,295 +4029,6 @@ function snapToLine(line, ll) {
   }
   return best;
 }
-
-function placeAt(latlng) {
-  const key = cb.placing[0];
-  const route = cb.byId.get(routeOfPoint(key));
-  const snap = snapToLine(route.geometry, latlng);
-  if (snap.d > MAX_SNAP_M) {
-    cbEl.status.textContent = `That is ${(snap.d / 1000).toFixed(1)} km from route ${key[0].toUpperCase()}; click closer to it (or press Esc).`;
-    return;
-  }
-  cb.points[key] = snap.p;
-  cb.pointsTouched = true;
-  cb.placing.shift();
-  drawCombineResult();
-  if (cb.placing.length) return promptPlacing();
-  stopPlacing();
-  runPreview();
-}
-
-function swapPoints(side) {
-  const [p, q] = [`${side}1`, `${side}2`];
-  [cb.points[p], cb.points[q]] = [cb.points[q], cb.points[p]];
-  cb.pointsTouched = true;
-  runPreview();
-}
-
-async function suggestPoints() {
-  if (!cb.a || !cb.b) return;
-  stopPlacing();
-  cbEl.status.textContent = "Looking for the closest points…";
-  try {
-    const res = await svc.combineSuggest(cb.a, cb.b, cb.mode);
-    const [pa, pb] = res.parts;
-    cb.points = { a1: pa.start, a2: pa.end, b1: pb.start, b2: pb.end };
-    // E.g. back on a loop B to its start = on to its end, "the other way round" to its start.
-    if (!cbEl.revA.disabled) cbEl.revA.checked = !!pa.other_way;
-    if (!cbEl.revB.disabled) cbEl.revB.checked = !!pb.other_way;
-    cb.pointsTouched = false;
-  } catch (err) {
-    cbEl.status.textContent = `Error: ${err.message}`;
-    return;
-  }
-  await runPreview();
-}
-
-function combineRequest(extra = {}) {
-  const p = cb.points;
-  return {
-    parts: [
-      { route_id: cb.a, start: p.a1, end: p.a2, other_way: cbEl.revA.checked },
-      { route_id: cb.b, start: p.b1, end: p.b2, other_way: cbEl.revB.checked },
-    ],
-    closed: cb.mode !== "open",
-    reverse: cbEl.rev.checked,
-    profile: cbEl.profile.value,
-    prefer_unpaved: cbEl.unpaved.checked,
-    straight: cbEl.straight.checked,
-    vias: cb.vias,
-    ...extra,
-  };
-}
-
-async function runPreview() {
-  renderPoints();
-  if (!cb.a || !cb.b) return;
-  if (!POINT_KEYS.every((k) => cb.points[k])) {
-    cb.preview = null;
-    drawCombineRoutes();
-    drawCombineResult();
-    const missing = POINT_KEYS.filter((k) => !cb.points[k]).map(pointLabel).join(", ");
-    cbEl.status.textContent = `Place ${missing} to see the combination.`;
-    return;
-  }
-  const token = ++cb.token;
-  cbEl.status.textContent = cbEl.straight.checked ? "Joining…" : "Routing the connectors…";
-  let res;
-  try {
-    res = await svc.combinePreview(combineRequest());
-  } catch (err) {
-    if (token !== cb.token) return;
-    cb.preview = null;
-    drawCombineRoutes();
-    drawCombineResult();
-    renderPoints();
-    cbEl.status.textContent = `Error: ${err.message}`;
-    return;
-  }
-  if (token !== cb.token) return; // a newer preview is on its way
-  cb.preview = res;
-  // Snapped onto the routes.
-  const [pa, pb] = res.parts;
-  cb.points = { a1: pa.start, a2: pa.end, b1: pb.start, b2: pb.end };
-  if (!cb.nameTouched) cbEl.name.value = `${cb.byId.get(cb.a).name} + ${cb.byId.get(cb.b).name}`;
-  cbEl.status.replaceChildren(
-    res.description,
-    ...(res.crossing
-      ? [el("br"), el("span", { class: "cb-warn" }, "The connectors cross each other: try swapping B1 ↔ B2 (or A1 ↔ A2).")]
-      : [])
-  );
-  drawCombineRoutes();
-  drawCombineResult();
-  renderPoints();
-}
-
-/** "Your ride": the combined route in words, step by step. */
-function renderRide(res) {
-  $("#cb-ride").hidden = !res;
-  if (!res) return;
-  const [pa, pb] = res.parts;
-  const routeA = cb.byId.get(cb.a), routeB = cb.byId.get(cb.b);
-  // Where a point lies on its route, in words: "the start", "km 37.6", ...
-  const where = (route, km) => {
-    const len = route?.distance_km ?? Infinity;
-    if (km < 0.05) return route?.is_loop ? "the start/finish" : "the start";
-    if (km > len - 0.05) return route?.is_loop ? "the start/finish" : "the end";
-    return `km ${km.toFixed(1)}`;
-  };
-  const direction = (p, letter) => (p.with_route
-    ? `in ${letter}'s own direction`
-    : el("span", { class: "against" }, `against ${letter}'s direction (backwards)`));
-  // A connector step: routed, a short straight join, or none at all (the points touch).
-  const connector = (c, to, touching) => (!c ? null
-    : !c.routed && c.distance_km < 0.03 && !c.via ? touching
-    : `Connector to ${to}${c.via ? `, through ${c.via.name}` : ""}: ${fmt.km(c.distance_km)}` +
-      `${c.routed ? ", routed along roads and paths" : ", joined in a straight line"}.`);
-  const [c1, c2] = res.connectors;
-  const steps = [
-    [`Start at A1: ${where(routeA, pa.start_km)} of route A.`],
-    [`Ride route A to A2 (${where(routeA, pa.end_km)}): ${fmt.km(pa.distance_km)}, `, direction(pa, "A"), "."],
-    [connector(c1, `B1 (${where(routeB, pb.start_km)} of route B)`,
-      `Switch to route B at B1 (${where(routeB, pb.start_km)} of route B): the routes touch there.`)],
-    [`Ride route B to B2 (${where(routeB, pb.end_km)}): ${fmt.km(pb.distance_km)}, `, direction(pb, "B"), "."],
-  ];
-  if (cb.mode !== "open") {
-    steps.push([connector(c2, "A1, where you started", "You're back at A1, where you started: no connector needed.")]);
-  }
-  steps.push([`${res.is_loop ? "A loop" : "Point to point"} of ${fmt.km(res.distance_km)} with ${fmt.m(res.elevation_gain_m)} of climbing.`]);
-  $("#cb-steps").replaceChildren(...steps.map((parts) => el("li", {}, ...parts.filter((x) => x !== null && x !== ""))));
-}
-
-/** Per connector: ride it through one of your places (a café, water, a viewpoint, …). */
-function renderVias(res) {
-  const box = $("#cb-vias");
-  box.hidden = !res || !svc.visiblePlaces().length;
-  if (box.hidden) return box.replaceChildren();
-  const cats = svc.placeCategories();
-  setChildren(box, el("strong", {}, "Through a place"), ...res.connectors.map((c, k) => {
-    const options = svc.placesForConnector(c.from, c.to);
-    const chosen = cb.vias[k] ? svc.place(cb.vias[k]) : null;
-    if (chosen && !options.some((o) => o.place.id === chosen.id)) options.unshift({ place: chosen, detour_km: null });
-    const label = res.connectors.length > 1 ? (k === 0 ? "Connector 1 (to route B)" : "Connector 2 (back to A1)") : "Connector (to route B)";
-    return el("label", {}, `${label}: `,
-      el("select", {
-        onchange: (e) => {
-          cb.vias[k] = e.target.value || null;
-          runPreview();
-        },
-      },
-        el("option", { value: "" }, options.length ? "— straight to the next route —" : "— no places near this connector —"),
-        options.map(({ place: p, detour_km }) => el("option", { value: p.id, selected: chosen?.id === p.id },
-          `${categoryOf(p.category, cats).symbol} ${p.name}${detour_km != null ? ` (+${detour_km.toFixed(1)} km)` : ""}`))));
-  }));
-}
-
-function markerIcon(label, cls) {
-  return L.divIcon({ className: `cb-marker ${cls}`, html: label, iconSize: [28, 22], iconAnchor: [14, 11] });
-}
-
-function drawCombineResult() {
-  cb.resultLayer.clearLayers();
-  cb.markerLayer.clearLayers();
-  const res = cb.preview;
-  cbEl.stats.hidden = !res;
-  cbEl.save.hidden = !res;
-  renderRide(res);
-  renderVias(res);
-  if (res) {
-    for (const leg of res.legs) {
-      const color = leg.kind === "a" ? COLOR_A : leg.kind === "b" ? COLOR_B : COLOR_CONNECTOR;
-      L.polyline(leg.geometry, {
-        color, weight: leg.kind === "connector" ? 5 : 6, opacity: 0.9, interactive: false,
-        dashArray: leg.kind === "connector" && !leg.routed ? "6 6" : null,
-      }).addTo(cb.resultLayer);
-    }
-    L.marker(res.start, { icon: L.divIcon({ className: "cb-start", html: "Start", iconSize: [42, 20], iconAnchor: [21, 26] }), interactive: false })
-      .addTo(cb.markerLayer);
-    const connectors = res.connectors
-      .map((c, i) => `${i + 1}: ${c.distance_km.toFixed(1)} km${c.routed ? "" : " (joined)"}`)
-      .join(", ");
-    const stats = [
-      ["Distance", fmt.km(res.distance_km)],
-      ["Elevation gain", fmt.m(res.elevation_gain_m)],
-      ["Type", res.is_loop ? "Loop" : "Point to point"],
-      ["On route A / B", res.parts.map((p) => fmt.km(p.distance_km)).join(" / ")],
-      ["Connectors", connectors],
-    ];
-    cbEl.stats.replaceChildren(...stats.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
-  }
-  // Draggable points (also shown before the first preview has succeeded).
-  for (const key of POINT_KEYS) {
-    if (!cb.points[key]) continue;
-    const side = key[0];
-    L.marker(cb.points[key], { draggable: true, icon: markerIcon(pointLabel(key), side), zIndexOffset: 1000 })
-      .bindTooltip(`${pointLabel(key)}: ${POINT_HINTS[key]} (drag along route ${side.toUpperCase()})`)
-      .on("dragend", (e) => {
-        const ll = e.target.getLatLng();
-        cb.points[key] = [ll.lat, ll.lng];
-        cb.pointsTouched = true;
-        runPreview();
-      })
-      .addTo(cb.markerLayer);
-  }
-}
-
-cbEl.a.addEventListener("change", () => setRoutes(Number(cbEl.a.value) || null, cb.b));
-cbEl.b.addEventListener("change", () => setRoutes(cb.a, Number(cbEl.b.value) || null));
-$$('input[name="cb-mode"]').forEach((r) =>
-  r.addEventListener("change", () => {
-    setMode(r.value);
-    cb.modeTouched = true;
-    updateHash();
-    // Suggested points depend on the mode; points the user placed are kept.
-    if (cb.pointsTouched) runPreview();
-    else suggestPoints();
-  })
-);
-$("#cb-suggest").addEventListener("click", suggestPoints);
-$("#cb-click-all").addEventListener("click", () => startPlacing(POINT_KEYS));
-$("#cb-swap-a").addEventListener("click", () => swapPoints("a"));
-$("#cb-swap-b").addEventListener("click", () => swapPoints("b"));
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && cb.placing.length) {
-    stopPlacing();
-    runPreview();
-  }
-});
-[cbEl.revA, cbEl.revB, cbEl.rev, cbEl.unpaved].forEach((c) => c.addEventListener("change", runPreview));
-[cbEl.profile, cbEl.straight].forEach((c) =>
-  c.addEventListener("change", () => {
-    updateDirectionLabels();
-    runPreview();
-  })
-);
-cbEl.name.addEventListener("input", () => (cb.nameTouched = true));
-
-$("#cb-save-btn").addEventListener("click", async () => {
-  const name = cbEl.name.value.trim();
-  if (!name) return cbEl.name.focus();
-  cbEl.saved.textContent = "saving…";
-  try {
-    const res = await svc.combineSave(combineRequest({ name }));
-    cbEl.saved.replaceChildren(
-      "Saved as ",
-      el("a", { onclick: () => { showView("library"); openDetail(res.id); } }, res.name),
-      res.similar.length ? ` (very similar to ${res.similar.map((s) => s.other_name).join(", ")})` : ""
-    );
-    const keep = { a: cb.a, b: cb.b };
-    await Promise.all([refresh(), loadFacets()]);
-    await showCombine();
-    cb.a = keep.a;
-    cb.b = keep.b;
-    syncSelects();
-  } catch (err) {
-    cbEl.saved.textContent = `Error: ${err.message}`;
-  }
-});
-
-$("#cb-download").addEventListener("click", async () => {
-  const name = cbEl.name.value.trim() || "combined route";
-  try {
-    const f = await svc.combineGpx(combineRequest({ name }));
-    downloadBlob(f.text, f.filename);
-  } catch (err) {
-    cbEl.saved.textContent = `Error: ${err.message}`;
-  }
-});
-
-/** Open the combiner with the given routes (either may be null). */
-async function openCombiner(a, b) {
-  showView("combine");
-  await cb.loading;
-  await setRoutes(a, b);
-}
-
-$("#d-combine").addEventListener("click", () => {
-  const id = selectedId;
-  // Add to the current combination: as B if A is already chosen, otherwise as A.
-  if (cb.a && cb.a !== id) openCombiner(cb.a, id);
-  else openCombiner(id, cb.b !== id ? cb.b : null);
-});
 
 // ------------------------------------------------------------------ change start point (utility)
 // A loop route ridden from a different point on the loop. The server cuts the full-resolution
@@ -5111,7 +5620,8 @@ async function afterLibraryChange() {
   checked.clear();
   state.ids = [];
   closeDetail();
-  cb.a = cb.b = null;
+  Object.assign(cb, { routeIds: [], parts: [], links: [], vias: [], placing: null, pending: null, preview: null, step: "routes", order: null, altsOpen: null });
+  cb.conns.clear();
   rs.id = null;
   rs.loaded = false;
   fp.id = null;
@@ -5304,7 +5814,7 @@ async function startApp() {
   applySettings(lib.settings);
   if (server) checkDiskFiles();
   restoreFilters();
-  updateDirectionLabels();
+  updateRoutingOptions();
   await loadFacets();
   const view = new URLSearchParams(location.hash.slice(1)).get("view");
   sharedPacked = shareFromHash();

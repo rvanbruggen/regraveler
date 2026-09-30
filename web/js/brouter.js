@@ -23,12 +23,12 @@ function explain(message) {
 // One request at a time: a shared public server should not get bursts from one page.
 let queue = Promise.resolve();
 
-async function request(waypoints, profile, params = null, baseUrl = null) {
+async function request(waypoints, profile, params = null, baseUrl = null, alternative = 0) {
   const base = (baseUrl || config.BROUTER_URL).replace(/\/+$/, "");
   const query = [
     `lonlats=${waypoints.map(([lat, lon]) => `${lon.toFixed(6)},${lat.toFixed(6)}`).join("|")}`,
     `profile=${encodeURIComponent(profile)}`,
-    "alternativeidx=0",
+    `alternativeidx=${alternative}`,
     "format=geojson",
     ...Object.entries(params || {}).map(([k, v]) => `profile:${encodeURIComponent(k)}=${encodeURIComponent(v)}`),
   ].join("&");
@@ -67,9 +67,18 @@ function points(feature) {
   return pts;
 }
 
-/** Route between two [lat, lon] points (through `via` points, if any); returns [[lat, lon, ele], ...]. */
-export async function route(start, end, profile, params = null, baseUrl = null, via = []) {
-  return points(await request([start, ...via, end], profile, params, baseUrl));
+/** BRouter computes up to four routes between the same points: alternativeidx 0 to 3. */
+export const ALTERNATIVES = 4;
+
+/**
+ * Route between two [lat, lon] points (through `via` points, if any); returns [[lat, lon, ele], ...].
+ * alternative: 0 for the best route, 1 to 3 for BRouter's alternatives.
+ */
+export async function route(start, end, profile, params = null, baseUrl = null, via = [], alternative = 0) {
+  if (!Number.isInteger(alternative) || alternative < 0 || alternative >= ALTERNATIVES) {
+    throw new BRouterError(`Unknown alternative ${alternative}: use 0 to ${ALTERNATIVES - 1}`);
+  }
+  return points(await request([start, ...via, end], profile, params, baseUrl, alternative));
 }
 
 /**

@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.5.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.8.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -164,6 +164,8 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
     with the original files (a multi-track file is included once).
   - **Show on map:** the map (and library) show only the selected routes until you click
     *show all routes* or *Clear*.
+  - **Combine…:** with 2 to 4 routes selected, opens *Combine* with them (see
+    [Utilities](#utilities)).
   - **Tags…:** add one or more tags to all selected routes, or remove a tag from all of them
     (the panel lists the tags on the selection with how many routes have each, e.g. `forest 3/5`).
   - **Estimate surface:** (re)estimates the paved % from OpenStreetMap; progress is shown next
@@ -290,42 +292,42 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
 
 The *Utilities* menu in the header has the operations on routes:
 
-- **Combine** two routes into a new one by picking the part of each route you want to ride:
-  1. Pick route A and B (dropdowns, click them on the map, "Combine…" in a route's
-     detail panel, or "combine" next to a pair in the map's proximity list).
-  2. Choose how to combine them (the screen explains each):
-     - **Out on A, back on B:** start where A starts, ride A to a crossing, switch to B and ride
-       B back to its start: A1 is A's start, B2 is B's start. The crossing is where the routes
-       come closest, but well away from their starts (routes that share a start are closest
-       right there). A loop route B is ridden on in its own direction to its start/finish;
-       any other route B is ridden backwards.
-     - **Two crossings (loop):** A1 → A2 → connector → B1 → B2 → connector back to A1.
-     - **A, then B (point to point):** A1 → A2 → connector → B1 → B2.
+- **Combine** parts of 2 to 4 routes into a new one, in four steps:
+  1. **Routes:** tick 2 to 4 routes in the list or click them on the map. The Browse panel
+     (collections, smart collections, areas, regions, activity, …) and a name search narrow
+     the list down, without touching the library's filters. *Combine…* in the library's
+     selection bar starts with the 2 to 4 selected routes, *Combine…* in a route's detail
+     panel adds that route, and *combine* next to a pair in the map's proximity list starts
+     with those two.
+  2. **Parts:** on each route, mark the parts to keep: *＋ Part*, then click where it starts
+     and where it ends (clicks snap onto the route; Esc cancels). You ride a part in that
+     direction; *⇄* turns it round, and for a loop route *long way* takes the other part of the
+     loop, through its start. Drag the ends to adjust them. *Whole route* keeps a whole (non-loop)
+     route. One route can give several parts; at most 6 parts in all.
+  3. **Connect:** click the end (■) of a part, then the start (▶) of the part that follows.
+     Connect the last part back to the first for a loop. *Auto: loop* and *Auto: point to
+     point* join the parts in the order with the shortest gaps. The app says what is still
+     missing ("Part C is not connected yet") and warns when the connections cross.
+  4. **Ride:** the gaps are filled with connectors routed by BRouter (the profile follows the
+     routes' activity: *gravel*, *fastbike* for road, *mtb* for mountain biking,
+     *hiking-mountain* for hiking; for gravel optionally *prefer unpaved paths*; other profiles
+     or plain straight lines are possible). Points less than 25 m apart are joined directly.
+     **Check each connection:** *Accept* it, or open *Other options…* to pick another of
+     BRouter's routes (up to four; routes BRouter gives twice are shown once, and the other
+     options are drawn dotted on the map, where a click picks one), a straight line, or a place
+     of yours to ride through. When BRouter can't route a connection, its options open with
+     the straight line to fall back on. *Save* and *Download GPX* work once every connection
+     is accepted (*Accept all* accepts them in one go), and use exactly the lines you
+     accepted: nothing is routed again. The preview shows the total
+     distance, elevation gain, the km on the routes and the connector lengths, and **Your
+     ride**: the combined route in words, step by step. *Ride the whole result the other way*
+     reverses it. Save it as a new route (a new GPX file in `gpx/derived/`, source *combined*,
+     with the parent routes recorded and linked in its detail panel), or just download the GPX.
+  - A loop starts at the start of the first part.
+  - The link (URL) keeps the routes, parts, connections and step, so a bookmark brings the
+    combination back.
 
-     When the two routes start within 1 km of each other the screen starts with *Out on A, back
-     on B*, otherwise with the loop. The app suggests the four points for the chosen pattern:
-     you ride route A from A1 to A2 and route B from B1 to B2.
-  3. Change them with *Click all four* (click A1, A2, B1, B2 on the map in turn; Esc cancels),
-     *Place* next to a single point, or drag a point along its route. Clicks snap onto the
-     route. *Suggest* puts the suggested points back.
-  4. The gaps are filled with connectors routed by BRouter (the profile follows the routes'
-     activity: *gravel*, *fastbike* for road, *mtb* for mountain biking, *hiking-mountain* for
-     hiking; for gravel optionally
-     *prefer unpaved paths*; other profiles or plain straight lines are possible).
-     Points less than 25 m apart are joined directly.
-  5. Preview with total distance, elevation gain, the km on each route and connector lengths,
-     and **Your ride**: the combined route in words, step by step (where you start, how far
-     you ride on each route and in which direction, each connector).
-  6. Save as a new route (a new GPX file in `gpx/derived/`, source *combined*, with the parent
-     routes recorded and linked in its detail panel), or just download the GPX.
-  - A loop starts at A1.
-  - The riding direction on a route follows the order of its two points: *Swap A1 ↔ A2* (or
-    B1 ↔ B2) rides it the other way. When the connectors of a loop cross each other, the app
-    says so; swapping B1 and B2 usually fixes it. For loop routes, *Other way round A/B* takes
-    the other part of that loop (through its start). *Ride the whole result the other way*
-    reverses the direction.
-
-![Combine: route A, then route B (point to point)](docs/screenshots/combine.webp)
+![Combine: parts of two routes, with the connectors routed between them](docs/screenshots/combine.webp)
 
 - **Change start point** of a loop route: choose a loop (dropdown, click it on the map, or
   *Change start…* in a loop's detail panel), then click where it should start (clicks snap onto

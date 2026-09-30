@@ -221,8 +221,25 @@ def main() -> None:
         if want("combine"):
             go()
             a, b = route_id("Tervuren – Kapucijnenbos"), route_id("Blauwput – Korbeek-Lo")
-            go(f"view=combine&a={a}&b={b}")
-            settle(3000)
+            # Parts for "A, then B": A from its start to where it comes closest to B, then B
+            # from there to its end (closest points of the two routes' geometries, keeping at
+            # least 30 % of each route so neither part is empty).
+            parts = svc("""const [ra, rb] = arg.map((id) => svc.library().get(id));
+              const d = (p, q) => Math.hypot(p[0] - q[0], (p[1] - q[1]) * Math.cos(p[0] * Math.PI / 180));
+              let best = [Infinity, 0, 0];
+              const na = ra.geometry.length, nb = rb.geometry.length;
+              ra.geometry.forEach((p, i) => rb.geometry.forEach((q, j) => {
+                if (i < 0.3 * (na - 1) || j > 0.7 * (nb - 1)) return; // keep at least 30 % of each route
+                const x = d(p, q); if (x < best[0]) best = [x, i, j];
+              }));
+              const pt = (p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`;
+              return [`${ra.id}:${pt(ra.geometry[0])}:${pt(ra.geometry[best[1]])}`,
+                      `${rb.id}:${pt(rb.geometry[best[2]])}:${pt(rb.geometry[rb.geometry.length - 1])}`];""", [a, b])
+            go(f"view=combine&routes={a},{b}&part={parts[0]}&part={parts[1]}&links=0-1&step=ride")
+            # Wait for the connection to be routed, then accept it.
+            page.wait_for_function("!document.querySelector('#cb-accept-all').disabled", timeout=60000)
+            page.click("#cb-accept-all")
+            settle(1000)
             # Zoom to the result: its legs are the thick lines on the combine map.
             page.evaluate("""() => { const m = window.__maps['combine-map'], legs = [];
               m.eachLayer((l) => { if (l instanceof L.Polyline && l.options.weight >= 5) legs.push(l); });

@@ -12,8 +12,9 @@ Agreed order, 2026-09-28. Each item ships as its own minor release (`/bump minor
 | 6 | Ride log and wishlist | S | no |
 | 7 | Train rides | L | no (uses home + stations + POIs) |
 
-Dropped for now: multi-user hosting, comments and sharing between users, mud check, combining N
-routes, route editor, PWA, TCX/FIT course export.
+Dropped for now: multi-user hosting, comments and sharing between users, mud check, route editor,
+PWA, TCX/FIT course export. (Combining more than two routes came back in 1.6.0: see
+`docs/COMBINE_REDESIGN.md`.)
 
 ---
 

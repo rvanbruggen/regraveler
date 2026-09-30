@@ -1,6 +1,6 @@
 {
   "name": "rerouter-web",
-  "version": "1.5.0",
+  "version": "1.8.0",
   "private": true,
   "description": "rerouter: the page (all route logic). Runs as a static site or served by the rerouter server",
   "type": "module",

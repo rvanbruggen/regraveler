@@ -84,17 +84,17 @@ PAGES = [
     {
         "slug": "combine-routes",
         "view": "combine",
-        "shot": ("combine.webp", "Combine: route A, then route B, with the connectors routed between them"),
-        "title": "Combine two GPX routes into a new ride",
-        "description": "Pick the part of two routes you want to ride and rerouter joins them into a new route, with the connectors routed for you by BRouter. Download the GPX.",
-        "h1": "Combine two routes into a new ride",
+        "shot": ("combine.webp", "Combine: parts of two routes, with the connectors routed between them"),
+        "title": "Combine GPX routes into a new ride",
+        "description": "Pick the parts of 2 to 4 routes you want to ride, say which follows which, and rerouter joins them into a new route, with the connectors routed for you by BRouter. Download the GPX.",
+        "h1": "Combine routes into a new ride",
         "lead": "Like the first half of one route and the second half of another? Pick the parts you want to ride and rerouter joins them, with the connectors routed for you.",
         "body": """
 <ol>
-  <li>Pick route A and route B: from a list, by clicking them on the map, or from a route's panel.</li>
-  <li>Choose how to combine them: <strong>out on A, back on B</strong>, <strong>two crossings</strong> (a loop) or <strong>A, then B</strong> (point to point). The screen explains each and suggests one.</li>
-  <li>rerouter suggests where to leave one route and join the other; move the points by clicking or dragging them along the route.</li>
-  <li>The gaps are filled with connectors routed by <a href="https://brouter.de/">BRouter</a>, with a profile for the activity (gravel, road, mountain biking or hiking; for gravel optionally preferring unpaved paths).</li>
+  <li>Choose 2 to 4 routes: select them in your library, tick them in a list you can narrow down by collection, area, region or name, click them on the map, or start from a route's panel.</li>
+  <li>Mark the <strong>parts</strong> to keep: click where each part starts and ends on its route, and drag the ends to adjust them. One route can give several parts.</li>
+  <li><strong>Connect</strong> them: click the end of one part, then the start of the next, or let rerouter pick the order with the shortest gaps, as a loop or point to point.</li>
+  <li>The gaps are filled with connectors routed by <a href="https://brouter.de/">BRouter</a>, with a profile for the activity (gravel, road, mountain biking or hiking; for gravel optionally preferring unpaved paths). Check each one: accept it, or pick another of BRouter's routes, a straight line, or one of your places to ride through.</li>
   <li>Check the distance, the climbing and <strong>your ride</strong> described step by step, then save it as a new route or download the GPX for your bike computer.</li>
 </ol>
 <p>Your original routes are never changed. On the <a href="route-map.html">map</a>, <em>Highlight routes near each other</em> shows where your routes meet: good places to combine them.</p>
