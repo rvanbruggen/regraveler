@@ -571,6 +571,20 @@ Build and deployment › Source: GitHub Actions*; the app is then at
 
 ### Search engines and link previews
 
+The app is one page, and its views (Library, Map, Combine, …) are chosen after the `#` in the
+address, which search engines leave out. So every feature also has a small static page of its
+own in `web/features/` (*Combine two routes into a new ride*, *The weather along your route*,
+…, and an overview at `features/index.html`, linked from the app's footer), with its own
+address, title, text and screenshot, and a button that opens that part of the app. The pages,
+their screenshots (copied from `docs/screenshots/`) and `web/sitemap.xml` are made by
+
+```bash
+python3 web/tools/build_feature_pages.py
+```
+
+from the texts in its `PAGES`: change them there, run it and push (`web/tests/feature_pages.test.js`
+checks that the sitemap and the pages agree).
+
 `web/robots.txt` lets search engines crawl the site and points them to `web/sitemap.xml`;
 the `<head>` of `web/index.html` has a canonical URL, Open Graph / X (Twitter) tags for link
 previews (with `web/og-image.jpg`, 1200×630) and a schema.org `WebApplication` description.
@@ -807,6 +821,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     worker.js        Web Worker for "routes near each other"
     config.js        settings and the version
   robots.txt, sitemap.xml, og-image.jpg  for search engines and link previews
+  features/          a static page per feature, for search engines (made by tools/build_feature_pages.py)
   data/places/       GeoNames place tiles, admin.json (region and province names)
   data/seeds/        example route sets offered to visitors (+ index.json)
   data/place-sets/   example place sets (CSV) on the Places tab (+ index.json)
@@ -815,6 +830,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
   tools/build_seeds.py   builds data/seeds/index.json from the zips there
   tools/build_place_sets.py  builds data/place-sets/index.json from the CSV files there
   tools/build_stations.py    builds data/stations.json from OpenStreetMap (Overpass)
+  tools/build_feature_pages.py  builds features/ and sitemap.xml
   tests/             Node tests of the route logic
 app/                 the server (self-hosted version): stores the library, serves web/
   main.py            FastAPI: storage API, backups, /brouter proxy, the page
