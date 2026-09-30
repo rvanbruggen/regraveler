@@ -261,28 +261,63 @@ export function suggestParts(a, b, pattern = "loop", stepM = 50) {
 /** Is the part ridden in the route's own direction? */
 export const withRoute = (p) => (p.otherWay ? p.startAt > p.endAt : p.startAt <= p.endAt);
 
-/** A connector from p to q ([x, y, ele]); `via`: [lat, lon] points it must pass (a place). */
-async function connector(p, q, router, directJoinM, via = []) {
+/**
+ * A connector from p to q ([x, y, ele]); `via`: [lat, lon] points it must pass (a place).
+ * Gaps of directJoinM or less (without a via) are joined with a straight line.
+ */
+export async function routeConnector(p, q, router, directJoinM, via = []) {
   if (!via.length && hyp(p, q) <= directJoinM) return { kind: "connector", xyz: [p, q], routed: false };
   const routed = fromLatLon(await (via.length ? router(latLonOf(p), latLonOf(q), via) : router(latLonOf(p), latLonOf(q))));
   // BRouter snaps to the nearest way; keep the exact cut points at both ends.
   return { kind: "connector", xyz: join([[p], routed, [q]]), routed: true };
 }
 
+/** The gaps to bridge, in riding order: [[from, to], ...] as [x, y, ele] (and the one back if closed). */
+export function connectorEnds(parts, closed = true) {
+  const ends = parts.map((p) => [pointAt(p.track, p.startAt), pointAt(p.track, p.endAt)]);
+  const gaps = [];
+  for (let i = 1; i < ends.length; i++) gaps.push([ends[i - 1][1], ends[i][0]]);
+  if (closed) gaps.push([ends[ends.length - 1][1], ends[0][0]]);
+  return gaps;
+}
+
+const APPROVED_FIT_M = 1; // an approved connector must start and end this close to its gap
+
+/**
+ * A connector the user approved earlier: {from: [lat, lon], to: [lat, lon], points: [[lat, lon, ele], ...]}.
+ * Used as it is (no routing), as long as it still bridges the gap from p to q.
+ */
+function approvedConnector(p, q, approved, k) {
+  const isLatLon = (v) => Array.isArray(v) && v.length >= 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]);
+  if (!isLatLon(approved.from) || !isLatLon(approved.to)) throw new CombineError(`Connection ${k + 1} has no start or end point`);
+  const [from, to] = [approved.from, approved.to].map(([lat, lon]) => toMetric(lat, lon));
+  if (!(hyp(from, p) <= APPROVED_FIT_M && hyp(to, q) <= APPROVED_FIT_M)) {
+    throw new CombineError(`Connection ${k + 1} no longer fits the parts it joins: route it again`);
+  }
+  if (!Array.isArray(approved.points) || approved.points.length < 2 || !approved.points.every(isLatLon)) {
+    throw new CombineError(`Connection ${k + 1} has no route`);
+  }
+  return { kind: "connector", xyz: join([[p], fromLatLon(approved.points), [q]]), routed: true, approved: true };
+}
+
 /**
  * Legs in riding order: part, connector, part, ... (and a connector back if closed).
  * vias[k]: [lat, lon] points connector k must pass (k = 0 for the first connector).
+ * approved[k]: a connector the user approved (see approvedConnector), used instead of routing.
  */
-async function stitch(parts, router, closed, directJoinM, vias = []) {
-  const ends = parts.map((p) => [pointAt(p.track, p.startAt), pointAt(p.track, p.endAt)]);
-  const legs = [];
-  let k = 0;
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i];
-    if (i) legs.push(await connector(ends[i - 1][1], ends[i][0], router, directJoinM, vias[k++] || []));
-    legs.push({ kind: partKey(i), xyz: section(p.track, p.startAt, p.endAt, p.otherWay), routed: true });
+async function stitch(parts, router, closed, directJoinM, vias = [], approved = []) {
+  const gaps = connectorEnds(parts, closed);
+  const connectors = [];
+  for (let k = 0; k < gaps.length; k++) {
+    const [p, q] = gaps[k];
+    connectors.push(approved[k] ? approvedConnector(p, q, approved[k], k) : await routeConnector(p, q, router, directJoinM, vias[k] || []));
   }
-  if (closed) legs.push(await connector(ends[ends.length - 1][1], ends[0][0], router, directJoinM, vias[k] || []));
+  const legs = [];
+  parts.forEach((p, i) => {
+    if (i) legs.push(connectors[i - 1]);
+    legs.push({ kind: partKey(i), xyz: section(p.track, p.startAt, p.endAt, p.otherWay), routed: true });
+  });
+  if (closed) legs.push(connectors[connectors.length - 1]);
   return legs;
 }
 
@@ -339,8 +374,9 @@ export async function combine(a, b, connections, router, {
  * Ride each part from its start to its end point, joined by connectors.
  * closed: add a connector from the last part's end back to the first part's start; the
  * result then starts (and ends) at the first part's start point.
+ * connectors[k]: an approved connector for gap k ({from, to, points}), used instead of routing.
  */
-export async function combineParts(parts, router, { closed = true, reverse = false, directJoinM = 25, vias = [] } = {}) {
+export async function combineParts(parts, router, { closed = true, reverse = false, directJoinM = 25, vias = [], connectors = [] } = {}) {
   if (parts.length < 2) throw new CombineError("Choose at least two routes");
   parts = parts.map((p) => part(p.track, clamp(p.startAt, 0, p.track.length), clamp(p.endAt, 0, p.track.length), p.otherWay));
   parts.forEach((p, i) => {
@@ -348,7 +384,7 @@ export async function combineParts(parts, router, { closed = true, reverse = fal
       throw new CombineError(`The two points on route ${partKey(i).toUpperCase()} must be different`);
     }
   });
-  const legs = await stitch(parts, router, closed, directJoinM, vias);
+  const legs = await stitch(parts, router, closed, directJoinM, vias, connectors);
   let pts = join(legs.map((l) => l.xyz));
   if (reverse) pts = reversed(pts);
   return {
@@ -368,17 +404,87 @@ export const connectorsOf = (result) => result.legs.filter((l) => l.kind === "co
  * route should be ridden the other way (swap its two points).
  */
 export function connectorsCross(parts, closed = true) {
-  const ends = parts.map((p) => [pointAt(p.track, p.startAt), pointAt(p.track, p.endAt)]);
-  const gaps = [];
-  for (let i = 0; i < ends.length - 1; i++) gaps.push([ends[i][1], ends[i + 1][0]]);
-  if (closed) gaps.push([ends[ends.length - 1][1], ends[0][0]]);
-  const lines = gaps.filter(([p, q]) => hyp(p, q) > 0);
+  const lines = connectorEnds(parts, closed).filter(([p, q]) => hyp(p, q) > 0);
   for (let i = 0; i < lines.length; i++) {
     for (let j = i + 1; j < lines.length; j++) {
       if (segmentsCross(lines[i][0], lines[i][1], lines[j][0], lines[j][1])) return true;
     }
   }
   return false;
+}
+
+// ------------------------------------------------------------------ connecting parts
+
+const partName = (i) => partKey(i).toUpperCase();
+
+/**
+ * The riding order from the user's connections between parts.
+ * n: the number of parts; links: [{from: i, to: j}], "from the end of part i to the start of
+ * part j". Returns {order: [part index, ...], closed}; a closed chain starts at part 0.
+ * Throws a CombineError that says what is missing or wrong.
+ */
+export function orderParts(n, links) {
+  if (n < 2) throw new CombineError("Mark at least two parts");
+  const next = new Array(n).fill(-1), prev = new Array(n).fill(-1);
+  for (const { from, to } of links) {
+    if (![from, to].every((i) => Number.isInteger(i) && i >= 0 && i < n)) throw new CombineError("A connection joins a part that does not exist");
+    if (from === to) throw new CombineError(`Part ${partName(from)} cannot be connected to itself`);
+    if (next[from] >= 0) throw new CombineError(`The end of part ${partName(from)} is connected twice`);
+    if (prev[to] >= 0) throw new CombineError(`The start of part ${partName(to)} is connected twice`);
+    next[from] = to;
+    prev[to] = from;
+  }
+  const loose = [...Array(n).keys()].filter((i) => next[i] < 0 && prev[i] < 0);
+  if (loose.length) throw new CombineError(`Part ${loose.map(partName).join(", ")} is not connected yet`);
+  const heads = [...Array(n).keys()].filter((i) => prev[i] < 0);
+  if (heads.length > 1) throw new CombineError("The parts form separate chains: connect them into one");
+  const first = heads.length ? heads[0] : 0;
+  const order = [first];
+  for (let i = next[first]; i >= 0 && i !== first; i = next[i]) order.push(i);
+  if (order.length < n) throw new CombineError("The parts form separate chains: connect them into one");
+  return { order, closed: heads.length === 0 };
+}
+
+function* permutations(items) {
+  if (items.length <= 1) {
+    yield items;
+    return;
+  }
+  for (let i = 0; i < items.length; i++) {
+    const rest = [...items.slice(0, i), ...items.slice(i + 1)];
+    for (const p of permutations(rest)) yield [items[i], ...p];
+  }
+}
+
+const MAX_SUGGEST_PARTS = 8; // 8! orders is still quick; the service allows fewer
+
+/**
+ * Connections that join the parts (each ridden in its own direction) with the shortest total
+ * of straight gaps: [{from, to}]. closed: also back from the last part to the first. For a
+ * closed chain the order starts at part 0 (every rotation is the same loop).
+ */
+export function suggestOrder(parts, closed = true) {
+  const n = parts.length;
+  if (n < 2) throw new CombineError("Mark at least two parts");
+  if (n > MAX_SUGGEST_PARTS) throw new CombineError(`Too many parts to suggest an order (at most ${MAX_SUGGEST_PARTS})`);
+  const ends = parts.map((p) => [pointAt(p.track, p.startAt), pointAt(p.track, p.endAt)]);
+  const gap = (i, j) => hyp(ends[i][1], ends[j][0]);
+  const rest = [...Array(n).keys()].slice(closed ? 1 : 0);
+  let best = Infinity, bestOrder = null;
+  for (const perm of permutations(rest)) {
+    const order = closed ? [0, ...perm] : perm;
+    let total = 0;
+    for (let k = 1; k < n; k++) total += gap(order[k - 1], order[k]);
+    if (closed) total += gap(order[n - 1], order[0]);
+    if (total < best) {
+      best = total;
+      bestOrder = order;
+    }
+  }
+  const links = [];
+  for (let k = 1; k < n; k++) links.push({ from: bestOrder[k - 1], to: bestOrder[k] });
+  if (closed) links.push({ from: bestOrder[n - 1], to: bestOrder[0] });
+  return links;
 }
 
 /** Fallback "router": straight lines (no elevation), through the via points if any. */

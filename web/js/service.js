@@ -765,54 +765,125 @@ function partOut(p, routeId) {
   };
 }
 
-const MAX_PARTS = 6;
+const MAX_ROUTES = 4; // different routes in one combination
+const MAX_PARTS = 6; // parts in all (a route can give more than one)
 
 const namesOf = (routes) => {
   const names = routes.map((r) => `'${r.name}'`);
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 };
 
-/**
- * req: {parts: [{route_id, start: [lat, lon], end: [lat, lon], other_way}], closed, reverse,
- *       profile, prefer_unpaved, straight, vias: [place id | null per connector]}
- */
-async function runCombine(req) {
-  const reqParts = req.parts || [];
-  if (reqParts.length < 2 || reqParts.length > MAX_PARTS) throw new ServiceError(`Use 2 to ${MAX_PARTS} routes`);
-  const ids = reqParts.map((p) => p.route_id);
-  if (new Set(ids).size < 2) throw new ServiceError("Choose at least two different routes");
-  const routes = new Map(ids.map((id) => [id, getRoute(id)]));
-  const tracks = new Map();
-  for (const [id, r] of routes) tracks.set(id, await loadTrack(r));
-  const acts = new Set([...routes.values()].map((r) => r.activity));
-  const byActivity = acts.size === 1 ? config.ACTIVITY_PROFILES[[...acts][0]] : null;
-  const profile = req.profile || byActivity || config.BROUTER_PROFILES[0];
-  if (!config.BROUTER_PROFILES.includes(profile)) throw new ServiceError(`Unknown profile '${profile}'`);
-  const params = req.prefer_unpaved && profile === "gravel" ? { prefer_unpaved_paths: "1" } : null;
-  const router = req.straight ? cb.straightRouter : (p, q, via = []) => brouter.route(p, q, profile, params, null, via);
-  // Connectors through a place: vias[k] is the id of a place connector k must pass.
-  const viaPlaces = (req.vias || []).map((id) => (id ? lib.getDoc("poi", id) : null));
-  if (viaPlaces.some((p, k) => req.vias[k] && !p)) throw new ServiceError("A place to ride through was removed");
-  const vias = viaPlaces.map((p) => (p ? [[p.lat, p.lon]] : []));
-  let result;
+/** Run fn, turning combiner and BRouter errors into ServiceErrors. */
+async function combineErrors(fn) {
   try {
-    const parts = reqParts.map((p) => {
-      const t = tracks.get(p.route_id);
-      return cb.part(t, cb.locate(t, ...p.start), cb.locate(t, ...p.end), !!p.other_way);
-    });
-    result = await cb.combineParts(parts, router, { closed: req.closed !== false, reverse: !!req.reverse, directJoinM: config.DIRECT_JOIN_M, vias });
+    return await fn();
   } catch (err) {
     if (err instanceof cb.CombineError) throw new ServiceError(err.message);
     if (err instanceof brouter.BRouterUnavailable) throw new ServiceError(err.message, 503);
     if (err instanceof brouter.BRouterError) throw new ServiceError(err.message, 502);
     throw err;
   }
-  const how = req.straight ? "straight lines" : `BRouter (${profile}${params ? ", prefer unpaved" : ""})`;
+}
+
+/** The routes and full-resolution tracks of request parts: {routes, tracks} (maps by route id). */
+async function partTracks(reqParts) {
+  const routes = new Map(reqParts.map((p) => [p.route_id, getRoute(p.route_id)]));
+  const tracks = new Map();
+  for (const [id, r] of routes) tracks.set(id, await loadTrack(r));
+  return { routes, tracks };
+}
+
+/** A request part {route_id, start, end, other_way} as a combiner part (points snapped onto the route). */
+function trackPart(p, tracks) {
+  if (!p || !Array.isArray(p.start) || !Array.isArray(p.end)) throw new ServiceError("A part needs a start and an end point");
+  const t = tracks.get(p.route_id);
+  return cb.part(t, cb.locate(t, ...p.start), cb.locate(t, ...p.end), !!p.other_way);
+}
+
+/**
+ * The router for connectors: the profile asked for, else the one that fits the routes'
+ * activity (when they share one). {router, how}; router(p, q, via) as the combiner expects.
+ */
+function connectorRouter(req, routes, alternative = 0) {
+  const acts = new Set([...routes.values()].map((r) => r.activity));
+  const byActivity = acts.size === 1 ? config.ACTIVITY_PROFILES[[...acts][0]] : null;
+  const profile = req.profile || byActivity || config.BROUTER_PROFILES[0];
+  if (!config.BROUTER_PROFILES.includes(profile)) throw new ServiceError(`Unknown profile '${profile}'`);
+  const params = req.prefer_unpaved && profile === "gravel" ? { prefer_unpaved_paths: "1" } : null;
+  if (req.straight) return { router: cb.straightRouter, how: "straight lines" };
+  return {
+    router: (p, q, via = []) => brouter.route(p, q, profile, params, null, via, alternative),
+    how: `BRouter (${profile}${params ? ", prefer unpaved" : ""})`,
+  };
+}
+
+/** A place to ride through, by id (null for none). */
+function viaPlace(id) {
+  if (!id) return null;
+  const p = lib.getDoc("poi", id);
+  if (!p) throw new ServiceError("A place to ride through was removed");
+  return p;
+}
+
+/**
+ * req: {parts: [{route_id, start: [lat, lon], end: [lat, lon], other_way}], closed, reverse,
+ *       profile, prefer_unpaved, straight, vias: [place id | null per connector],
+ *       connectors: [approved connector | null per connector]}
+ * An approved connector is what combineConnector returned ({from, to, points}); it is used
+ * as it is instead of routing again, as long as the parts it joins have not moved.
+ */
+async function runCombine(req) {
+  const reqParts = req.parts || [];
+  if (reqParts.length < 2 || reqParts.length > MAX_PARTS) throw new ServiceError(`Use 2 to ${MAX_PARTS} parts`);
+  const ids = reqParts.map((p) => p.route_id);
+  const distinct = new Set(ids).size;
+  if (distinct < 2) throw new ServiceError("Choose at least two different routes");
+  if (distinct > MAX_ROUTES) throw new ServiceError(`Combine at most ${MAX_ROUTES} routes`);
+  const { routes, tracks } = await partTracks(reqParts);
+  const { router, how } = connectorRouter(req, routes);
+  // Connectors through a place: vias[k] is the id of a place connector k must pass.
+  const viaPlaces = (req.vias || []).map(viaPlace);
+  const vias = viaPlaces.map((p) => (p ? [[p.lat, p.lon]] : []));
+  if (req.connectors != null && !Array.isArray(req.connectors)) throw new ServiceError("connectors must be a list");
+  const result = await combineErrors(() => cb.combineParts(reqParts.map((p) => trackPart(p, tracks)), router, {
+    closed: req.closed !== false, reverse: !!req.reverse, directJoinM: config.DIRECT_JOIN_M, vias, connectors: req.connectors || [],
+  }));
   const used = [...new Map(ids.map((id) => [id, routes.get(id)])).values()];
   const through = viaPlaces.filter(Boolean).map((p) => p.name);
   return {
     used, result, viaPlaces,
     description: `Combined from ${namesOf(used)} via ${how}${through.length ? `, through ${through.join(" and ")}` : ""}.`,
+  };
+}
+
+/**
+ * Route one connection, to show it before it is used: from the end of from_part to the start
+ * of to_part (parts as in runCombine). req: {from_part, to_part, profile, prefer_unpaved,
+ * straight, via: place id | null, alternative: 0 (BRouter's best route) to 3}.
+ * Returns {from, to, points: [[lat, lon, ele], ...], distance_km, routed, alternative, via};
+ * pass it back in runCombine's `connectors` to use exactly this route.
+ */
+export async function combineConnector(req) {
+  const alternative = req.alternative ?? 0;
+  if (!Number.isInteger(alternative) || alternative < 0 || alternative >= brouter.ALTERNATIVES) {
+    throw new ServiceError(`Choose an alternative from 0 to ${brouter.ALTERNATIVES - 1}`);
+  }
+  const reqParts = [req.from_part, req.to_part];
+  if (reqParts.some((p) => !p)) throw new ServiceError("A connection needs the part it leaves and the part it joins");
+  const { routes, tracks } = await partTracks(reqParts);
+  const { router } = connectorRouter(req, routes, alternative);
+  const place = viaPlace(req.via);
+  const [from, to] = reqParts.map((p) => trackPart(p, tracks));
+  const p = cb.pointAt(from.track, from.endAt), q = cb.pointAt(to.track, to.startAt);
+  const leg = await combineErrors(() => cb.routeConnector(p, q, router, config.DIRECT_JOIN_M, place ? [[place.lat, place.lon]] : []));
+  return {
+    from: ll(cb.latLonOf(p)),
+    to: ll(cb.latLonOf(q)),
+    points: cb.toLatLon(leg.xyz).map(([lat, lon, ele]) => [round(lat, 6), round(lon, 6), ele == null ? null : round(ele, 1)]),
+    distance_km: round(cb.legLength(leg.xyz) / 1000, 2),
+    routed: leg.routed,
+    alternative,
+    via: place ? { id: place.id, name: place.name } : null,
   };
 }
 
@@ -839,7 +910,7 @@ export async function combinePreview(req) {
     start: [stats.start_lat, stats.start_lon],
     end: [stats.end_lat, stats.end_lon],
     connectors: cb.connectorsOf(result).map((l, k) => ({
-      distance_km: round(cb.legLength(l.xyz) / 1000, 2), routed: l.routed,
+      distance_km: round(cb.legLength(l.xyz) / 1000, 2), routed: l.routed, approved: !!l.approved,
       from: ll(cb.latLonOf(l.xyz[0])), to: ll(cb.latLonOf(l.xyz[l.xyz.length - 1])),
       via: viaPlaces[k] ? { id: viaPlaces[k].id, name: viaPlaces[k].name } : null,
     })),

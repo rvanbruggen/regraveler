@@ -243,6 +243,104 @@ test("parts need distinct points and two routes", async () => {
   await assert.rejects(cb.combineParts([cb.part(a, 0, 3000)], fakeRouter), cb.CombineError);
 });
 
+// ------------------------------------------------------------------ approved connectors
+
+test("parts: an approved connector is used as it is, without routing", async () => {
+  const [a, b] = twoParallelLines();
+  const parts = [cb.part(a, 0, 3000), cb.part(b, 3000, b.length)];
+  const [[p, q]] = cb.connectorEnds(parts, false);
+  const from = cb.latLonOf(p), to = cb.latLonOf(q);
+  const detour = offset(...from, 400, 500); // a bend no router would give for this gap
+  const approved = { from, to, points: [[...from, null], [...detour, null], [...to, null]] };
+  const res = await cb.combineParts(parts, fakeRouter, { closed: false, connectors: [approved] });
+  assert.equal(calls.length, 0);
+  const [conn] = cb.connectorsOf(res);
+  assert.equal(conn.approved, true);
+  approxLL(cb.latLonOf(conn.xyz[1]), detour);
+  assert.ok(dist(conn.xyz[0], p) < 0.01 && dist(conn.xyz[conn.xyz.length - 1], q) < 0.01, "from the cut point to the cut point");
+});
+
+test("parts: approved and routed connectors mix", async () => {
+  const [a, b] = twoParallelLines();
+  const parts = [cb.part(a, 1000, 5000), cb.part(b, 5000, 1000)];
+  const first = await cb.routeConnector(...cb.connectorEnds(parts)[0], fakeRouter, 25);
+  calls = [];
+  const approved = { from: cb.latLonOf(first.xyz[0]), to: cb.latLonOf(first.xyz[first.xyz.length - 1]), points: cb.toLatLon(first.xyz) };
+  const res = await cb.combineParts(parts, fakeRouter, { connectors: [approved, null] });
+  assert.equal(calls.length, 1, "only the connector back is routed");
+  const plain = await cb.combineParts(parts, fakeRouter);
+  assert.equal(res.points.length, plain.points.length);
+  res.points.forEach((pt, i) => approxLL(pt, plain.points[i], 1e-7));
+});
+
+test("parts: an approved connector that no longer fits is refused", async () => {
+  const [a, b] = twoParallelLines();
+  const [[p, q]] = cb.connectorEnds([cb.part(a, 0, 3000), cb.part(b, 3000, b.length)], false);
+  const approved = { from: cb.latLonOf(p), to: cb.latLonOf(q), points: [[...cb.latLonOf(p), null], [...cb.latLonOf(q), null]] };
+  // Part A now ends 200 m further on.
+  await assert.rejects(cb.combineParts([cb.part(a, 0, 3200), cb.part(b, 3000, b.length)], fakeRouter, { closed: false, connectors: [approved] }),
+    /Connection 1 no longer fits/);
+  const parts = [cb.part(a, 0, 3000), cb.part(b, 3000, b.length)];
+  await assert.rejects(cb.combineParts(parts, fakeRouter, { closed: false, connectors: [{ ...approved, from: "x" }] }), /no start or end point/);
+  await assert.rejects(cb.combineParts(parts, fakeRouter, { closed: false, connectors: [{ ...approved, points: [[1, "x"], [2, 3]] }] }), /has no route/);
+});
+
+test("connector: short gaps are joined directly, longer ones routed", async () => {
+  const [a, b] = twoParallelLines();
+  const direct = await cb.routeConnector(cb.pointAt(a, 1000), cb.pointAt(a, 1010), fakeRouter, 25);
+  assert.equal(direct.routed, false);
+  assert.equal(calls.length, 0);
+  const routed = await cb.routeConnector(cb.pointAt(a, 1000), cb.pointAt(b, 1000), fakeRouter, 25);
+  assert.equal(routed.routed, true);
+  assert.equal(calls.length, 1);
+  approx(cb.legLength(routed.xyz), 800, { abs: 1 });
+});
+
+test("parts: two parts of the same route", async () => {
+  const [a, b] = twoParallelLines();
+  const res = await cb.combineParts([cb.part(a, 0, 2000), cb.part(b, 2000, 4000), cb.part(a, 4000, 6000)], fakeRouter, { closed: false });
+  assert.deepEqual(res.legs.map((l) => l.kind), ["a", "connector", "b", "connector", "c"]);
+  approx(lengthM(res.points), 2000 + 800 + 2000 + 800 + 2000, { rel: 0.01 });
+});
+
+// ------------------------------------------------------------------ connecting parts
+
+test("order parts: an open chain in the order of the connections", () => {
+  assert.deepEqual(cb.orderParts(3, [{ from: 2, to: 0 }, { from: 0, to: 1 }]), { order: [2, 0, 1], closed: false });
+  assert.deepEqual(cb.orderParts(2, [{ from: 1, to: 0 }]), { order: [1, 0], closed: false });
+});
+
+test("order parts: a closed chain starts at part A", () => {
+  assert.deepEqual(cb.orderParts(3, [{ from: 1, to: 2 }, { from: 2, to: 0 }, { from: 0, to: 1 }]), { order: [0, 1, 2], closed: true });
+  assert.deepEqual(cb.orderParts(3, [{ from: 0, to: 2 }, { from: 2, to: 1 }, { from: 1, to: 0 }]), { order: [0, 2, 1], closed: true });
+});
+
+test("order parts: says what is wrong", () => {
+  assert.throws(() => cb.orderParts(3, [{ from: 0, to: 1 }]), /Part C is not connected/);
+  assert.throws(() => cb.orderParts(2, []), /Part A, B is not connected/);
+  assert.throws(() => cb.orderParts(2, [{ from: 0, to: 0 }]), /cannot be connected to itself/);
+  assert.throws(() => cb.orderParts(3, [{ from: 0, to: 1 }, { from: 0, to: 2 }]), /end of part A is connected twice/);
+  assert.throws(() => cb.orderParts(3, [{ from: 0, to: 2 }, { from: 1, to: 2 }]), /start of part C is connected twice/);
+  // A + B form a loop, C + D a chain: two chains.
+  assert.throws(() => cb.orderParts(4, [{ from: 0, to: 1 }, { from: 1, to: 0 }, { from: 2, to: 3 }]), /separate chains/);
+  // Two loops.
+  assert.throws(() => cb.orderParts(4, [{ from: 0, to: 1 }, { from: 1, to: 0 }, { from: 2, to: 3 }, { from: 3, to: 2 }]), /separate chains/);
+  assert.throws(() => cb.orderParts(2, [{ from: 0, to: 5 }]), /does not exist/);
+  assert.throws(() => cb.orderParts(1, []), /at least two parts/);
+});
+
+test("suggest order: the shortest gaps", () => {
+  const [a, b] = twoParallelLines();
+  const c = cb.makeTrack(east({ northM: 1600, lengthM: 6000 }));
+  // Ridden A 0->2000, B 2000->4000, C 4000->6000 has 800 m gaps; any other order is longer.
+  const parts = [cb.part(c, 4000, 6000), cb.part(a, 0, 2000), cb.part(b, 2000, 4000)];
+  assert.deepEqual(cb.suggestOrder(parts, false), [{ from: 1, to: 2 }, { from: 2, to: 0 }]);
+  const loop = cb.suggestOrder([cb.part(a, 1000, 5000), cb.part(b, 5000, 1000)], true);
+  assert.deepEqual(loop, [{ from: 0, to: 1 }, { from: 1, to: 0 }]);
+  assert.deepEqual(cb.orderParts(3, cb.suggestOrder(parts, true)).order[0], 0);
+  assert.throws(() => cb.suggestOrder([parts[0]]), cb.CombineError);
+});
+
 test("connectors cross when one route is the wrong way", () => {
   const [a, b] = twoParallelLines();
   assert.equal(cb.connectorsCross([cb.part(a, 1000, 5000), cb.part(b, 1000, 5000)]), true);

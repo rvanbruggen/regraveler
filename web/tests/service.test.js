@@ -513,3 +513,84 @@ test("combine: a connector can ride through one of your places", async () => {
   await svc.deletePlaces([cafe.id]);
   await assert.rejects(svc.combinePreview({ ...req, vias: [cafe.id] }), /was removed/);
 });
+
+// ------------------------------------------------------------------ combine: connections one by one
+
+async function threeLines() {
+  config.AUTO_RENAME_ON_IMPORT = false;
+  await importOne("A.gpx", east(0, 6000));
+  await importOne("B.gpx", east(800, 6000));
+  await importOne("C.gpx", east(1600, 6000));
+  return ["A", "B", "C"].map((n) => svc.listRoutes("").find((r) => r.name === n));
+}
+const partOf = (r, fromM, toM) => ({ route_id: r.id, start: at(fromM.n, fromM.e), end: at(toM.n, toM.e) });
+
+test("combine: route one connection, then use it as approved", async () => {
+  const [a, b] = await threeLines();
+  const parts = [partOf(a, { n: 0, e: 0 }, { n: 0, e: 3000 }), partOf(b, { n: 800, e: 3000 }, { n: 800, e: 6000 })];
+  const conn = await svc.combineConnector({ from_part: parts[0], to_part: parts[1], straight: true });
+  approx(conn.distance_km, 0.8, { abs: 0.01 });
+  assert.equal(conn.routed, true);
+  assert.equal(conn.alternative, 0);
+  approx(conn.from[0], at(0, 3000)[0], { abs: 1e-5 });
+  approx(conn.to[0], at(800, 3000)[0], { abs: 1e-5 });
+
+  // Not the straight line: the approved route goes round by the east.
+  const bend = [...at(400, 3500), null];
+  const approved = { ...conn, points: [conn.points[0], bend, conn.points[conn.points.length - 1]] };
+  const prev = await svc.combinePreview({ parts, closed: false, straight: true, connectors: [approved] });
+  assert.equal(prev.connectors[0].approved, true);
+  approx(prev.connectors[0].distance_km, 2 * Math.hypot(0.4, 0.5), { abs: 0.01 });
+  const gpx = parseGpx((await svc.combineGpx({ parts, closed: false, straight: true, connectors: [approved], name: "x" })).text);
+  assert.ok(gpx.tracks[0].points.some(([la, lo]) => Math.abs(la - bend[0]) < 1e-6 && Math.abs(lo - bend[1]) < 1e-6));
+
+  // A part moved: the approved connection no longer fits.
+  const moved = [partOf(a, { n: 0, e: 0 }, { n: 0, e: 2500 }), parts[1]];
+  await assert.rejects(svc.combinePreview({ parts: moved, closed: false, straight: true, connectors: [approved] }), /no longer fits/);
+  await assert.rejects(svc.combinePreview({ parts, closed: false, straight: true, connectors: "x" }), /must be a list/);
+});
+
+test("combine: a connection asks BRouter for the alternative chosen", async () => {
+  const [a, b] = await threeLines();
+  const parts = [partOf(a, { n: 0, e: 0 }, { n: 0, e: 3000 }), partOf(b, { n: 800, e: 3000 }, { n: 800, e: 6000 })];
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const q = new URL(url).searchParams;
+    asked.push(q.get("alternativeidx"));
+    const coords = q.get("lonlats").split("|").map((c) => [...c.split(",").map(Number), 10]);
+    return new Response(JSON.stringify({ features: [{ geometry: { coordinates: coords } }] }));
+  };
+  try {
+    await svc.combineConnector({ from_part: parts[0], to_part: parts[1] });
+    const alt = await svc.combineConnector({ from_part: parts[0], to_part: parts[1], alternative: 2 });
+    assert.equal(alt.alternative, 2);
+    await assert.rejects(svc.combineConnector({ from_part: parts[0], to_part: parts[1], alternative: 4 }), /alternative from 0 to 3/);
+    await assert.rejects(svc.combineConnector({ from_part: parts[0] }), /needs the part it leaves and the part it joins/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(asked, ["0", "2"]);
+});
+
+test("combine: several parts of one route; at most 4 routes and 6 parts", async () => {
+  const [a, b, c] = await threeLines();
+  const req = {
+    parts: [
+      partOf(a, { n: 0, e: 0 }, { n: 0, e: 2000 }),
+      partOf(b, { n: 800, e: 2000 }, { n: 800, e: 4000 }),
+      partOf(a, { n: 0, e: 4000 }, { n: 0, e: 6000 }),
+    ],
+    closed: false, straight: true,
+  };
+  const prev = await svc.combinePreview(req);
+  assert.equal(prev.parts.length, 3);
+  approx(prev.distance_km, 2 + 0.8 + 2 + 0.8 + 2, { abs: 0.05 });
+
+  await importOne("D.gpx", east(2400, 6000));
+  await importOne("E.gpx", east(3200, 6000));
+  const [d, e] = ["D", "E"].map((n) => svc.listRoutes("").find((r) => r.name === n));
+  const one = (r, i) => partOf(r, { n: 0, e: i * 1000 }, { n: 0, e: i * 1000 + 500 });
+  await assert.rejects(svc.combinePreview({ parts: [a, b, c, d, e].map(one), straight: true }), /at most 4 routes/);
+  await assert.rejects(svc.combinePreview({ parts: [a, b, c, a, b, c, a].map(one), straight: true }), /Use 2 to 6 parts/);
+});

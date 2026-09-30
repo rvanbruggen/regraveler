@@ -1,6 +1,15 @@
 # Combine routes: redesign plan
 
-Status: agreed, 2026-09-30 (decisions below). Nothing is built yet.
+Status: agreed, 2026-09-30 (decisions below). Phase 1 (engine and service) is built; phases 2–4
+are not.
+
+Built in phase 1 (no change on screen yet):
+- `brouter.route(..., via, alternative)`, with `ALTERNATIVES = 4` (BRouter's `alternativeidx` 0–3).
+- `combiner.js`: `routeConnector`, `connectorEnds`, `orderParts`, `suggestOrder`, and
+  `combineParts(..., {connectors})` for approved connectors (refused when they no longer fit
+  their gap by more than 1 m).
+- `service.js`: `combineConnector(req)`; `runCombine` takes `connectors`, allows at most
+  4 routes and 6 parts.
 
 ## Decisions
 
