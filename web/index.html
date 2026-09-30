@@ -36,7 +36,7 @@
   }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=1.9.0">
+  <link rel="stylesheet" href="style.css?v=1.10.0">
   <!-- Cache-busting: every module is loaded as js/<file>?v=<version>, so a new release never runs
        with modules the browser still has from the previous one (static hosts such as GitHub Pages
        let browsers keep files for 10 minutes). /bump updates the version here; a test checks that
@@ -44,34 +44,35 @@
   <script type="importmap">
   {
     "imports": {
-      "./js/app.js": "./js/app.js?v=1.9.0",
-      "./js/backup.js": "./js/backup.js?v=1.9.0",
-      "./js/brouter.js": "./js/brouter.js?v=1.9.0",
-      "./js/combiner.js": "./js/combiner.js?v=1.9.0",
-      "./js/config.js": "./js/config.js?v=1.9.0",
-      "./js/db.js": "./js/db.js?v=1.9.0",
-      "./js/fit.js": "./js/fit.js?v=1.9.0",
-      "./js/geo.js": "./js/geo.js?v=1.9.0",
-      "./js/gpx.js": "./js/gpx.js?v=1.9.0",
-      "./js/linkimport.js": "./js/linkimport.js?v=1.9.0",
-      "./js/osm.js": "./js/osm.js?v=1.9.0",
-      "./js/places.js": "./js/places.js?v=1.9.0",
-      "./js/poi.js": "./js/poi.js?v=1.9.0",
-      "./js/profile.js": "./js/profile.js?v=1.9.0",
-      "./js/remote.js": "./js/remote.js?v=1.9.0",
-      "./js/rwgps.js": "./js/rwgps.js?v=1.9.0",
-      "./js/service.js": "./js/service.js?v=1.9.0",
-      "./js/sha256.js": "./js/sha256.js?v=1.9.0",
-      "./js/share.js": "./js/share.js?v=1.9.0",
-      "./js/similarity.js": "./js/similarity.js?v=1.9.0",
-      "./js/stats.js": "./js/stats.js?v=1.9.0",
-      "./js/surface.js": "./js/surface.js?v=1.9.0",
-      "./js/tcx.js": "./js/tcx.js?v=1.9.0",
-      "./js/trackfile.js": "./js/trackfile.js?v=1.9.0",
-      "./js/trains.js": "./js/trains.js?v=1.9.0",
-      "./js/weather.js": "./js/weather.js?v=1.9.0",
-      "./js/worker.js": "./js/worker.js?v=1.9.0",
-      "./js/zip.js": "./js/zip.js?v=1.9.0"
+      "./js/app.js": "./js/app.js?v=1.10.0",
+      "./js/backup.js": "./js/backup.js?v=1.10.0",
+      "./js/brouter.js": "./js/brouter.js?v=1.10.0",
+      "./js/combiner.js": "./js/combiner.js?v=1.10.0",
+      "./js/config.js": "./js/config.js?v=1.10.0",
+      "./js/db.js": "./js/db.js?v=1.10.0",
+      "./js/fit.js": "./js/fit.js?v=1.10.0",
+      "./js/geo.js": "./js/geo.js?v=1.10.0",
+      "./js/gpx.js": "./js/gpx.js?v=1.10.0",
+      "./js/linkimport.js": "./js/linkimport.js?v=1.10.0",
+      "./js/osm.js": "./js/osm.js?v=1.10.0",
+      "./js/places.js": "./js/places.js?v=1.10.0",
+      "./js/poi.js": "./js/poi.js?v=1.10.0",
+      "./js/profile.js": "./js/profile.js?v=1.10.0",
+      "./js/remote.js": "./js/remote.js?v=1.10.0",
+      "./js/rwgps.js": "./js/rwgps.js?v=1.10.0",
+      "./js/service.js": "./js/service.js?v=1.10.0",
+      "./js/sha256.js": "./js/sha256.js?v=1.10.0",
+      "./js/share.js": "./js/share.js?v=1.10.0",
+      "./js/similarity.js": "./js/similarity.js?v=1.10.0",
+      "./js/stats.js": "./js/stats.js?v=1.10.0",
+      "./js/strava.js": "./js/strava.js?v=1.10.0",
+      "./js/surface.js": "./js/surface.js?v=1.10.0",
+      "./js/tcx.js": "./js/tcx.js?v=1.10.0",
+      "./js/trackfile.js": "./js/trackfile.js?v=1.10.0",
+      "./js/trains.js": "./js/trains.js?v=1.10.0",
+      "./js/weather.js": "./js/weather.js?v=1.10.0",
+      "./js/worker.js": "./js/worker.js?v=1.10.0",
+      "./js/zip.js": "./js/zip.js?v=1.10.0"
     }
   }
   </script>
@@ -326,7 +327,8 @@
       <li><strong>Import your routes</strong> (<a class="link" data-goto="import">Import</a>): drop GPX, TCX or FIT
         files, whole folders or zip files, and set their source, activity and tags. Or paste a link to a route on
         RideWithGPS, Komoot or Strava (<a class="link" data-goto="link">Utilities › Import from a link</a>), or
-        bring in all the routes and rides of your RideWithGPS account at once (<em>From your RideWithGPS account</em> on the <a class="link" data-goto="import">Import</a> screen). Just
+        bring in all the routes of your RideWithGPS or Strava account at once (<em>From your RideWithGPS account</em>,
+        <em>From your Strava account</em> on the <a class="link" data-goto="import">Import</a> screen). Just
         looking around? Add a set of example routes on the Import screen (while your library is empty) or under
         <a class="link" data-goto="data">Library &amp; settings</a>. rerouter works out the distance, the climbing, a name after the places the route visits and,
         if you like, how much of it is paved.</li>
@@ -717,6 +719,11 @@
         <p class="seed-status small"></p>
       </div>
     </div>
+    <!-- Once the library has routes the welcome box above is gone: say where things are now. -->
+    <p id="import-intro" class="import-intro" hidden>Your library has routes now, so rerouter opens on the
+      <a class="link" data-goto="library">Library</a> from here on. Add more routes on this screen: your own files, or
+      straight from your RideWithGPS or Strava account (the panels at the bottom). Want to look around some more? The
+      <a class="link" id="import-seeds-link">example sets</a> are still there, under ⚙ Library &amp; settings.</p>
     <div class="batch">
       <label>Source name (whole batch) <input type="text" id="batch-source-name" list="source-list" placeholder="e.g. gravelroutedatabase.be"></label>
       <label>Source URL (whole batch) <input type="url" id="batch-source-url" placeholder="https://…"></label>
@@ -739,8 +746,9 @@
       <p class="small">Files in a subfolder get the subfolder's name as source name, unless you fill in a source name above.
         A recorded ride (a FIT or TCX activity from your bike computer or watch, also .gz as in a Strava export) that
         rides most of a route in your library can be logged on that route instead of being imported as a new one.</p>
-      <p class="small">On RideWithGPS? Bring in your routes and rides <a class="link" id="rwgps-jump">from your RideWithGPS account</a>
-        (below), or one route from a link (<a class="link" data-goto="link">Utilities › Import from a link</a>).</p>
+      <p class="small">On RideWithGPS or Strava? Bring in your routes <a class="link" id="rwgps-jump">from your RideWithGPS account</a>
+        or <a class="link" id="strava-jump">from your Strava account</a> (below), or one route from a link
+        (<a class="link" data-goto="link">Utilities › Import from a link</a>).</p>
     </div>
     <table id="pending" hidden>
       <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th>Activity (override)</th><th>Extra tags</th><th></th></tr></thead>
@@ -754,7 +762,7 @@
     <p id="import-set-status" class="muted"></p>
     <div id="import-results"></div>
     <!-- From the user's own RideWithGPS account (rwgps.js) -->
-    <details id="rwgps" class="panel rwgps-panel">
+    <details id="rwgps" class="panel account-panel">
       <summary><strong>From your RideWithGPS account</strong> <span class="muted small">— your routes and rides, all at once</span>
         <span id="rwgps-connected" class="muted small"></span></summary>
       <details id="rwgps-connect" open>
@@ -781,7 +789,7 @@
       </details>
       <p id="rwgps-status" class="muted small"></p>
       <div id="rwgps-browse" hidden>
-        <div class="rwgps-bar">
+        <div class="account-bar">
           <span class="seg" role="group" aria-label="Show">
             <button type="button" class="secondary small-btn" data-rwgps-kind="routes">Routes <span id="rwgps-n-routes"></span></button>
             <button type="button" class="secondary small-btn" data-rwgps-kind="trips">Rides <span id="rwgps-n-trips"></span></button>
@@ -790,7 +798,7 @@
           <label class="check"><input type="checkbox" id="rwgps-new-only" checked> Only what isn't in your library yet</label>
           <span class="small">Select: <a class="link" id="rwgps-all">all shown</a> · <a class="link" id="rwgps-none">none</a></span>
         </div>
-        <div class="rwgps-table-wrap">
+        <div class="account-table-wrap">
           <table id="rwgps-table">
             <thead><tr><th></th><th>Name</th><th>Distance</th><th>Gain</th><th>Date</th><th>In your library</th></tr></thead>
             <tbody></tbody>
@@ -809,6 +817,61 @@
           <span id="rwgps-import-status" class="muted"></span>
         </p>
         <div id="rwgps-results"></div>
+      </div>
+    </details>
+    <!-- From the user's own Strava account (strava.js): routes only -->
+    <details id="strava" class="panel account-panel">
+      <summary><strong>From your Strava account</strong> <span class="muted small">— the routes you made on Strava, all at once</span>
+        <span id="strava-connected" class="muted small"></span></summary>
+      <details id="strava-connect" open>
+        <summary>Connect with your own Strava API app</summary>
+        <ol class="small">
+          <li>On <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>
+            (signed in), create an API application: a name such as "rerouter", category <em>Other</em>, any website
+            (e.g. https://rerouter.eu), and as <strong>Authorization Callback Domain</strong>: <code id="strava-host"></code>.
+            Strava asks for an icon too; any small image will do.</li>
+          <li>Copy its <strong>Client ID</strong> and <strong>Client Secret</strong> and paste them here.</li>
+          <li><em>Connect with Strava</em> takes you to Strava: allow it to view your private routes, and it brings you back here.</li>
+        </ol>
+        <form id="strava-form" class="batch" autocomplete="off">
+          <label>Client ID <input type="text" id="strava-client-id" required spellcheck="false" inputmode="numeric"></label>
+          <label>Client Secret <input type="password" id="strava-client-secret" required spellcheck="false" autocomplete="off"></label>
+          <p class="actions wide">
+            <button type="submit" id="strava-go">Connect with Strava</button>
+            <a class="link small" id="strava-forget" hidden>Disconnect and forget</a>
+          </p>
+        </form>
+        <p class="muted small">The Client ID, Client Secret and the sign-in from Strava are kept in this browser (the sign-in
+          needs them after Strava sends you back) and go only to Strava. They are not part of your library and not in its
+          backups. <em>Disconnect and forget</em> removes them and withdraws the access on Strava.</p>
+      </details>
+      <p id="strava-status" class="muted small"></p>
+      <div id="strava-browse" hidden>
+        <div class="account-bar">
+          <input type="search" id="strava-q" placeholder="search by name">
+          <label class="check"><input type="checkbox" id="strava-new-only" checked> Only what isn't in your library yet</label>
+          <span class="small">Select: <a class="link" id="strava-all">all shown</a> · <a class="link" id="strava-none">none</a></span>
+          <a class="link small" id="strava-reload">Load the list again</a>
+        </div>
+        <div class="account-table-wrap">
+          <table id="strava-table">
+            <thead><tr><th></th><th>Name</th><th>Distance</th><th>Gain</th><th>Made</th><th>In your library</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="batch">
+          <label>Source name <input type="text" id="strava-source-name" list="source-list" value="Strava"></label>
+          <label>Activity <select id="strava-activity" class="activity-select" data-any="as on Strava"></select></label>
+          <label>Tags <input type="text" id="strava-tags" list="tag-list" placeholder="comma separated"></label>
+        </div>
+        <p class="muted small">Strava lets an app make about 100 requests per 15 minutes and 1,000 a day (one per route). A long
+          import waits for the next quarter of an hour when it reaches the limit, and goes on by itself.</p>
+        <p class="actions">
+          <button type="button" id="strava-import" disabled>Import selected</button>
+          <button type="button" id="strava-stop" class="secondary" hidden>Stop</button>
+          <span id="strava-import-status" class="muted"></span>
+        </p>
+        <div id="strava-results"></div>
       </div>
     </details>
   </section>
@@ -1014,6 +1077,6 @@
 </aside>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script type="module" src="js/app.js?v=1.9.0"></script>
+<script type="module" src="js/app.js?v=1.10.0"></script>
 </body>
 </html>

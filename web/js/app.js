@@ -15,6 +15,7 @@ import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./link
 import { RemoteBackend, detectServer } from "./remote.js";
 import * as rwgps from "./rwgps.js";
 import * as svc from "./service.js";
+import * as strava from "./strava.js";
 import * as weather from "./weather.js";
 import { readZip } from "./zip.js";
 
@@ -123,7 +124,7 @@ function showView(name) {
   if (name === "findplaces") showFindPlaces();
   if (name === "trains") showTrains();
   if (name === "duplicates") loadDuplicates();
-  if (name === "import") renderRwgps();
+  if (name === "import") { renderRwgps(); renderStrava(); stravaAutoLoad(); }
   if (name === "data") showData();
   if (name === "places") renderPlaces();
   if (name === "shared") showShared();
@@ -2975,6 +2976,309 @@ $("#rwgps-import").addEventListener("click", async () => {
   }
 });
 
+// ------------------------------------------------------------------ import from Strava
+
+// The user's own Strava app (Client ID and Secret) and the sign-in (tokens), in this browser
+// only: the sign-in needs them when Strava sends the user back to the page.
+const STRAVA_KEY = "rerouter.strava";
+const STRAVA_STATE_KEY = "rerouter.strava.state";
+const st = {
+  client: null, // strava.StravaClient once connected
+  items: null, // summarised routes (strava.summarise), null until loaded
+  selected: new Set(), // source URLs
+  busy: false,
+  stop: false,
+};
+
+function stravaSaved() {
+  try { return JSON.parse(localStorage.getItem(STRAVA_KEY) || "null") || {}; } catch { return {}; }
+}
+function stravaSave(changes) {
+  try { localStorage.setItem(STRAVA_KEY, JSON.stringify({ ...stravaSaved(), ...changes })); } catch { /* then only for now */ }
+}
+
+function stravaClient() {
+  const saved = stravaSaved();
+  if (!saved.clientId || !saved.clientSecret || !saved.auth?.refresh_token) return null;
+  if (!st.client) {
+    st.client = new strava.StravaClient({ clientId: saved.clientId, clientSecret: saved.clientSecret }, saved.auth,
+      { onAuth: (auth) => stravaSave({ auth }) });
+  }
+  return st.client;
+}
+
+function renderStravaConnection() {
+  const saved = stravaSaved();
+  $("#strava-host").textContent = location.hostname || "localhost";
+  if (saved.clientId && !$("#strava-client-id").value) $("#strava-client-id").value = saved.clientId;
+  if (saved.clientSecret && !$("#strava-client-secret").value) $("#strava-client-secret").value = saved.clientSecret;
+  const auth = saved.auth;
+  $("#strava-forget").hidden = !saved.clientId;
+  $("#strava-connected").textContent = auth?.refresh_token
+    ? `· connected${auth.athlete_name ? ` as ${auth.athlete_name}` : ""}${st.items ? `: ${st.items.length} route${st.items.length === 1 ? "" : "s"}` : ""}`
+    : "";
+  $("#strava-go").textContent = auth?.refresh_token ? "Connect again" : "Connect with Strava";
+}
+
+(function initStrava() {
+  renderStravaConnection();
+  if (stravaSaved().auth?.refresh_token) {
+    $("#strava").open = true;
+    $("#strava-connect").open = false;
+  }
+})();
+
+$("#strava-jump").addEventListener("click", () => {
+  $("#strava").open = true;
+  $("#strava").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+// The panel open on the Import screen (connected before): load the list, once.
+function stravaAutoLoad() {
+  if (currentView === "import" && $("#strava").open && !st.items && !st.busy && stravaClient()) loadStravaRoutes();
+}
+$("#strava").addEventListener("toggle", stravaAutoLoad);
+
+$("#strava-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const clientId = $("#strava-client-id").value.trim();
+  const clientSecret = $("#strava-client-secret").value.trim();
+  if (!clientId || !clientSecret) return;
+  if (!/^\d+$/.test(clientId)) {
+    $("#strava-status").textContent = "The Client ID is a number (strava.com/settings/api shows it).";
+    return;
+  }
+  // Kept for when Strava sends the user back; a new connection replaces the old sign-in.
+  stravaSave({ clientId, clientSecret, auth: null });
+  st.client = null;
+  const state = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+  try { sessionStorage.setItem(STRAVA_STATE_KEY, state); } catch { /* checked on return; fails then */ }
+  $("#strava-status").textContent = "Going to Strava…";
+  location.href = strava.authorizeUrl({ clientId, redirectUri: strava.redirectUri(location.href), state });
+});
+
+/**
+ * At start-up: did Strava just send the user back here (?code=…&state=…)? Then take the address
+ * back to normal, trade the code for tokens and show the routes. Returns true when it was a return.
+ */
+function stravaReturn() {
+  const back = strava.returnFrom(location.href);
+  if (!back) return false;
+  // The code is single use: off the address bar (and out of the history) straight away.
+  history.replaceState(null, "", `${location.pathname}#view=import`);
+  let expected = null;
+  try { expected = sessionStorage.getItem(STRAVA_STATE_KEY); sessionStorage.removeItem(STRAVA_STATE_KEY); } catch { /* none */ }
+  if (!expected || back.state !== expected) return false; // not our request
+  (async () => {
+    const status = $("#strava-status");
+    $("#strava").open = true;
+    // After start-up has shown the Import screen (a timeout, not a frame: a hidden tab paints none).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    $("#strava").scrollIntoView({ block: "start" });
+    if (back.error) {
+      status.textContent = back.error === "access_denied"
+        ? "You didn't allow rerouter on Strava, so it can't read your routes. Connect again to allow it."
+        : `Strava answered: ${back.error}.`;
+      return;
+    }
+    const saved = stravaSaved();
+    status.textContent = "Signing in with Strava…";
+    try {
+      const auth = await strava.exchangeCode(saved, back.code, back.scope);
+      stravaSave({ auth });
+      st.client = null;
+      $("#strava-connect").open = false;
+      renderStravaConnection();
+      status.textContent = strava.canReadPrivate(back.scope) ? ""
+        : "You allowed only public data, so only your public routes are listed. Connect again and allow private routes to see them all.";
+      await loadStravaRoutes(status.textContent);
+    } catch (err) {
+      if (!(err instanceof strava.StravaError)) throw err;
+      status.textContent = err.message;
+    }
+  })();
+  return true;
+}
+
+async function loadStravaRoutes(keepNote = "") {
+  const client = stravaClient();
+  if (!client || st.busy) return;
+  const status = $("#strava-status");
+  st.busy = true;
+  try {
+    status.textContent = "Loading your routes from Strava…";
+    st.items = await client.listRoutes({ onPage: ({ loaded }) => (status.textContent = `Loading your routes from Strava… ${loaded}`) });
+    st.items = st.items.filter((it) => it.url);
+    status.textContent = keepNote;
+    $("#strava-browse").hidden = false;
+    renderStrava();
+  } catch (err) {
+    if (!(err instanceof strava.StravaError)) throw err;
+    status.textContent = err.status === 429
+      ? `${err.message} Try again after ${new Date(err.resetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
+      : err.message;
+  } finally {
+    st.busy = false;
+    renderStravaConnection();
+    stravaCount();
+  }
+}
+
+$("#strava-reload").addEventListener("click", () => loadStravaRoutes());
+
+$("#strava-forget").addEventListener("click", async () => {
+  if (!confirm("Disconnect from Strava and forget the Client ID, Client Secret and sign-in in this browser?")) return;
+  const auth = stravaSaved().auth;
+  if (auth?.access_token) await strava.deauthorize(auth);
+  try { localStorage.removeItem(STRAVA_KEY); } catch { /* nothing kept */ }
+  st.client = null;
+  st.items = null;
+  st.selected.clear();
+  $("#strava-client-id").value = "";
+  $("#strava-client-secret").value = "";
+  $("#strava-browse").hidden = true;
+  $("#strava-connect").open = true;
+  $("#strava-status").textContent = "Disconnected. (Your Strava app stays on strava.com/settings/api; delete it there if you like.)";
+  renderStravaConnection();
+});
+
+function stravaShown(imported) {
+  const q = $("#strava-q").value.trim().toLowerCase();
+  const newOnly = $("#strava-new-only").checked;
+  return (st.items || []).filter((it) => (!q || it.name.toLowerCase().includes(q)) && (!newOnly || !imported.has(it.url)));
+}
+
+function renderStrava() {
+  if (!st.items) return;
+  const imported = strava.importedByUrl(svc.library().all());
+  const shown = stravaShown(imported);
+  $("#strava-table tbody").replaceChildren(...(shown.length ? shown.map((it) => {
+    const inLib = imported.get(it.url) || [];
+    return el("tr", {},
+      el("td", {}, el("input", {
+        type: "checkbox", checked: st.selected.has(it.url), "aria-label": `Select ${it.name}`,
+        onchange: (e) => { e.target.checked ? st.selected.add(it.url) : st.selected.delete(it.url); stravaCount(); },
+      })),
+      el("td", {}, el("a", { href: it.url, target: "_blank", rel: "noopener", title: "Open on Strava" }, it.name),
+        it.private ? el("span", { class: "muted", title: "Private on Strava" }, " 🔒") : null),
+      el("td", {}, fmt.km(it.distance_km)),
+      el("td", {}, fmt.m(it.gain_m)),
+      el("td", {}, fmt.date(it.date)),
+      el("td", {}, ...inLib.flatMap((r, i) => [i ? ", " : "", routeLink(r.id, r.name)])));
+  }) : [el("tr", {}, el("td", { colspan: 6, class: "muted" },
+    st.items.length ? "No routes to show with this search or setting." : "There are no routes in this Strava account."))]));
+  const known = new Set(st.items.map((it) => it.url));
+  for (const url of [...st.selected]) if (!known.has(url)) st.selected.delete(url);
+  renderStravaConnection();
+  stravaCount();
+}
+
+function stravaCount() {
+  const n = st.selected.size;
+  $("#strava-import").textContent = n ? `Import ${n} selected` : "Import selected";
+  $("#strava-import").disabled = !n || st.busy;
+}
+
+$("#strava-q").addEventListener("input", () => renderStrava());
+$("#strava-new-only").addEventListener("change", () => renderStrava());
+$("#strava-all").addEventListener("click", () => {
+  stravaShown(strava.importedByUrl(svc.library().all())).forEach((it) => st.selected.add(it.url));
+  renderStrava();
+});
+$("#strava-none").addEventListener("click", () => { st.selected.clear(); renderStrava(); });
+$("#strava-stop").addEventListener("click", () => {
+  st.stop = true;
+  $("#strava-import-status").textContent = "Stopping…";
+});
+
+/** Wait until `until` (ms), showing a countdown; false when Stop was pressed. */
+async function stravaWait(until, label) {
+  const status = $("#strava-import-status");
+  while (Date.now() < until) {
+    if (st.stop) return false;
+    const s = Math.ceil((until - Date.now()) / 1000);
+    status.textContent = `${label} Strava's limit is reached; going on at ${new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} (${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")})…`;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return true;
+}
+
+$("#strava-import").addEventListener("click", async () => {
+  const client = stravaClient();
+  if (st.busy || !client || !st.selected.size) return;
+  const todo = st.items.filter((it) => st.selected.has(it.url));
+  const status = $("#strava-import-status");
+  let batch;
+  try {
+    const activity = $("#strava-activity").value;
+    batch = {
+      source_name: $("#strava-source-name").value.trim() || null,
+      activity: activity ? svc.checkActivity(activity) : null,
+      tags: splitTags($("#strava-tags").value),
+    };
+  } catch (err) {
+    status.textContent = `error: ${err.message}`;
+    return;
+  }
+  st.busy = true;
+  st.stop = false;
+  stravaCount();
+  $("#strava-stop").hidden = false;
+  $("#strava-results").replaceChildren();
+  const results = [];
+  const estimate = [];
+  const failed = (it, err) => results.push({ filename: it.name, status: "error", message: err.message, routes: [], duplicates: [], similar: [] });
+  try {
+    for (const [i, it] of todo.entries()) {
+      if (st.stop) break;
+      const label = `${i + 1} of ${todo.length}: ${it.name}.`;
+      status.textContent = `Importing ${label.slice(0, -1)}…`;
+      let data = null;
+      // A 429 waits for the next quarter hour, once; a second one in a row is the daily limit.
+      for (let attempt = 0; attempt < 2 && data === null && !st.stop; attempt++) {
+        try {
+          data = await client.routeGpx(it.id);
+        } catch (err) {
+          if (!(err instanceof strava.StravaError)) throw err;
+          if (err.status === 429 && attempt === 0) {
+            if (!(await stravaWait(err.resetAt + 5000, label))) break;
+            continue;
+          }
+          failed(it, err.status === 429 ? new Error(`${err.message} This is probably the daily limit: import the rest tomorrow.`) : err);
+          if (err.status === 401 || err.status === 429) st.stop = true; // the next ones would fail the same way
+          break;
+        }
+      }
+      if (data === null) continue;
+      try {
+        const act = batch.activity || it.activity;
+        const res = await svc.importGpx(data, `${it.name}.gpx`, {
+          source_name: batch.source_name, source_url: it.url, activity: act ? svc.checkActivity(act) : null,
+          tags: batch.tags, notes: it.description,
+        });
+        results.push(res);
+        estimate.push(...res.routes.map((x) => x.id));
+        st.selected.delete(it.url);
+      } catch (err) {
+        failed(it, err);
+      }
+    }
+    if (estimate.length && config.SURFACE_AUTO_ESTIMATE) {
+      svc.surfaceJob.enqueue(estimate);
+      watchSurfaceJob();
+    }
+    if (estimate.length) requestPersistence();
+    status.textContent = st.stop && results.length < todo.length ? "Stopped." : "";
+    renderResults(results, $("#strava-results"));
+    await Promise.all([refresh(), loadFacets()]);
+  } finally {
+    st.busy = false;
+    st.stop = false;
+    $("#strava-stop").hidden = true;
+    renderStrava();
+  }
+});
+
 // ------------------------------------------------------------------ overview map
 
 // Distinct colours that stay readable on OSM tiles. Yellow is reserved for shared stretches.
@@ -5631,6 +5935,7 @@ function renderWelcome() {
   const empty = libraryEmpty();
   if (["library", "map"].includes(currentView)) $("#filters").hidden = empty;
   $("#welcome").hidden = !empty;
+  $("#import-intro").hidden = empty;
   $("#library-empty").hidden = !empty;
   $(".table-head").hidden = empty;
   $("#view-library .table-wrap").hidden = empty;
@@ -5648,6 +5953,10 @@ function renderWelcome() {
     " to keep them safe, or to move them to another device.");
 }
 $("#welcome-restore").addEventListener("click", () => showView("data"));
+$("#import-seeds-link").addEventListener("click", () => {
+  showView("data");
+  $("#data-seeds").scrollIntoView({ behavior: "smooth", block: "start" });
+});
 
 /** Ask the browser to keep our storage when space runs low (not evicted automatically). */
 async function requestPersistence() {
@@ -6029,7 +6338,8 @@ async function startApp() {
   restoreFilters();
   updateRoutingOptions();
   await loadFacets();
-  const view = new URLSearchParams(location.hash.slice(1)).get("view");
+  const fromStrava = stravaReturn(); // Strava sent the user back after signing in
+  const view = fromStrava ? "import" : new URLSearchParams(location.hash.slice(1)).get("view");
   sharedPacked = shareFromHash();
   // An empty library starts on the Import screen (own files, a backup or an example set).
   const home = svc.library().all().length ? "library" : "import";

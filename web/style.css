@@ -278,19 +278,20 @@ td.est { color: var(--muted); }
 #view-link .batch label.wide { flex-basis: 100%; }
 #view-link .batch label:has(#link-activity) { flex: 0 1 180px; min-width: 150px; }
 #link-form .actions { align-self: flex-end; margin: 0; }
-.rwgps-panel { margin-top: 20px; }
-.rwgps-panel > summary { cursor: pointer; }
-.rwgps-panel[open] > summary { margin-bottom: 10px; }
-.rwgps-panel .batch .wide { flex-basis: 100%; }
-.rwgps-panel .batch label:has(#rwgps-activity) { flex: 0 1 180px; min-width: 150px; }
-#rwgps-form .actions { margin: 0; display: flex; gap: 14px; align-items: center; }
-#rwgps-connect { margin-bottom: 12px; }
-#rwgps-connect > summary { cursor: pointer; font-size: 14px; }
-.rwgps-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-.rwgps-bar input[type="search"] { width: auto; flex: 0 1 220px; }
-.rwgps-bar .seg { display: inline-flex; gap: 4px; }
-.rwgps-table-wrap { max-height: 60vh; overflow: auto; margin-bottom: 12px; }
-#rwgps-table td:first-child, #rwgps-table th:first-child { width: 28px; }
+.import-intro { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin: 0 0 14px; }
+.account-panel { margin-top: 20px; }
+.account-panel > summary { cursor: pointer; }
+.account-panel[open] > summary { margin-bottom: 10px; }
+.account-panel .batch .wide { flex-basis: 100%; }
+.account-panel .batch label:has(.activity-select) { flex: 0 1 180px; min-width: 150px; }
+.account-panel form .actions { margin: 0; display: flex; gap: 14px; align-items: center; }
+.account-panel > details { margin-bottom: 12px; }
+.account-panel > details > summary { cursor: pointer; font-size: 14px; }
+.account-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.account-bar input[type="search"] { width: auto; flex: 0 1 220px; }
+.account-bar .seg { display: inline-flex; gap: 4px; }
+.account-table-wrap { max-height: 60vh; overflow: auto; margin-bottom: 12px; }
+.account-panel table td:first-child, .account-panel table th:first-child { width: 28px; }
 
 /* Bulk tags */
 .tag-panel {

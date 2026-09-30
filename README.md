@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.9.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.10.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -32,8 +32,8 @@ history in [CHANGELOG.md](CHANGELOG.md).
 At a glance:
 
 - **Import** GPX, TCX and FIT files (also zipped folders, and a whole Strava export), or a
-  route from a link (RideWithGPS, Komoot, Strava, any GPX file online), or all the routes and
-  rides of your own RideWithGPS account at once. Stats, a descriptive
+  route from a link (RideWithGPS, Komoot, Strava, any GPX file online), or all the routes of
+  your own RideWithGPS account (rides too) or Strava account at once. Stats, a descriptive
   name and the surface (paved / unpaved, from OpenStreetMap) are worked out for you; recorded
   rides of routes you have are logged on them.
 - **A library** with a filter bar and a **Browse** panel: collections (nested), smart
@@ -138,6 +138,26 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
     and the source name, activity and tags you set for the batch (the activity comes from
     RideWithGPS when you leave it on *as on RideWithGPS*). RideWithGPS's surface can be used as
     the paved %.
+- **From your Strava account** (the next panel on the Import screen): the routes you made on
+  Strava, private ones too, each as Strava's own GPX file. Routes only: recorded activities come
+  in better through Strava's bulk export (see above). Strava's API is called straight from the
+  page too, so this works in the browser version and on a server alike.
+  - **Connecting:** Strava only offers OAuth, and rerouter has no Strava app of its own, so you
+    make one at [strava.com/settings/api](https://www.strava.com/settings/api): any name,
+    category *Other*, any website, and as **Authorization Callback Domain** the host you run
+    rerouter on (the panel shows it: `rerouter.eu`, your server's name, or `localhost`, which
+    Strava always allows). Paste its **Client ID** and **Client Secret** in the panel and click
+    *Connect with Strava*: Strava asks you to let the app view your (private) routes and sends
+    you back. rerouter keeps the ID, secret and sign-in in this browser (never in the library or
+    its backups) and renews the 6-hour access token by itself. *Disconnect and forget* removes
+    them and withdraws the access on Strava.
+  - **Choosing and importing:** as for RideWithGPS (private routes have a 🔒). The activity comes
+    from the Strava route type (Gravel Ride, Mountain Bike Ride, Ride with Road / MTB / Gravel,
+    Walk, Hike, Run). Strava lets an app make about 100 requests per 15 minutes and 1,000 a day,
+    one per route: a long import waits for the next quarter of an hour when it reaches the limit
+    and goes on by itself (*Stop* halts it); at the daily limit it stops.
+- **Once the library has routes**, the Import screen says so at the top: rerouter now opens on
+  the Library, and the example sets are under ⚙ Library & settings.
 
 ### The library
 
@@ -839,6 +859,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     surface.js       surface estimate (map matching via BRouter)
     linkimport.js    import from a link: RideWithGPS, Komoot, Strava, GPX files online
     rwgps.js         import from your RideWithGPS account (API v1: list routes and rides, fetch one)
+    strava.js        import from your Strava account (OAuth with the user's own app, routes as GPX)
     weather.js       ride weather: forecast along the route (Open-Meteo), headwind / tailwind
     places.js        route names from GeoNames places (start town + places visited)
     zip.js, backup.js  zip files, library backups and exported route sets
