@@ -278,6 +278,19 @@ td.est { color: var(--muted); }
 #view-link .batch label.wide { flex-basis: 100%; }
 #view-link .batch label:has(#link-activity) { flex: 0 1 180px; min-width: 150px; }
 #link-form .actions { align-self: flex-end; margin: 0; }
+.rwgps-panel { margin-top: 20px; }
+.rwgps-panel > summary { cursor: pointer; }
+.rwgps-panel[open] > summary { margin-bottom: 10px; }
+.rwgps-panel .batch .wide { flex-basis: 100%; }
+.rwgps-panel .batch label:has(#rwgps-activity) { flex: 0 1 180px; min-width: 150px; }
+#rwgps-form .actions { margin: 0; display: flex; gap: 14px; align-items: center; }
+#rwgps-connect { margin-bottom: 12px; }
+#rwgps-connect > summary { cursor: pointer; font-size: 14px; }
+.rwgps-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.rwgps-bar input[type="search"] { width: auto; flex: 0 1 220px; }
+.rwgps-bar .seg { display: inline-flex; gap: 4px; }
+.rwgps-table-wrap { max-height: 60vh; overflow: auto; margin-bottom: 12px; }
+#rwgps-table td:first-child, #rwgps-table th:first-child { width: 28px; }
 
 /* Bulk tags */
 .tag-panel {

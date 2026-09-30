@@ -13,6 +13,7 @@ import { toMetric } from "./geo.js";
 import { isTrackFileName } from "./trackfile.js";
 import { LinkImportError, fetchRoute, parseRouteLink, serviceName } from "./linkimport.js";
 import { RemoteBackend, detectServer } from "./remote.js";
+import * as rwgps from "./rwgps.js";
 import * as svc from "./service.js";
 import * as weather from "./weather.js";
 import { readZip } from "./zip.js";
@@ -122,6 +123,7 @@ function showView(name) {
   if (name === "findplaces") showFindPlaces();
   if (name === "trains") showTrains();
   if (name === "duplicates") loadDuplicates();
+  if (name === "import") renderRwgps();
   if (name === "data") showData();
   if (name === "places") renderPlaces();
   if (name === "shared") showShared();
@@ -2759,6 +2761,217 @@ $("#link-import").addEventListener("click", async () => {
     status.textContent = `error: ${err.message}`;
   } finally {
     button.disabled = false;
+  }
+});
+
+// ------------------------------------------------------------------ import from RideWithGPS
+
+// The API key and auth token, remembered in this browser only (never in the library or backups).
+const RWGPS_KEY = "rerouter.rwgps";
+const rw = {
+  creds: null, // {apiKey, authToken}
+  items: { routes: null, trips: null }, // summarised lists (rwgps.summarise), null until loaded
+  kind: "routes",
+  selected: new Set(), // source URLs
+  busy: false,
+  stop: false,
+};
+
+function rwgpsSavedCreds() {
+  try {
+    const c = JSON.parse(localStorage.getItem(RWGPS_KEY) || "null");
+    return c && c.apiKey && c.authToken ? c : null;
+  } catch { return null; }
+}
+
+(function initRwgps() {
+  const c = rwgpsSavedCreds();
+  if (!c) return;
+  $("#rwgps-key").value = c.apiKey;
+  $("#rwgps-token").value = c.authToken;
+  $("#rwgps-forget").hidden = false;
+  // Connected before: the panel is open, the connect steps folded away.
+  $("#rwgps").open = true;
+  $("#rwgps-connect").open = false;
+})();
+
+// "from your RideWithGPS account" in the drop zone: open the panel and go there.
+$("#rwgps-jump").addEventListener("click", () => {
+  $("#rwgps").open = true;
+  $("#rwgps").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+$("#rwgps-forget").addEventListener("click", () => {
+  try { localStorage.removeItem(RWGPS_KEY); } catch { /* nothing kept */ }
+  $("#rwgps-key").value = "";
+  $("#rwgps-token").value = "";
+  $("#rwgps-forget").hidden = true;
+  $("#rwgps-status").textContent = "The key and token are forgotten in this browser. (The token still works on RideWithGPS until you delete it there.)";
+});
+
+$("#rwgps-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (rw.busy) return;
+  const creds = { apiKey: $("#rwgps-key").value.trim(), authToken: $("#rwgps-token").value.trim() };
+  if (!creds.apiKey || !creds.authToken) return;
+  const status = $("#rwgps-status");
+  rw.busy = true;
+  $("#rwgps-load").disabled = true;
+  try {
+    const items = {};
+    for (const kind of Object.keys(rwgps.KINDS)) {
+      const label = rwgps.KINDS[kind].labelPlural;
+      status.textContent = `Loading your ${label} from RideWithGPS…`;
+      items[kind] = await rwgps.listAll(kind, creds, {
+        onPage: ({ loaded, total }) => (status.textContent = `Loading your ${label} from RideWithGPS… ${loaded}${total ? ` of ${total}` : ""}`),
+      });
+    }
+    rw.creds = creds;
+    rw.items = items;
+    rw.selected.clear();
+    if (!items.routes.length && items.trips.length) rw.kind = "trips";
+    try {
+      if ($("#rwgps-remember").checked) localStorage.setItem(RWGPS_KEY, JSON.stringify(creds));
+      else localStorage.removeItem(RWGPS_KEY);
+    } catch { /* then only for now */ }
+    $("#rwgps-forget").hidden = !rwgpsSavedCreds();
+    status.textContent = "";
+    $("#rwgps-connect").open = false;
+    $("#rwgps-browse").hidden = false;
+    renderRwgps();
+  } catch (err) {
+    if (!(err instanceof rwgps.RwgpsError)) throw err;
+    status.textContent = err.message;
+  } finally {
+    rw.busy = false;
+    $("#rwgps-load").disabled = false;
+  }
+});
+
+/** The routes or rides shown with the current choice, search and "only new" setting. */
+function rwgpsShown(imported) {
+  const q = $("#rwgps-q").value.trim().toLowerCase();
+  const newOnly = $("#rwgps-new-only").checked;
+  return (rw.items[rw.kind] || []).filter((it) =>
+    (!q || it.name.toLowerCase().includes(q)) && (!newOnly || !imported.has(it.url)));
+}
+
+function renderRwgps() {
+  if (!rw.items.routes) return;
+  const imported = rwgps.importedByUrl(svc.library().all());
+  const all = [...rw.items.routes, ...rw.items.trips];
+  const newCount = (list) => list.filter((it) => !imported.has(it.url)).length;
+  for (const kind of Object.keys(rwgps.KINDS)) {
+    const list = rw.items[kind];
+    $(`#rwgps-n-${kind}`).textContent = `(${list.length}, ${newCount(list)} new)`;
+  }
+  $$("[data-rwgps-kind]").forEach((b) => b.classList.toggle("secondary", b.dataset.rwgpsKind !== rw.kind));
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  $("#rwgps-connected").textContent = `· connected: ${count(rw.items.routes.length, "route", "routes")}, ${count(rw.items.trips.length, "ride", "rides")}`;
+  const shown = rwgpsShown(imported);
+  const label = rwgps.KINDS[rw.kind];
+  $("#rwgps-table tbody").replaceChildren(...(shown.length ? shown.map((it) => {
+    const inLib = imported.get(it.url) || [];
+    return el("tr", {},
+      el("td", {}, el("input", {
+        type: "checkbox", checked: rw.selected.has(it.url), "aria-label": `Select ${it.name}`,
+        onchange: (e) => { e.target.checked ? rw.selected.add(it.url) : rw.selected.delete(it.url); rwgpsCount(); },
+      })),
+      el("td", {}, el("a", { href: it.url, target: "_blank", rel: "noopener", title: "Open on RideWithGPS" }, it.name)),
+      el("td", {}, fmt.km(it.distance_km)),
+      el("td", {}, fmt.m(it.gain_m)),
+      el("td", {}, fmt.date(it.date)),
+      el("td", {}, ...inLib.flatMap((r, i) => [i ? ", " : "", routeLink(r.id, r.name)])));
+  }) : [el("tr", {}, el("td", { colspan: 6, class: "muted" },
+    (rw.items[rw.kind] || []).length ? `No ${label.labelPlural} to show with this search or setting.` : `There are no ${label.labelPlural} in this RideWithGPS account.`))]));
+  // What is no longer in the list (imported since, or gone from RideWithGPS) is no longer selected.
+  const known = new Set(all.map((it) => it.url));
+  for (const url of [...rw.selected]) if (!known.has(url)) rw.selected.delete(url);
+  rwgpsCount();
+}
+
+function rwgpsCount() {
+  const n = rw.selected.size;
+  $("#rwgps-import").textContent = n ? `Import ${n} selected` : "Import selected";
+  $("#rwgps-import").disabled = !n || rw.busy;
+}
+
+$$("[data-rwgps-kind]").forEach((b) => b.addEventListener("click", () => { rw.kind = b.dataset.rwgpsKind; renderRwgps(); }));
+$("#rwgps-q").addEventListener("input", () => renderRwgps());
+$("#rwgps-new-only").addEventListener("change", () => renderRwgps());
+$("#rwgps-all").addEventListener("click", () => {
+  rwgpsShown(rwgps.importedByUrl(svc.library().all())).forEach((it) => rw.selected.add(it.url));
+  renderRwgps();
+});
+$("#rwgps-none").addEventListener("click", () => { rw.selected.clear(); renderRwgps(); });
+$("#rwgps-stop").addEventListener("click", () => {
+  rw.stop = true;
+  $("#rwgps-import-status").textContent = "Stopping after this one…";
+});
+
+$("#rwgps-import").addEventListener("click", async () => {
+  if (rw.busy || !rw.creds || !rw.selected.size) return;
+  const todo = [...rw.items.routes, ...rw.items.trips].filter((it) => rw.selected.has(it.url));
+  const status = $("#rwgps-import-status");
+  let batch;
+  try {
+    const activity = $("#rwgps-activity").value;
+    batch = {
+      source_name: $("#rwgps-source-name").value.trim() || null,
+      activity: activity ? svc.checkActivity(activity) : null,
+      tags: splitTags($("#rwgps-tags").value),
+      usePaved: $("#rwgps-paved").checked,
+    };
+  } catch (err) {
+    status.textContent = `error: ${err.message}`;
+    return;
+  }
+  rw.busy = true;
+  rw.stop = false;
+  rwgpsCount();
+  $("#rwgps-stop").hidden = false;
+  $("#rwgps-results").replaceChildren();
+  const results = [];
+  const estimate = [];
+  try {
+    for (const [i, it] of todo.entries()) {
+      if (rw.stop) break;
+      status.textContent = `Importing ${i + 1} of ${todo.length}: ${it.name}…`;
+      try {
+        if (i) await new Promise((resolve) => setTimeout(resolve, rwgps.IMPORT_PAUSE_MS));
+        const r = await rwgps.fetchOne(it.kind, it.id, rw.creds);
+        const act = batch.activity || r.activity;
+        const res = await svc.importGpx(r.data, r.filename, {
+          source_name: batch.source_name, source_url: it.url, activity: act ? svc.checkActivity(act) : null,
+          tags: batch.tags, notes: r.description || null,
+        });
+        results.push(res);
+        const ids = res.routes.map((x) => x.id);
+        if (ids.length && batch.usePaved && r.paved_pct != null) {
+          for (const id of ids) await svc.updateRoute(id, { paved_pct: r.paved_pct });
+        } else {
+          estimate.push(...ids);
+        }
+        rw.selected.delete(it.url);
+      } catch (err) {
+        results.push({ filename: it.name, status: "error", message: err.message, routes: [], duplicates: [], similar: [] });
+        // A refused token or "slow down": the next ones would fail the same way.
+        if (err instanceof rwgps.RwgpsError && (err.status === 401 || err.status === 429)) break;
+      }
+    }
+    if (estimate.length && config.SURFACE_AUTO_ESTIMATE) {
+      svc.surfaceJob.enqueue(estimate);
+      watchSurfaceJob();
+    }
+    if (results.some((r) => r.routes.length)) requestPersistence();
+    status.textContent = rw.stop ? "Stopped." : "";
+    renderResults(results, $("#rwgps-results"));
+    await Promise.all([refresh(), loadFacets()]);
+  } finally {
+    rw.busy = false;
+    rw.stop = false;
+    $("#rwgps-stop").hidden = true;
+    renderRwgps();
   }
 });
 

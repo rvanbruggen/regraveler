@@ -36,7 +36,7 @@
   }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=1.8.0">
+  <link rel="stylesheet" href="style.css?v=1.9.0">
   <!-- Cache-busting: every module is loaded as js/<file>?v=<version>, so a new release never runs
        with modules the browser still has from the previous one (static hosts such as GitHub Pages
        let browsers keep files for 10 minutes). /bump updates the version here; a test checks that
@@ -44,33 +44,34 @@
   <script type="importmap">
   {
     "imports": {
-      "./js/app.js": "./js/app.js?v=1.8.0",
-      "./js/backup.js": "./js/backup.js?v=1.8.0",
-      "./js/brouter.js": "./js/brouter.js?v=1.8.0",
-      "./js/combiner.js": "./js/combiner.js?v=1.8.0",
-      "./js/config.js": "./js/config.js?v=1.8.0",
-      "./js/db.js": "./js/db.js?v=1.8.0",
-      "./js/fit.js": "./js/fit.js?v=1.8.0",
-      "./js/geo.js": "./js/geo.js?v=1.8.0",
-      "./js/gpx.js": "./js/gpx.js?v=1.8.0",
-      "./js/linkimport.js": "./js/linkimport.js?v=1.8.0",
-      "./js/osm.js": "./js/osm.js?v=1.8.0",
-      "./js/places.js": "./js/places.js?v=1.8.0",
-      "./js/poi.js": "./js/poi.js?v=1.8.0",
-      "./js/profile.js": "./js/profile.js?v=1.8.0",
-      "./js/remote.js": "./js/remote.js?v=1.8.0",
-      "./js/service.js": "./js/service.js?v=1.8.0",
-      "./js/sha256.js": "./js/sha256.js?v=1.8.0",
-      "./js/share.js": "./js/share.js?v=1.8.0",
-      "./js/similarity.js": "./js/similarity.js?v=1.8.0",
-      "./js/stats.js": "./js/stats.js?v=1.8.0",
-      "./js/surface.js": "./js/surface.js?v=1.8.0",
-      "./js/tcx.js": "./js/tcx.js?v=1.8.0",
-      "./js/trackfile.js": "./js/trackfile.js?v=1.8.0",
-      "./js/trains.js": "./js/trains.js?v=1.8.0",
-      "./js/weather.js": "./js/weather.js?v=1.8.0",
-      "./js/worker.js": "./js/worker.js?v=1.8.0",
-      "./js/zip.js": "./js/zip.js?v=1.8.0"
+      "./js/app.js": "./js/app.js?v=1.9.0",
+      "./js/backup.js": "./js/backup.js?v=1.9.0",
+      "./js/brouter.js": "./js/brouter.js?v=1.9.0",
+      "./js/combiner.js": "./js/combiner.js?v=1.9.0",
+      "./js/config.js": "./js/config.js?v=1.9.0",
+      "./js/db.js": "./js/db.js?v=1.9.0",
+      "./js/fit.js": "./js/fit.js?v=1.9.0",
+      "./js/geo.js": "./js/geo.js?v=1.9.0",
+      "./js/gpx.js": "./js/gpx.js?v=1.9.0",
+      "./js/linkimport.js": "./js/linkimport.js?v=1.9.0",
+      "./js/osm.js": "./js/osm.js?v=1.9.0",
+      "./js/places.js": "./js/places.js?v=1.9.0",
+      "./js/poi.js": "./js/poi.js?v=1.9.0",
+      "./js/profile.js": "./js/profile.js?v=1.9.0",
+      "./js/remote.js": "./js/remote.js?v=1.9.0",
+      "./js/rwgps.js": "./js/rwgps.js?v=1.9.0",
+      "./js/service.js": "./js/service.js?v=1.9.0",
+      "./js/sha256.js": "./js/sha256.js?v=1.9.0",
+      "./js/share.js": "./js/share.js?v=1.9.0",
+      "./js/similarity.js": "./js/similarity.js?v=1.9.0",
+      "./js/stats.js": "./js/stats.js?v=1.9.0",
+      "./js/surface.js": "./js/surface.js?v=1.9.0",
+      "./js/tcx.js": "./js/tcx.js?v=1.9.0",
+      "./js/trackfile.js": "./js/trackfile.js?v=1.9.0",
+      "./js/trains.js": "./js/trains.js?v=1.9.0",
+      "./js/weather.js": "./js/weather.js?v=1.9.0",
+      "./js/worker.js": "./js/worker.js?v=1.9.0",
+      "./js/zip.js": "./js/zip.js?v=1.9.0"
     }
   }
   </script>
@@ -324,7 +325,8 @@
     <ol class="about-steps">
       <li><strong>Import your routes</strong> (<a class="link" data-goto="import">Import</a>): drop GPX, TCX or FIT
         files, whole folders or zip files, and set their source, activity and tags. Or paste a link to a route on
-        RideWithGPS, Komoot or Strava (<a class="link" data-goto="link">Utilities › Import from a link</a>). Just
+        RideWithGPS, Komoot or Strava (<a class="link" data-goto="link">Utilities › Import from a link</a>), or
+        bring in all the routes and rides of your RideWithGPS account at once (<em>From your RideWithGPS account</em> on the <a class="link" data-goto="import">Import</a> screen). Just
         looking around? Add a set of example routes on the Import screen (while your library is empty) or under
         <a class="link" data-goto="data">Library &amp; settings</a>. rerouter works out the distance, the climbing, a name after the places the route visits and,
         if you like, how much of it is paved.</li>
@@ -737,6 +739,8 @@
       <p class="small">Files in a subfolder get the subfolder's name as source name, unless you fill in a source name above.
         A recorded ride (a FIT or TCX activity from your bike computer or watch, also .gz as in a Strava export) that
         rides most of a route in your library can be logged on that route instead of being imported as a new one.</p>
+      <p class="small">On RideWithGPS? Bring in your routes and rides <a class="link" id="rwgps-jump">from your RideWithGPS account</a>
+        (below), or one route from a link (<a class="link" data-goto="link">Utilities › Import from a link</a>).</p>
     </div>
     <table id="pending" hidden>
       <thead><tr><th>File</th><th>Source name (override)</th><th>Source URL (override)</th><th>Activity (override)</th><th>Extra tags</th><th></th></tr></thead>
@@ -749,6 +753,64 @@
     </p>
     <p id="import-set-status" class="muted"></p>
     <div id="import-results"></div>
+    <!-- From the user's own RideWithGPS account (rwgps.js) -->
+    <details id="rwgps" class="panel rwgps-panel">
+      <summary><strong>From your RideWithGPS account</strong> <span class="muted small">— your routes and rides, all at once</span>
+        <span id="rwgps-connected" class="muted small"></span></summary>
+      <details id="rwgps-connect" open>
+        <summary>Connect with an API key and auth token</summary>
+        <ol class="small">
+          <li>On <a href="https://ridewithgps.com/api/api_clients" target="_blank" rel="noopener">ridewithgps.com/api/api_clients</a>
+            (signed in), make a new API client. Only the left side matters: an <em>Application name</em> such as "rerouter",
+            category <em>Other</em>. Leave the sync, webhook and OAuth fields empty. <em>Save changes</em>.</li>
+          <li>Open the new client: copy its <strong>API key</strong> (not the secret), and under <em>Basic Authentication</em>
+            generate an <strong>auth token</strong>.</li>
+          <li>Paste both here.</li>
+        </ol>
+        <form id="rwgps-form" class="batch" autocomplete="off">
+          <label>API key <input type="text" id="rwgps-key" required spellcheck="false"></label>
+          <label>Auth token <input type="password" id="rwgps-token" required spellcheck="false" autocomplete="off"></label>
+          <label class="check wide"><input type="checkbox" id="rwgps-remember" checked> Remember them in this browser</label>
+          <p class="actions wide">
+            <button type="submit" id="rwgps-load">Show my routes and rides</button>
+            <a class="link small" id="rwgps-forget" hidden>Forget the key and token</a>
+          </p>
+        </form>
+        <p class="muted small">The key and token go only to RideWithGPS, straight from this browser. They are not part of
+          your library and not in its backups. You can delete the token on RideWithGPS at any time.</p>
+      </details>
+      <p id="rwgps-status" class="muted small"></p>
+      <div id="rwgps-browse" hidden>
+        <div class="rwgps-bar">
+          <span class="seg" role="group" aria-label="Show">
+            <button type="button" class="secondary small-btn" data-rwgps-kind="routes">Routes <span id="rwgps-n-routes"></span></button>
+            <button type="button" class="secondary small-btn" data-rwgps-kind="trips">Rides <span id="rwgps-n-trips"></span></button>
+          </span>
+          <input type="search" id="rwgps-q" placeholder="search by name">
+          <label class="check"><input type="checkbox" id="rwgps-new-only" checked> Only what isn't in your library yet</label>
+          <span class="small">Select: <a class="link" id="rwgps-all">all shown</a> · <a class="link" id="rwgps-none">none</a></span>
+        </div>
+        <div class="rwgps-table-wrap">
+          <table id="rwgps-table">
+            <thead><tr><th></th><th>Name</th><th>Distance</th><th>Gain</th><th>Date</th><th>In your library</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="batch">
+          <label>Source name <input type="text" id="rwgps-source-name" list="source-list" value="RideWithGPS"></label>
+          <label>Activity <select id="rwgps-activity" class="activity-select" data-any="as on RideWithGPS"></select></label>
+          <label>Tags <input type="text" id="rwgps-tags" list="tag-list" placeholder="comma separated"></label>
+          <label class="check wide"><input type="checkbox" id="rwgps-paved"> Use RideWithGPS's surface (paved %) where it has one
+            (otherwise rerouter estimates it from OpenStreetMap)</label>
+        </div>
+        <p class="actions">
+          <button type="button" id="rwgps-import" disabled>Import selected</button>
+          <button type="button" id="rwgps-stop" class="secondary" hidden>Stop</button>
+          <span id="rwgps-import-status" class="muted"></span>
+        </p>
+        <div id="rwgps-results"></div>
+      </div>
+    </details>
   </section>
 
   <!-- Import from a link (utility) -->
@@ -952,6 +1014,6 @@
 </aside>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script type="module" src="js/app.js?v=1.8.0"></script>
+<script type="module" src="js/app.js?v=1.9.0"></script>
 </body>
 </html>

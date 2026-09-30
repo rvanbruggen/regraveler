@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.8.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.9.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -32,7 +32,8 @@ history in [CHANGELOG.md](CHANGELOG.md).
 At a glance:
 
 - **Import** GPX, TCX and FIT files (also zipped folders, and a whole Strava export), or a
-  route from a link (RideWithGPS, Komoot, Strava, any GPX file online). Stats, a descriptive
+  route from a link (RideWithGPS, Komoot, Strava, any GPX file online), or all the routes and
+  rides of your own RideWithGPS account at once. Stats, a descriptive
   name and the surface (paved / unpaved, from OpenStreetMap) are worked out for you; recorded
   rides of routes you have are logged on them.
 - **A library** with a filter bar and a **Browse** panel: collections (nested), smart
@@ -116,6 +117,27 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
     (many don't; then download the file and use the Import screen). A rerouter server fetches
     such files itself, only from public internet addresses (never from your own network), at
     most 20 MB, and only GPX files.
+- **From your RideWithGPS account** (a panel at the bottom of the Import screen): your own
+  routes and recorded rides, private ones too, all at once. It uses RideWithGPS's API v1
+  straight from the page (RideWithGPS allows that), so it works in the browser version and on
+  a server alike; the server is not involved.
+  - **Connecting:** on [ridewithgps.com/api/api_clients](https://ridewithgps.com/api/api_clients)
+    make an API client (only the name matters; leave the sync, webhook and OAuth fields empty),
+    copy its **API key** (not the secret) and generate an **auth token** under *Basic
+    Authentication*. Paste both in the panel. rerouter never asks for your RideWithGPS password.
+    The key and token are kept in this browser only if you tick *Remember them* (never in the
+    library or its backups); *Forget the key and token* removes them. Delete the token on
+    RideWithGPS to revoke it.
+  - **Choosing:** a list of your routes and your rides (name, distance, climbing, date), with a
+    search, *Only what isn't in your library yet* and select all / none. A route or ride counts
+    as in your library when a route has its RideWithGPS address as source URL, also when it came
+    in through *Import from a link*.
+  - **Importing:** one at a time, with a short pause between them (*Stop* halts after the current
+    one). Each is imported like a link from RideWithGPS: its track becomes a GPX file, named by
+    your naming setting, with the description in the notes, the RideWithGPS address as source URL
+    and the source name, activity and tags you set for the batch (the activity comes from
+    RideWithGPS when you leave it on *as on RideWithGPS*). RideWithGPS's surface can be used as
+    the paved %.
 
 ### The library
 
@@ -816,6 +838,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     brouter.js       client for the BRouter HTTP API
     surface.js       surface estimate (map matching via BRouter)
     linkimport.js    import from a link: RideWithGPS, Komoot, Strava, GPX files online
+    rwgps.js         import from your RideWithGPS account (API v1: list routes and rides, fetch one)
     weather.js       ride weather: forecast along the route (Open-Meteo), headwind / tailwind
     places.js        route names from GeoNames places (start town + places visited)
     zip.js, backup.js  zip files, library backups and exported route sets
