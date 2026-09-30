@@ -366,6 +366,10 @@ function renderSelection() {
   }
   else if (!$("#tag-panel").hidden) renderTagPanel();
   $("#sel-count").textContent = `${n} selected`;
+  const combine = $("#sel-combine");
+  combine.disabled = n < 2 || n > 4;
+  combine.title = n < 2 ? "Select 2 to 4 routes to combine them" : n > 4 ? "Combine at most 4 routes: select fewer"
+    : "Combine parts of the selected routes into a new route";
   const all = $("#sel-all");
   all.checked = n > 0 && n === routes.length;
   all.indeterminate = n > 0 && n < routes.length;
@@ -435,6 +439,10 @@ $("#sel-map").addEventListener("click", () => {
   state.ids = [...checked];
   showView("map");
   refresh();
+});
+
+$("#sel-combine").addEventListener("click", () => {
+  if (checked.size >= 2 && checked.size <= 4) openCombiner([...checked]);
 });
 
 $("#sel-remove").addEventListener("click", async () => {

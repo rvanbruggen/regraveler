@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.7.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.8.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -164,6 +164,8 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
     with the original files (a multi-track file is included once).
   - **Show on map:** the map (and library) show only the selected routes until you click
     *show all routes* or *Clear*.
+  - **Combine…:** with 2 to 4 routes selected, opens *Combine* with them (see
+    [Utilities](#utilities)).
   - **Tags…:** add one or more tags to all selected routes, or remove a tag from all of them
     (the panel lists the tags on the selection with how many routes have each, e.g. `forest 3/5`).
   - **Estimate surface:** (re)estimates the paved % from OpenStreetMap; progress is shown next
@@ -293,7 +295,8 @@ The *Utilities* menu in the header has the operations on routes:
 - **Combine** parts of 2 to 4 routes into a new one, in four steps:
   1. **Routes:** tick 2 to 4 routes in the list or click them on the map. The Browse panel
      (collections, smart collections, areas, regions, activity, …) and a name search narrow
-     the list down, without touching the library's filters. *Combine…* in a route's detail
+     the list down, without touching the library's filters. *Combine…* in the library's
+     selection bar starts with the 2 to 4 selected routes, *Combine…* in a route's detail
      panel adds that route, and *combine* next to a pair in the map's proximity list starts
      with those two.
   2. **Parts:** on each route, mark the parts to keep: *＋ Part*, then click where it starts

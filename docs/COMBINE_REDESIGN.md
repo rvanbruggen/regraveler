@@ -1,7 +1,7 @@
 # Combine routes: redesign plan
 
-Status: agreed, 2026-09-30 (decisions below). Phases 1 and 2 are built (1.6.0), phase 3 too
-(1.7.0); phase 4 is not.
+Status: agreed, 2026-09-30 (decisions below). All four phases are built: phases 1 and 2 in
+1.6.0, phase 3 in 1.7.0, phase 4 in 1.8.0.
 
 Built in phase 1 (engine and service):
 - `brouter.route(..., via, alternative)`, with `ALTERNATIVES = 4` (BRouter's `alternativeidx` 0–3).
@@ -37,8 +37,14 @@ Built in phase 3 (validate):
 - `combineConnector` returns `routed: false` and `how` for straight lines; the description of
   a combination with approved connectors says how they were made.
 
-Still to do: phase 4 (the library's *Combine…* button, help text, new screenshots:
-`docs/screenshots/take_screenshots.py` still opens `a=`/`b=` and now lands on the Parts step).
+Built in phase 4 (polish):
+- *Combine…* in the library's selection bar (enabled for 2 to 4 selected routes).
+- Auto-connect had come with phase 2; the About page, README and feature page describe the
+  new steps.
+- `docs/screenshots/take_screenshots.py` builds the combine scene with the new link format
+  (A from its start to where it comes closest to B, then B to its end; the connection
+  accepted). `docs/screenshots/combine.webp` itself still shows the old screen: retake it
+  with that script (it needs a local BRouter and rerouter server, see its docstring).
 
 ## Decisions
 

@@ -36,7 +36,7 @@
   }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=1.7.0">
+  <link rel="stylesheet" href="style.css?v=1.8.0">
   <!-- Cache-busting: every module is loaded as js/<file>?v=<version>, so a new release never runs
        with modules the browser still has from the previous one (static hosts such as GitHub Pages
        let browsers keep files for 10 minutes). /bump updates the version here; a test checks that
@@ -44,33 +44,33 @@
   <script type="importmap">
   {
     "imports": {
-      "./js/app.js": "./js/app.js?v=1.7.0",
-      "./js/backup.js": "./js/backup.js?v=1.7.0",
-      "./js/brouter.js": "./js/brouter.js?v=1.7.0",
-      "./js/combiner.js": "./js/combiner.js?v=1.7.0",
-      "./js/config.js": "./js/config.js?v=1.7.0",
-      "./js/db.js": "./js/db.js?v=1.7.0",
-      "./js/fit.js": "./js/fit.js?v=1.7.0",
-      "./js/geo.js": "./js/geo.js?v=1.7.0",
-      "./js/gpx.js": "./js/gpx.js?v=1.7.0",
-      "./js/linkimport.js": "./js/linkimport.js?v=1.7.0",
-      "./js/osm.js": "./js/osm.js?v=1.7.0",
-      "./js/places.js": "./js/places.js?v=1.7.0",
-      "./js/poi.js": "./js/poi.js?v=1.7.0",
-      "./js/profile.js": "./js/profile.js?v=1.7.0",
-      "./js/remote.js": "./js/remote.js?v=1.7.0",
-      "./js/service.js": "./js/service.js?v=1.7.0",
-      "./js/sha256.js": "./js/sha256.js?v=1.7.0",
-      "./js/share.js": "./js/share.js?v=1.7.0",
-      "./js/similarity.js": "./js/similarity.js?v=1.7.0",
-      "./js/stats.js": "./js/stats.js?v=1.7.0",
-      "./js/surface.js": "./js/surface.js?v=1.7.0",
-      "./js/tcx.js": "./js/tcx.js?v=1.7.0",
-      "./js/trackfile.js": "./js/trackfile.js?v=1.7.0",
-      "./js/trains.js": "./js/trains.js?v=1.7.0",
-      "./js/weather.js": "./js/weather.js?v=1.7.0",
-      "./js/worker.js": "./js/worker.js?v=1.7.0",
-      "./js/zip.js": "./js/zip.js?v=1.7.0"
+      "./js/app.js": "./js/app.js?v=1.8.0",
+      "./js/backup.js": "./js/backup.js?v=1.8.0",
+      "./js/brouter.js": "./js/brouter.js?v=1.8.0",
+      "./js/combiner.js": "./js/combiner.js?v=1.8.0",
+      "./js/config.js": "./js/config.js?v=1.8.0",
+      "./js/db.js": "./js/db.js?v=1.8.0",
+      "./js/fit.js": "./js/fit.js?v=1.8.0",
+      "./js/geo.js": "./js/geo.js?v=1.8.0",
+      "./js/gpx.js": "./js/gpx.js?v=1.8.0",
+      "./js/linkimport.js": "./js/linkimport.js?v=1.8.0",
+      "./js/osm.js": "./js/osm.js?v=1.8.0",
+      "./js/places.js": "./js/places.js?v=1.8.0",
+      "./js/poi.js": "./js/poi.js?v=1.8.0",
+      "./js/profile.js": "./js/profile.js?v=1.8.0",
+      "./js/remote.js": "./js/remote.js?v=1.8.0",
+      "./js/service.js": "./js/service.js?v=1.8.0",
+      "./js/sha256.js": "./js/sha256.js?v=1.8.0",
+      "./js/share.js": "./js/share.js?v=1.8.0",
+      "./js/similarity.js": "./js/similarity.js?v=1.8.0",
+      "./js/stats.js": "./js/stats.js?v=1.8.0",
+      "./js/surface.js": "./js/surface.js?v=1.8.0",
+      "./js/tcx.js": "./js/tcx.js?v=1.8.0",
+      "./js/trackfile.js": "./js/trackfile.js?v=1.8.0",
+      "./js/trains.js": "./js/trains.js?v=1.8.0",
+      "./js/weather.js": "./js/weather.js?v=1.8.0",
+      "./js/worker.js": "./js/worker.js?v=1.8.0",
+      "./js/zip.js": "./js/zip.js?v=1.8.0"
     }
   }
   </script>
@@ -167,6 +167,7 @@
         <button type="button" id="sel-download" class="secondary">Download GPX</button>
         <button type="button" id="sel-export" class="secondary" aria-expanded="false" aria-controls="export-panel" title="A rerouter zip with these routes and their details, to add to another library">Export set…</button>
         <button type="button" id="sel-map" class="secondary">Show on map</button>
+        <button type="button" id="sel-combine" class="secondary" title="Combine parts of 2 to 4 of the selected routes into a new route">Combine…</button>
         <button type="button" id="sel-surface" class="secondary" title="Estimate paved % from OpenStreetMap (asks the BRouter server; one route at a time)">Estimate surface</button>
         <select id="sel-activity" class="activity-select" data-any="Set activity…" aria-label="Set the activity of the selected routes"></select>
         <button type="button" id="sel-tags" class="secondary" aria-expanded="false" aria-controls="tag-panel">Tags…</button>
@@ -339,8 +340,8 @@
       <li><strong>Add places</strong> (<a class="link" data-goto="places">Places</a>): import your Google My Maps
         or a CSV file, add example lists, or click <em>＋ Place</em> on the map. Places show on every map and in each
         route's panel (<em>Places along this route</em>), where you can also look up more on OpenStreetMap.</li>
-      <li><strong>Use the utilities</strong> (<em>Utilities</em>): <em>Combine routes</em> into a new ride with
-        connectors routed for you, <em>Change start point</em> of a loop, <em>Ride weather</em> for the day you ride,
+      <li><strong>Use the utilities</strong> (<em>Utilities</em>): <em>Combine routes</em> into a new ride
+        (choose 2 to 4 routes, mark the parts to keep, connect them and check each connector routed for you), <em>Change start point</em> of a loop, <em>Ride weather</em> for the day you ride,
         <em>Search for places</em> along a route (and ride past them), and <em>Train rides</em>: a day out with the
         train, with your routes as the riding part. What you make can be saved as a new route or downloaded as
         GPX for your bike computer.</li>
@@ -951,6 +952,6 @@
 </aside>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script type="module" src="js/app.js?v=1.7.0"></script>
+<script type="module" src="js/app.js?v=1.8.0"></script>
 </body>
 </html>

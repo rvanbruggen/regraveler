@@ -91,7 +91,7 @@ PAGES = [
         "lead": "Like the first half of one route and the second half of another? Pick the parts you want to ride and rerouter joins them, with the connectors routed for you.",
         "body": """
 <ol>
-  <li>Choose 2 to 4 routes: tick them in a list you can narrow down by collection, area, region or name, click them on the map, or start from a route's panel.</li>
+  <li>Choose 2 to 4 routes: select them in your library, tick them in a list you can narrow down by collection, area, region or name, click them on the map, or start from a route's panel.</li>
   <li>Mark the <strong>parts</strong> to keep: click where each part starts and ends on its route, and drag the ends to adjust them. One route can give several parts.</li>
   <li><strong>Connect</strong> them: click the end of one part, then the start of the next, or let rerouter pick the order with the shortest gaps, as a loop or point to point.</li>
   <li>The gaps are filled with connectors routed by <a href="https://brouter.de/">BRouter</a>, with a profile for the activity (gravel, road, mountain biking or hiking; for gravel optionally preferring unpaved paths). Check each one: accept it, or pick another of BRouter's routes, a straight line, or one of your places to ride through.</li>
