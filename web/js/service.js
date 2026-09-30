@@ -722,49 +722,6 @@ const ll = (p) => [round(p[0], 6), round(p[1], 6)];
 
 // ------------------------------------------------------------------ combiner
 
-/** Suggested points: where routes A and B come closest (count 1: point to point, 2: loop). */
-/**
- * Suggested points for combining routes A and B. pattern: "loop" (two crossings, back to
- * A1), "open" (A then B, point to point) or "outback" (out on A, back on B to its start);
- * the old form 2 / 1 still means loop / open.
- */
-export async function combineSuggest(aId, bId, pattern = "open") {
-  if (aId === bId) throw new ServiceError("Choose two different routes");
-  if (pattern === 2) pattern = "loop";
-  if (pattern === 1) pattern = "open";
-  if (!["loop", "open", "outback"].includes(pattern)) throw new ServiceError(`Unknown pattern '${pattern}'`);
-  const [a, b] = await Promise.all([loadTrack(getRoute(aId)), loadTrack(getRoute(bId))]);
-  let connections, parts;
-  try {
-    connections = pattern === "outback"
-      ? [cb.suggestCrossover(a, b)]
-      : cb.suggestConnections(a, b, pattern === "loop" ? 2 : 1);
-    parts = cb.suggestParts(a, b, pattern);
-  } catch (err) {
-    if (err instanceof cb.CombineError) throw new ServiceError(err.message);
-    throw err;
-  }
-  return {
-    connections: connections.map((c) => {
-      const pa = cb.pointAt(a, c.aAt), pb = cb.pointAt(b, c.bAt);
-      return { a: ll(cb.latLonOf(pa)), b: ll(cb.latLonOf(pb)), distance_m: Math.round(Math.hypot(pa[0] - pb[0], pa[1] - pb[1])) };
-    }),
-    parts: parts.map((p, i) => partOut(p, [aId, bId][i])),
-  };
-}
-
-function partOut(p, routeId) {
-  return {
-    route_id: routeId,
-    start: ll(cb.latLonOf(cb.pointAt(p.track, p.startAt))),
-    end: ll(cb.latLonOf(cb.pointAt(p.track, p.endAt))),
-    start_km: round(p.startAt / 1000, 2),
-    end_km: round(p.endAt / 1000, 2),
-    other_way: p.otherWay,
-    with_route: cb.withRoute(p),
-  };
-}
-
 const MAX_ROUTES = 4; // different routes in one combination
 const MAX_PARTS = 6; // parts in all (a route can give more than one)
 

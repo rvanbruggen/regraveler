@@ -36,7 +36,7 @@
   }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=1.5.0">
+  <link rel="stylesheet" href="style.css?v=1.6.0">
   <!-- Cache-busting: every module is loaded as js/<file>?v=<version>, so a new release never runs
        with modules the browser still has from the previous one (static hosts such as GitHub Pages
        let browsers keep files for 10 minutes). /bump updates the version here; a test checks that
@@ -44,33 +44,33 @@
   <script type="importmap">
   {
     "imports": {
-      "./js/app.js": "./js/app.js?v=1.5.0",
-      "./js/backup.js": "./js/backup.js?v=1.5.0",
-      "./js/brouter.js": "./js/brouter.js?v=1.5.0",
-      "./js/combiner.js": "./js/combiner.js?v=1.5.0",
-      "./js/config.js": "./js/config.js?v=1.5.0",
-      "./js/db.js": "./js/db.js?v=1.5.0",
-      "./js/fit.js": "./js/fit.js?v=1.5.0",
-      "./js/geo.js": "./js/geo.js?v=1.5.0",
-      "./js/gpx.js": "./js/gpx.js?v=1.5.0",
-      "./js/linkimport.js": "./js/linkimport.js?v=1.5.0",
-      "./js/osm.js": "./js/osm.js?v=1.5.0",
-      "./js/places.js": "./js/places.js?v=1.5.0",
-      "./js/poi.js": "./js/poi.js?v=1.5.0",
-      "./js/profile.js": "./js/profile.js?v=1.5.0",
-      "./js/remote.js": "./js/remote.js?v=1.5.0",
-      "./js/service.js": "./js/service.js?v=1.5.0",
-      "./js/sha256.js": "./js/sha256.js?v=1.5.0",
-      "./js/share.js": "./js/share.js?v=1.5.0",
-      "./js/similarity.js": "./js/similarity.js?v=1.5.0",
-      "./js/stats.js": "./js/stats.js?v=1.5.0",
-      "./js/surface.js": "./js/surface.js?v=1.5.0",
-      "./js/tcx.js": "./js/tcx.js?v=1.5.0",
-      "./js/trackfile.js": "./js/trackfile.js?v=1.5.0",
-      "./js/trains.js": "./js/trains.js?v=1.5.0",
-      "./js/weather.js": "./js/weather.js?v=1.5.0",
-      "./js/worker.js": "./js/worker.js?v=1.5.0",
-      "./js/zip.js": "./js/zip.js?v=1.5.0"
+      "./js/app.js": "./js/app.js?v=1.6.0",
+      "./js/backup.js": "./js/backup.js?v=1.6.0",
+      "./js/brouter.js": "./js/brouter.js?v=1.6.0",
+      "./js/combiner.js": "./js/combiner.js?v=1.6.0",
+      "./js/config.js": "./js/config.js?v=1.6.0",
+      "./js/db.js": "./js/db.js?v=1.6.0",
+      "./js/fit.js": "./js/fit.js?v=1.6.0",
+      "./js/geo.js": "./js/geo.js?v=1.6.0",
+      "./js/gpx.js": "./js/gpx.js?v=1.6.0",
+      "./js/linkimport.js": "./js/linkimport.js?v=1.6.0",
+      "./js/osm.js": "./js/osm.js?v=1.6.0",
+      "./js/places.js": "./js/places.js?v=1.6.0",
+      "./js/poi.js": "./js/poi.js?v=1.6.0",
+      "./js/profile.js": "./js/profile.js?v=1.6.0",
+      "./js/remote.js": "./js/remote.js?v=1.6.0",
+      "./js/service.js": "./js/service.js?v=1.6.0",
+      "./js/sha256.js": "./js/sha256.js?v=1.6.0",
+      "./js/share.js": "./js/share.js?v=1.6.0",
+      "./js/similarity.js": "./js/similarity.js?v=1.6.0",
+      "./js/stats.js": "./js/stats.js?v=1.6.0",
+      "./js/surface.js": "./js/surface.js?v=1.6.0",
+      "./js/tcx.js": "./js/tcx.js?v=1.6.0",
+      "./js/trackfile.js": "./js/trackfile.js?v=1.6.0",
+      "./js/trains.js": "./js/trains.js?v=1.6.0",
+      "./js/weather.js": "./js/weather.js?v=1.6.0",
+      "./js/worker.js": "./js/worker.js?v=1.6.0",
+      "./js/zip.js": "./js/zip.js?v=1.6.0"
     }
   }
   </script>
@@ -93,7 +93,7 @@
     <div class="menu" id="utilities">
       <button type="button" class="tab menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="utilities-menu">Utilities ▾</button>
       <div class="menu-list" id="utilities-menu" role="menu" hidden>
-        <button type="button" role="menuitem" data-view="combine">Combine routes<small>Join two routes with routed connectors</small></button>
+        <button type="button" role="menuitem" data-view="combine">Combine routes<small>Join parts of 2 to 4 routes with routed connectors</small></button>
         <button type="button" role="menuitem" data-view="restart">Change start point<small>Start a loop somewhere else on the loop</small></button>
         <button type="button" role="menuitem" data-view="weather">Ride weather<small>Rain, temperature and wind along a route on the day you ride</small></button>
         <button type="button" role="menuitem" data-view="findplaces">Search for places<small>Cafés, water, toilets, … along a route; a route with them</small></button>
@@ -311,7 +311,7 @@
   <section id="view-about" class="view about" hidden>
     <h2>About rerouter</h2>
     <p class="lead">rerouter is a really easy way to keep a library of your routes (gravel, road, mountain
-      biking, hiking) and to do, in one click, the things riders keep needing and keep doing by hand: combine two
+      biking, hiking) and to do, in one click, the things riders keep needing and keep doing by hand: combine
       routes into a new ride, start a loop somewhere else, check the weather along the way, find the cafés and
       water taps on a route, or plan a day out with the train.</p>
     <p>It runs in your browser. Your routes stay with you: in this browser on this device, or on your own
@@ -519,70 +519,72 @@
   <section id="view-combine" class="view" hidden>
     <div class="map-layout">
       <div class="map-side" id="cb-side">
-        <div class="cb-intro small">
-          <p>Make a new route from two routes: you ride a stretch of <strong>route A</strong> (from point
-            A1 to A2) and a stretch of <strong>route B</strong> (from B1 to B2). Where there is a gap
-            between them, an <span class="cb-conn">orange connector</span> is routed along real roads and
-            paths.</p>
-          <p class="muted">Pick the two routes (or click them on the map), then the way to combine them.
-            Suggested points are placed for you; drag any point along its route to change it.</p>
+        <ol class="cb-steps" id="cb-stepbar">
+          <li><button type="button" data-step="routes">1 Routes</button></li>
+          <li><button type="button" data-step="parts">2 Parts</button></li>
+          <li><button type="button" data-step="connect">3 Connect</button></li>
+          <li><button type="button" data-step="ride">4 Ride</button></li>
+        </ol>
+
+        <div class="cb-step" data-step="routes">
+          <p class="small">Choose <strong>2 to 4 routes</strong> to combine: tick them in the list or click
+            them on the map. Browse narrows the list down.</p>
+          <div id="cb-chosen" class="cb-chosen"></div>
+          <input type="search" id="cb-search" placeholder="Search by name" aria-label="Search routes by name">
+          <div id="cb-catalog" class="catalog"></div>
+          <p id="cb-list-count" class="muted small"></p>
+          <ul id="cb-list" class="cb-list"></ul>
         </div>
-        <label><span><span class="swatch" style="background:#2f6fd6"></span>Route A</span> <select id="cb-a"></select></label>
-        <label><span><span class="swatch" style="background:#d62f4b"></span>Route B</span> <select id="cb-b"></select></label>
-        <fieldset class="options cb-patterns">
-          <legend>How to combine them</legend>
-          <label class="check"><input type="radio" name="cb-mode" value="outback">
-            <span><strong>Out on A, back on B</strong>
-              <small>Start where A starts, ride A to a crossing, switch to B and ride B back to its
-                start. For two routes that start in the same place.</small></span></label>
-          <label class="check"><input type="radio" name="cb-mode" value="loop" checked>
-            <span><strong>Two crossings (loop)</strong>
-              <small>Ride part of A, switch to B, ride part of B and switch back to where you joined A.
-                For two routes that cross or come close in two places.</small></span></label>
-          <label class="check"><input type="radio" name="cb-mode" value="open">
-            <span><strong>A, then B (point to point)</strong>
-              <small>Ride part of A, switch to B and finish somewhere on B.</small></span></label>
-        </fieldset>
-        <fieldset class="options">
-          <legend>Points</legend>
-          <p class="muted small cb-legend">A1 = where you join route A, A2 = where you leave it;
-            B1 and B2 the same on route B.</p>
-          <div id="cb-points" class="cb-points"></div>
+
+        <div class="cb-step" data-step="parts" hidden>
+          <p class="small">Mark the <strong>parts to keep</strong>: click where a part starts on its route,
+            then where it ends. You ride it in that direction. Drag the ends to adjust them.</p>
+          <div id="cb-parts" class="cb-parts"></div>
+        </div>
+
+        <div class="cb-step" data-step="connect" hidden>
+          <p class="small">Say which parts follow each other: click the <strong>end</strong> of a part (■),
+            then the <strong>start</strong> of the next one (▶). Connect the last part back to the first
+            for a loop.</p>
           <div class="actions">
-            <button type="button" id="cb-click-all" class="secondary">Click all four</button>
-            <button type="button" id="cb-suggest" class="secondary">Suggest</button>
+            <button type="button" id="cb-auto-loop" class="secondary" title="Join the parts in the order with the shortest gaps, back to the start">Auto: loop</button>
+            <button type="button" id="cb-auto-open" class="secondary" title="Join the parts in the order with the shortest gaps">Auto: point to point</button>
+            <button type="button" id="cb-clear-links" class="secondary">Clear</button>
           </div>
-          <div class="actions">
-            <button type="button" id="cb-swap-a" class="secondary" title="Ride route A the other way">Swap A1 ↔ A2</button>
-            <button type="button" id="cb-swap-b" class="secondary" title="Ride route B the other way">Swap B1 ↔ B2</button>
+          <ul id="cb-links" class="cb-links"></ul>
+          <p id="cb-order" class="small"></p>
+        </div>
+
+        <div class="cb-step" data-step="ride" hidden>
+          <p class="small">Where there is a gap between two parts, an <span class="cb-conn">orange
+            connector</span> is routed along real roads and paths.</p>
+          <fieldset class="options">
+            <legend>Connector routing</legend>
+            <label>Profile <select id="cb-profile"></select></label>
+            <label class="check" id="cb-unpaved-label"><input type="checkbox" id="cb-unpaved"> Prefer unpaved paths</label>
+            <label class="check"><input type="checkbox" id="cb-straight"> Straight lines (no routing)</label>
+            <label class="check"><input type="checkbox" id="cb-rev"> Ride the whole result the other way</label>
+          </fieldset>
+          <div id="cb-ride" class="cb-ride" hidden>
+            <h3>Your ride</h3>
+            <ol id="cb-ride-steps"></ol>
           </div>
-        </fieldset>
-        <fieldset class="options">
-          <legend>Direction</legend>
-          <label class="check" id="cb-rev-a-label"><input type="checkbox" id="cb-rev-a"> <span></span></label>
-          <label class="check" id="cb-rev-b-label"><input type="checkbox" id="cb-rev-b"> <span></span></label>
-          <label class="check"><input type="checkbox" id="cb-rev"> Ride the whole result the other way</label>
-        </fieldset>
-        <fieldset class="options">
-          <legend>Connector routing</legend>
-          <label>Profile <select id="cb-profile"></select></label>
-          <label class="check" id="cb-unpaved-label"><input type="checkbox" id="cb-unpaved"> Prefer unpaved paths</label>
-          <label class="check"><input type="checkbox" id="cb-straight"> Straight lines (no routing)</label>
-        </fieldset>
+          <div id="cb-vias" class="cb-vias small" hidden></div>
+          <dl id="cb-stats" class="stats" hidden></dl>
+          <div id="cb-save" hidden>
+            <label>Name <input id="cb-name"></label>
+            <div class="actions">
+              <button type="button" id="cb-save-btn">Save as new route</button>
+              <button type="button" id="cb-download" class="secondary">Download GPX</button>
+            </div>
+            <p id="cb-saved" class="small"></p>
+          </div>
+        </div>
+
         <p id="cb-status" class="muted small"></p>
-        <div id="cb-ride" class="cb-ride" hidden>
-          <h3>Your ride</h3>
-          <ol id="cb-steps"></ol>
-        </div>
-        <div id="cb-vias" class="cb-vias small" hidden></div>
-        <dl id="cb-stats" class="stats" hidden></dl>
-        <div id="cb-save" hidden>
-          <label>Name <input id="cb-name"></label>
-          <div class="actions">
-            <button type="button" id="cb-save-btn">Save as new route</button>
-            <button type="button" id="cb-download" class="secondary">Download GPX</button>
-          </div>
-          <p id="cb-saved" class="small"></p>
+        <div class="actions cb-nav">
+          <button type="button" id="cb-back" class="secondary">‹ Back</button>
+          <button type="button" id="cb-next">Next ›</button>
         </div>
       </div>
       <div id="combine-map"></div>
@@ -684,7 +686,7 @@
     <div id="welcome" class="welcome" hidden>
       <h2>Your route library, in your browser</h2>
       <p>rerouter keeps a library of GPX routes for gravel, road and mountain biking, and hiking: stats, a map,
-        filters, finding routes that overlap, and combining two routes into a new one.</p>
+        filters, finding routes that overlap, and combining routes into a new one.</p>
       <p id="welcome-where">Everything you add is stored <strong>in this browser only</strong>, on this device. Nothing is
         uploaded. The connector routing and the surface estimate ask a BRouter server for directions
         (the public one at brouter.de by default); only the points being routed are sent. The ride weather
@@ -941,6 +943,6 @@
 </aside>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script type="module" src="js/app.js?v=1.5.0"></script>
+<script type="module" src="js/app.js?v=1.6.0"></script>
 </body>
 </html>

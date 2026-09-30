@@ -1,15 +1,32 @@
 # Combine routes: redesign plan
 
-Status: agreed, 2026-09-30 (decisions below). Phase 1 (engine and service) is built; phases 2–4
+Status: agreed, 2026-09-30 (decisions below). Phases 1 and 2 are built (1.6.0); phases 3 and 4
 are not.
 
-Built in phase 1 (no change on screen yet):
+Built in phase 1 (engine and service):
 - `brouter.route(..., via, alternative)`, with `ALTERNATIVES = 4` (BRouter's `alternativeidx` 0–3).
 - `combiner.js`: `routeConnector`, `connectorEnds`, `orderParts`, `suggestOrder`, and
   `combineParts(..., {connectors})` for approved connectors (refused when they no longer fit
   their gap by more than 1 m).
 - `service.js`: `combineConnector(req)`; `runCombine` takes `connectors`, allows at most
   4 routes and 6 parts.
+
+Built in phase 2 (the screen):
+- The wizard (Routes → Parts → Connect → Ride) in `index.html` and `app.js`; the Browse panel
+  in pick mode (`catalogNodes(cat, ctx)`, shared with the library's `renderCatalog`), rendered
+  into its own `#cb-catalog` rather than moving `#catalog`, so the library's filters stay as
+  they are. Auto-connect (`suggestOrder`) came along already.
+- The link: `routes=1,2&part=<route>:<lat,lon>:<lat,lon>[:o]&links=0-1,1-0&step=ride`; old
+  `a=`/`b=` links open the Parts step with those two routes.
+- Removed: the three patterns, `combine()`, `suggestConnections()`, `suggestCrossover()`,
+  `suggestParts()`, `combineSuggest`, and their tests (the behaviour that stays is tested
+  against `combineParts`).
+- Kept in step 4: *Ride the whole result the other way* (the plan listed it among the boxes
+  to drop; it costs nothing and is still useful).
+
+Still to do: phase 3 (accept a connector or pick an alternative), phase 4 (the library's
+*Combine…* button, help text, new screenshots: `docs/screenshots/take_screenshots.py`
+still opens `a=`/`b=` and now lands on the Parts step).
 
 ## Decisions
 

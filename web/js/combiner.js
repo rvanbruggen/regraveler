@@ -3,20 +3,12 @@
 // All cutting happens on the full-resolution GPX points, in a metric projection. Positions
 // along a route are distances in metres from its start ("at"), measured in that projection.
 //
-// Point-to-point (one connection):
-//     A from its start up to a1  ->  connector a1-b1  ->  B from b1 to its end
-//     reverseA: arrive at a1 from A's end instead (A ridden backwards)
-//     reverseB: leave b1 towards B's start instead (B ridden backwards)
-//
-// Loop (two connections):
-//     A from a2 to a1  ->  connector a1-b1  ->  B from b1 to b2  ->  connector b2-a2
-//     reverseA / reverseB: take the other way round a loop route (through its start/end)
-//
-// Parts (combineParts): the general form both of the above are built on. A list of parts,
-// each ridden from its start point to its end point along its route, joined by connectors:
+// A combination is a list of parts, each ridden from its start point to its end point along
+// its route, joined by connectors (combineParts):
 //     A1 -> A2  ->  connector  ->  B1 -> B2  [-> connector -> C1 -> C2 ...]  [-> back to A1]
 // Riding direction follows the order of the two points; otherWay takes the other way round
-// a loop route.
+// a loop route. Several parts may come from the same route. orderParts turns the user's
+// "connect the end of this part to the start of that one" into the riding order.
 //
 // A router is an async function ([lat, lon], [lat, lon]) -> [[lat, lon, ele|null], ...].
 // A point here is [x, y, ele] with ele NaN when unknown.
@@ -135,65 +127,6 @@ export function legLength(xyz) {
   return s;
 }
 
-// ------------------------------------------------------------------ suggestions
-
-function along(d, ref, length, loop) {
-  const diff = Math.abs(d - ref);
-  return loop ? Math.min(diff, length - diff) : diff;
-}
-
-function samples(track, stepM) {
-  const ds = [];
-  for (let d = 0; d < track.length; d += stepM) ds.push(d);
-  ds.push(track.length);
-  return { ds, xy: ds.map((d) => pointAt(track, d)) };
-}
-
-/**
- * Where the routes come closest: [{aAt, bAt}]. For count=2, the second pair is the closest
- * pair that is well away (along both routes) from the first, so a loop can be formed.
- */
-export function suggestConnections(a, b, count = 1, stepM = 50) {
-  // Coarser sampling for very long routes keeps the distance matrix small.
-  const step = Math.max(stepM, Math.sqrt((a.length * b.length) / 4e6));
-  const A = samples(a, step), B = samples(b, step);
-  const dist = (i, j) => hyp(A.xy[i], B.xy[j]);
-  let best = Infinity, bi = 0, bj = 0;
-  for (let i = 0; i < A.ds.length; i++) {
-    for (let j = 0; j < B.ds.length; j++) {
-      const d = dist(i, j);
-      if (d < best) {
-        best = d;
-        bi = i;
-        bj = j;
-      }
-    }
-  }
-  const result = [{ aAt: A.ds[bi], bAt: B.ds[bj] }];
-  if (count >= 2) {
-    const minLen = Math.min(a.length, b.length);
-    const exclude = Math.min(Math.max(2000, 0.15 * minLen), 0.25 * minLen);
-    const awayA = A.ds.map((d) => along(d, A.ds[bi], a.length, a.isLoop) > exclude);
-    const awayB = B.ds.map((d) => along(d, B.ds[bj], b.length, b.isLoop) > exclude);
-    let best2 = Infinity, k = -1, m = -1;
-    for (let i = 0; i < A.ds.length; i++) {
-      if (!awayA[i]) continue;
-      for (let j = 0; j < B.ds.length; j++) {
-        if (!awayB[j]) continue;
-        const d = dist(i, j);
-        if (d < best2) {
-          best2 = d;
-          k = i;
-          m = j;
-        }
-      }
-    }
-    if (k < 0) throw new CombineError("The routes are too short to suggest a second connection");
-    result.push({ aAt: A.ds[k], bAt: B.ds[m] });
-  }
-  return result;
-}
-
 // ------------------------------------------------------------------ stitching
 
 /** The stretch of a route ridden from startAt to endAt (metres along the route). */
@@ -201,62 +134,6 @@ export const part = (track, startAt, endAt, otherWay = false) => ({ track, start
 
 /** Leg kind of the i-th part: "a", "b", "c", ... */
 export const partKey = (i) => String.fromCharCode(97 + i);
-
-/**
- * Where to cross from A to B when riding "out on A, back on B": the closest pair of points
- * that is well away from both starts. (Routes that share a start are closest right there,
- * which is no use as a crossing.) Returns {aAt, bAt}.
- */
-export function suggestCrossover(a, b, stepM = 50) {
-  const step = Math.max(stepM, Math.sqrt((a.length * b.length) / 4e6));
-  const A = samples(a, step), B = samples(b, step);
-  // At least 20 % of the route (and 1 km) from its start; for a loop also from its end,
-  // which is the same place.
-  const away = (t) => Math.min(Math.max(1000, 0.2 * t.length), 0.4 * t.length);
-  const exA = away(a), exB = away(b);
-  let best = Infinity, bi = -1, bj = -1;
-  for (let i = 0; i < A.ds.length; i++) {
-    if (along(A.ds[i], 0, a.length, a.isLoop) <= exA) continue;
-    for (let j = 0; j < B.ds.length; j++) {
-      if (along(B.ds[j], 0, b.length, b.isLoop) <= exB) continue;
-      const d = hyp(A.xy[i], B.xy[j]);
-      if (d < best) {
-        best = d;
-        bi = i;
-        bj = j;
-      }
-    }
-  }
-  if (bi < 0) throw new CombineError("The routes are too short to suggest where to cross over");
-  return { aAt: A.ds[bi], bAt: B.ds[bj] };
-}
-
-/**
- * Four starting points (A1, A2, B1, B2) for combining A and B, for a pattern:
- * - "loop" (or true):  A1 -> A2 -> B1 -> B2 -> back to A1, using the two closest, well
- *                      separated pairs.
- * - "open" (or false): A from its start to where it comes closest to B, then B from there
- *                      to its end.
- * - "outback":         out on A, back on B: A from its start to a crossing (A2), over to B
- *                      (B1), then B back to its start (B2); the result returns to A1. B is
- *                      ridden in its own direction when it is a loop (on to its end, which is
- *                      its start), otherwise backwards.
- */
-export function suggestParts(a, b, pattern = "loop", stepM = 50) {
-  if (pattern === true) pattern = "loop";
-  if (pattern === false) pattern = "open";
-  if (pattern === "outback") {
-    const c = suggestCrossover(a, b, stepM);
-    // For a loop, "to its start" = on to its end: from bAt the other way round to 0.
-    return [part(a, 0, c.aAt), part(b, c.bAt, 0, b.isLoop)];
-  }
-  if (pattern === "loop") {
-    const [c1, c2] = suggestConnections(a, b, 2, stepM);
-    return [part(a, c2.aAt, c1.aAt), part(b, c1.bAt, c2.bAt)];
-  }
-  const [c] = suggestConnections(a, b, 1, stepM);
-  return [part(a, 0, c.aAt), part(b, c.bAt, b.length)];
-}
 
 /** Is the part ridden in the route's own direction? */
 export const withRoute = (p) => (p.otherWay ? p.startAt > p.endAt : p.startAt <= p.endAt);
@@ -323,53 +200,6 @@ async function stitch(parts, router, closed, directJoinM, vias = [], approved = 
 
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
-/** Combine A and B with one or two connections [{aAt, bAt}]. */
-export async function combine(a, b, connections, router, {
-  reverseA = false, reverseB = false, reverse = false, startAtAStart = true, directJoinM = 25,
-} = {}) {
-  if (connections.length !== 1 && connections.length !== 2) throw new CombineError("Use one or two connections");
-  const cons = connections.map((c) => ({ aAt: clamp(c.aAt, 0, a.length), bAt: clamp(c.bAt, 0, b.length) }));
-  const pa = cons.map((c) => pointAt(a, c.aAt));
-  const pb = cons.map((c) => pointAt(b, c.bAt));
-
-  let legs;
-  if (cons.length === 1) {
-    const c = cons[0];
-    const parts = [part(a, reverseA ? a.length : 0, c.aAt), part(b, c.bAt, reverseB ? 0 : b.length)];
-    legs = await stitch(parts, router, false, directJoinM);
-  } else {
-    const [c1, c2] = cons;
-    if (Math.abs(c1.aAt - c2.aAt) < 1 || Math.abs(c1.bAt - c2.bAt) < 1) {
-      throw new CombineError("The two connection points on a route must be different");
-    }
-    legs = await stitch([part(a, c2.aAt, c1.aAt, reverseA), part(b, c1.bAt, c2.bAt, reverseB)], router, true, directJoinM);
-  }
-  let pts = join(legs.map((l) => l.xyz));
-
-  if (cons.length === 2 && startAtAStart) {
-    // A loop can start anywhere: start where route A starts, if that is on the loop.
-    const start = a.xyz[0];
-    let k = 0, best = Infinity;
-    pts.forEach((p, i) => {
-      const d = hyp(p, start);
-      if (d < best) {
-        best = d;
-        k = i;
-      }
-    });
-    if (best < 1 && k > 0 && k < pts.length - 1) pts = [...pts.slice(k), ...pts.slice(1, k + 1)];
-  }
-  if (reverse) pts = reversed(pts);
-  return {
-    points: toLatLon(pts),
-    legs,
-    connections: cons,
-    connectionPoints: pa.map((p, i) => [latLonOf(p), latLonOf(pb[i])]),
-    parts: [],
-    partPoints: [],
-  };
-}
-
 /**
  * Ride each part from its start to its end point, joined by connectors.
  * closed: add a connector from the last part's end back to the first part's start; the
@@ -435,7 +265,11 @@ export function orderParts(n, links) {
     prev[to] = from;
   }
   const loose = [...Array(n).keys()].filter((i) => next[i] < 0 && prev[i] < 0);
-  if (loose.length) throw new CombineError(`Part ${loose.map(partName).join(", ")} is not connected yet`);
+  if (loose.length === 1) throw new CombineError(`Part ${partName(loose[0])} is not connected yet`);
+  if (loose.length) {
+    const names = loose.map(partName);
+    throw new CombineError(`Parts ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} are not connected yet`);
+  }
   const heads = [...Array(n).keys()].filter((i) => prev[i] < 0);
   if (heads.length > 1) throw new CombineError("The parts form separate chains: connect them into one");
   const first = heads.length ? heads[0] : 0;
