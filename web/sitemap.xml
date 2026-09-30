@@ -3,4 +3,40 @@
   <url>
     <loc>https://rerouter.eu/</loc>
   </url>
+  <url>
+    <loc>https://rerouter.eu/features/</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/gpx-route-library.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/import-gpx-tcx-fit.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/import-from-komoot-ridewithgps-strava.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/combine-routes.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/change-start-point.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/ride-weather.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/places-along-a-route.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/train-rides.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/route-map.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/share-routes.html</loc>
+  </url>
+  <url>
+    <loc>https://rerouter.eu/features/duplicate-routes.html</loc>
+  </url>
 </urlset>
