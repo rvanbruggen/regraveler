@@ -6,6 +6,35 @@
   <title>rerouter · route manager</title>
   <meta name="description" content="A personal library of GPX routes for gravel, road and mountain biking, and hiking. Everything stays in your browser.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <!-- For search engines and link previews (Open Graph, X/Twitter). The public site is
+       https://rerouter.eu/; robots.txt and sitemap.xml are next to this page. -->
+  <link rel="canonical" href="https://rerouter.eu/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="rerouter">
+  <meta property="og:title" content="rerouter · route manager">
+  <meta property="og:description" content="A personal library of GPX routes for gravel, road and mountain biking, and hiking. Everything stays in your browser.">
+  <meta property="og:url" content="https://rerouter.eu/">
+  <meta property="og:image" content="https://rerouter.eu/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="rerouter: routes in Flanders on a map">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "rerouter",
+    "alternateName": "rerouter route manager",
+    "url": "https://rerouter.eu/",
+    "description": "A personal library of GPX routes for gravel, road and mountain biking, and hiking: import GPX, TCX and FIT files, filter and map them, combine routes, check the ride weather and plan a day out with the train. Everything stays in your browser.",
+    "applicationCategory": "SportsApplication",
+    "operatingSystem": "Any (web browser)",
+    "browserRequirements": "Requires JavaScript",
+    "image": "https://rerouter.eu/og-image.jpg",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+    "license": "https://opensource.org/licenses/MIT"
+  }
+  </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <link rel="stylesheet" href="style.css?v=1.5.0">
   <!-- Cache-busting: every module is loaded as js/<file>?v=<version>, so a new release never runs
