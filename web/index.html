@@ -36,7 +36,7 @@
   }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=1.6.0">
+  <link rel="stylesheet" href="style.css?v=1.7.0">
   <!-- Cache-busting: every module is loaded as js/<file>?v=<version>, so a new release never runs
        with modules the browser still has from the previous one (static hosts such as GitHub Pages
        let browsers keep files for 10 minutes). /bump updates the version here; a test checks that
@@ -44,33 +44,33 @@
   <script type="importmap">
   {
     "imports": {
-      "./js/app.js": "./js/app.js?v=1.6.0",
-      "./js/backup.js": "./js/backup.js?v=1.6.0",
-      "./js/brouter.js": "./js/brouter.js?v=1.6.0",
-      "./js/combiner.js": "./js/combiner.js?v=1.6.0",
-      "./js/config.js": "./js/config.js?v=1.6.0",
-      "./js/db.js": "./js/db.js?v=1.6.0",
-      "./js/fit.js": "./js/fit.js?v=1.6.0",
-      "./js/geo.js": "./js/geo.js?v=1.6.0",
-      "./js/gpx.js": "./js/gpx.js?v=1.6.0",
-      "./js/linkimport.js": "./js/linkimport.js?v=1.6.0",
-      "./js/osm.js": "./js/osm.js?v=1.6.0",
-      "./js/places.js": "./js/places.js?v=1.6.0",
-      "./js/poi.js": "./js/poi.js?v=1.6.0",
-      "./js/profile.js": "./js/profile.js?v=1.6.0",
-      "./js/remote.js": "./js/remote.js?v=1.6.0",
-      "./js/service.js": "./js/service.js?v=1.6.0",
-      "./js/sha256.js": "./js/sha256.js?v=1.6.0",
-      "./js/share.js": "./js/share.js?v=1.6.0",
-      "./js/similarity.js": "./js/similarity.js?v=1.6.0",
-      "./js/stats.js": "./js/stats.js?v=1.6.0",
-      "./js/surface.js": "./js/surface.js?v=1.6.0",
-      "./js/tcx.js": "./js/tcx.js?v=1.6.0",
-      "./js/trackfile.js": "./js/trackfile.js?v=1.6.0",
-      "./js/trains.js": "./js/trains.js?v=1.6.0",
-      "./js/weather.js": "./js/weather.js?v=1.6.0",
-      "./js/worker.js": "./js/worker.js?v=1.6.0",
-      "./js/zip.js": "./js/zip.js?v=1.6.0"
+      "./js/app.js": "./js/app.js?v=1.7.0",
+      "./js/backup.js": "./js/backup.js?v=1.7.0",
+      "./js/brouter.js": "./js/brouter.js?v=1.7.0",
+      "./js/combiner.js": "./js/combiner.js?v=1.7.0",
+      "./js/config.js": "./js/config.js?v=1.7.0",
+      "./js/db.js": "./js/db.js?v=1.7.0",
+      "./js/fit.js": "./js/fit.js?v=1.7.0",
+      "./js/geo.js": "./js/geo.js?v=1.7.0",
+      "./js/gpx.js": "./js/gpx.js?v=1.7.0",
+      "./js/linkimport.js": "./js/linkimport.js?v=1.7.0",
+      "./js/osm.js": "./js/osm.js?v=1.7.0",
+      "./js/places.js": "./js/places.js?v=1.7.0",
+      "./js/poi.js": "./js/poi.js?v=1.7.0",
+      "./js/profile.js": "./js/profile.js?v=1.7.0",
+      "./js/remote.js": "./js/remote.js?v=1.7.0",
+      "./js/service.js": "./js/service.js?v=1.7.0",
+      "./js/sha256.js": "./js/sha256.js?v=1.7.0",
+      "./js/share.js": "./js/share.js?v=1.7.0",
+      "./js/similarity.js": "./js/similarity.js?v=1.7.0",
+      "./js/stats.js": "./js/stats.js?v=1.7.0",
+      "./js/surface.js": "./js/surface.js?v=1.7.0",
+      "./js/tcx.js": "./js/tcx.js?v=1.7.0",
+      "./js/trackfile.js": "./js/trackfile.js?v=1.7.0",
+      "./js/trains.js": "./js/trains.js?v=1.7.0",
+      "./js/weather.js": "./js/weather.js?v=1.7.0",
+      "./js/worker.js": "./js/worker.js?v=1.7.0",
+      "./js/zip.js": "./js/zip.js?v=1.7.0"
     }
   }
   </script>
@@ -557,7 +557,8 @@
 
         <div class="cb-step" data-step="ride" hidden>
           <p class="small">Where there is a gap between two parts, an <span class="cb-conn">orange
-            connector</span> is routed along real roads and paths.</p>
+            connector</span> is routed along real roads and paths. Check each one: <strong>accept</strong> it,
+            pick <strong>another route</strong>, a straight line, or a place to ride through.</p>
           <fieldset class="options">
             <legend>Connector routing</legend>
             <label>Profile <select id="cb-profile"></select></label>
@@ -565,14 +566,21 @@
             <label class="check"><input type="checkbox" id="cb-straight"> Straight lines (no routing)</label>
             <label class="check"><input type="checkbox" id="cb-rev"> Ride the whole result the other way</label>
           </fieldset>
+          <div id="cb-conns-box" hidden>
+            <h3 class="cb-h">Connections</h3>
+            <ol id="cb-conns" class="cb-conns"></ol>
+            <div class="actions">
+              <button type="button" id="cb-accept-all" class="secondary">Accept all</button>
+            </div>
+          </div>
           <div id="cb-ride" class="cb-ride" hidden>
             <h3>Your ride</h3>
             <ol id="cb-ride-steps"></ol>
           </div>
-          <div id="cb-vias" class="cb-vias small" hidden></div>
           <dl id="cb-stats" class="stats" hidden></dl>
           <div id="cb-save" hidden>
             <label>Name <input id="cb-name"></label>
+            <p id="cb-accept-hint" class="small cb-warn" hidden></p>
             <div class="actions">
               <button type="button" id="cb-save-btn">Save as new route</button>
               <button type="button" id="cb-download" class="secondary">Download GPX</button>
@@ -943,6 +951,6 @@
 </aside>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script type="module" src="js/app.js?v=1.6.0"></script>
+<script type="module" src="js/app.js?v=1.7.0"></script>
 </body>
 </html>

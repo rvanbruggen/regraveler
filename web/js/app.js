@@ -3043,6 +3043,8 @@ const cb = {
   token: 0,
   nameTouched: false,
   vias: [], // per connector (riding order): the id of a place it must pass, or null
+  conns: new Map(), // connection key (see connGaps) -> its routes and the user's choice
+  altsOpen: null, // step 4: the connection whose options are shown
 };
 
 const cbEl = {
@@ -3211,6 +3213,7 @@ function goStep(step) {
   if (!canGo(step)) return;
   stopPlacing(false);
   cb.pending = null;
+  cb.altsOpen = null;
   cb.step = step;
   if (step !== "ride") {
     cb.preview = null;
@@ -3578,6 +3581,68 @@ function drawCombineRoutes() {
 
 // ---- step 4: the ride
 
+// A connection is routed on its own (svc.combineConnector) and used as the user chose it: the
+// preview, the GPX and the saved route all take those exact lines (approved connectors), so
+// nothing is routed again behind the user's back.
+
+const CONN_ALTS = [0, 1, 2, 3]; // BRouter's best route and its alternatives
+
+const routingKey = () => [cbEl.profile.value, cbEl.unpaved.checked && cbEl.profile.value === "gravel", cbEl.straight.checked];
+
+/**
+ * The gaps to bridge in riding order: {from, to (part indices), from_part, to_part, via, key}.
+ * The key changes when anything that changes the connection does (the part ends it joins,
+ * the place to ride through, the routing options); a connection keeps its routes and the
+ * user's choice as long as its key stays the same.
+ */
+function connGaps() {
+  if (!cb.order) return [];
+  const { order, closed } = cb.order;
+  const pairs = [];
+  for (let k = 1; k < order.length; k++) pairs.push([order[k - 1], order[k]]);
+  if (closed) pairs.push([order[order.length - 1], order[0]]);
+  return pairs.map(([i, j], k) => {
+    const from_part = { ...cb.parts[i] }, to_part = { ...cb.parts[j] };
+    const via = cb.vias[k] || null;
+    const key = JSON.stringify([from_part.route_id, from_part.end, to_part.route_id, to_part.start, via, routingKey()]);
+    return { from: i, to: j, from_part, to_part, via, key };
+  });
+}
+
+/** {choice: 0-3 or "s" (straight), results: {choice: connector}, errors: {choice: message}, accepted, direct}. */
+function connState(gap) {
+  let st = cb.conns.get(gap.key);
+  if (!st) {
+    st = { choice: cbEl.straight.checked ? "s" : 0, results: {}, errors: {}, accepted: false, direct: false };
+    cb.conns.set(gap.key, st);
+  }
+  return st;
+}
+
+/** Route one option of a connection (once; the result is kept). */
+async function fetchConn(gap, st, choice) {
+  if (st.results[choice] || st.errors[choice]) return;
+  const straight = choice === "s" || cbEl.straight.checked;
+  try {
+    const res = await svc.combineConnector({
+      from_part: gap.from_part, to_part: gap.to_part, via: gap.via,
+      profile: cbEl.profile.value, prefer_unpaved: cbEl.unpaved.checked, straight,
+      alternative: choice === "s" ? 0 : choice,
+    });
+    st.results[choice] = res;
+    // Parts less than 25 m apart are joined directly: nothing to choose there.
+    if (choice === 0 && !straight && !res.routed) st.direct = st.accepted = true;
+  } catch (err) {
+    // An alternative BRouter doesn't have, next to a best route it does have.
+    st.errors[choice] = choice !== 0 && choice !== "s" && st.results[0] ? "BRouter has no such alternative here" : err.message;
+  }
+}
+
+const chosenConn = (gap) => {
+  const st = connState(gap);
+  return st.results[st.choice] || null;
+};
+
 function combineRequest(extra = {}) {
   return {
     parts: cb.order.order.map((i) => ({ ...cb.parts[i] })),
@@ -3587,6 +3652,7 @@ function combineRequest(extra = {}) {
     prefer_unpaved: cbEl.unpaved.checked,
     straight: cbEl.straight.checked,
     vias: cb.vias,
+    connectors: connGaps().map(chosenConn),
     ...extra,
   };
 }
@@ -3602,7 +3668,22 @@ async function runPreview() {
   const token = ++cb.token;
   cb.preview = null;
   drawCombineResult();
-  cbEl.status.textContent = cbEl.straight.checked ? "Joining…" : "Routing the connectors…";
+  const gaps = connGaps();
+  for (const [k, g] of gaps.entries()) {
+    const st = connState(g);
+    if (st.results[st.choice] || st.errors[st.choice]) continue;
+    cbEl.status.textContent = `Routing connection ${k + 1} of ${gaps.length}…`;
+    await fetchConn(g, st, st.choice);
+    if (token !== cb.token) return; // something changed meanwhile: a newer run is on its way
+    renderConns();
+  }
+  const failed = gaps.findIndex((g) => !chosenConn(g));
+  if (failed >= 0) {
+    const st = connState(gaps[failed]);
+    cbEl.status.textContent = `Connection ${failed + 1} could not be routed: ${st.errors[st.choice]} Pick a straight line or another option for it.`;
+    openConnOptions(failed);
+    return;
+  }
   let res;
   try {
     res = await svc.combinePreview(combineRequest());
@@ -3622,6 +3703,130 @@ async function runPreview() {
   drawCombineResult();
 }
 
+/** Pick an option for connection k; the route is previewed with it (not yet accepted). */
+async function chooseConn(k, choice) {
+  const g = connGaps()[k];
+  const st = connState(g);
+  st.choice = choice;
+  st.accepted = false;
+  await runPreview();
+}
+
+/** Show (or hide) the options of connection k. */
+function toggleConnOptions(k) {
+  if (cb.altsOpen !== k) return openConnOptions(k);
+  cb.altsOpen = null;
+  renderConns();
+  drawCombineResult();
+}
+
+/** Show the options of connection k, routing the ones not asked for yet. */
+async function openConnOptions(k) {
+  cb.altsOpen = k;
+  renderConns();
+  drawCombineResult();
+  const g = connGaps()[k];
+  const st = connState(g);
+  for (const choice of [...(cbEl.straight.checked ? [] : CONN_ALTS), "s"]) {
+    if (st.results[choice] || st.errors[choice]) continue;
+    await fetchConn(g, st, choice);
+    if (cb.altsOpen !== k || cb.step !== "ride") return;
+    renderConns();
+    drawCombineResult();
+  }
+}
+
+/** The option an alternative duplicates (BRouter may give the same route twice), or null. */
+function sameAs(st, choice) {
+  const r = st.results[choice];
+  if (!r || choice === "s") return null;
+  for (const c of CONN_ALTS) {
+    if (c === choice) return null;
+    const q = st.results[c];
+    if (q && q.points.length === r.points.length && q.distance_km === r.distance_km) return c;
+  }
+  return null;
+}
+
+function choiceName(choice) {
+  if (choice === "s" || cbEl.straight.checked) return "straight line";
+  return choice === 0 ? "BRouter's best route" : `BRouter's route ${choice + 1}`;
+}
+
+const partBadge = (i, mark) => el("span", { class: "cb-badge", style: `border-color:${partColor(i)};color:${partColor(i)}` }, `${partLetter(i)}${mark}`);
+
+/** Step 4: per connection its route, Accept, and the other options (routes, straight, a place). */
+function renderConns() {
+  const gaps = cb.step === "ride" ? connGaps() : [];
+  $("#cb-conns-box").hidden = !gaps.length;
+  const cats = svc.placeCategories();
+  setChildren($("#cb-conns"), gaps.map((g, k) => {
+    const st = connState(g);
+    const res = st.results[st.choice];
+    const err = st.errors[st.choice];
+    const what = err ? el("span", { class: "err" }, err)
+      : !res ? el("span", { class: "muted" }, "routing…")
+      : st.direct ? `${fmt.km(res.distance_km)}: the parts touch, joined directly`
+      : `${fmt.km(res.distance_km)}, ${choiceName(st.choice)}${res.via ? `, through ${res.via.name}` : ""}`;
+    const head = el("div", { class: "cb-conn-head" },
+      partBadge(g.from, "■"), "→", partBadge(g.to, "▶"),
+      el("span", { class: "what" }, what),
+      st.direct ? null
+        : st.accepted ? el("span", { class: "cb-ok" }, "✓ accepted ",
+            el("a", { class: "link small", title: "Take the acceptance back", onclick: () => { st.accepted = false; renderConns(); } }, "undo"))
+        : el("button", { type: "button", disabled: !res || !cb.preview, onclick: () => { st.accepted = true; renderConns(); } }, "Accept"),
+      st.direct ? null : el("button", { type: "button", class: "secondary", onclick: () => toggleConnOptions(k) },
+        cb.altsOpen === k ? "Hide options" : "Other options…"));
+    if (cb.altsOpen !== k || st.direct) return el("li", {}, head);
+    const option = (choice) => {
+      const r = st.results[choice], e = st.errors[choice], dup = sameAs(st, choice);
+      const label = choice === "s" ? "Straight line" : `Route ${choice + 1}${choice === 0 ? " (BRouter's best)" : ""}`;
+      const info = e ? `: ${e}` : !r ? ": routing…" : dup != null ? `: the same as route ${dup + 1}` : `: ${fmt.km(r.distance_km)}`;
+      return el("label", { class: "check" },
+        el("input", { type: "radio", name: `cb-conn-${k}`, checked: st.choice === choice, disabled: !r || dup != null,
+          onchange: () => chooseConn(k, choice) }),
+        `${label}${info}`);
+    };
+    // Through one of your places near the connection (a café, water, a viewpoint, …).
+    let via = null;
+    const ends = res || Object.values(st.results)[0];
+    if (svc.visiblePlaces().length && ends) {
+      const options = svc.placesForConnector(ends.from, ends.to);
+      const chosen = g.via ? svc.place(g.via) : null;
+      if (chosen && !options.some((o) => o.place.id === chosen.id)) options.unshift({ place: chosen, detour_km: null });
+      via = el("label", {}, "Through a place ",
+        el("select", {
+          onchange: (e) => {
+            cb.vias[k] = e.target.value || null;
+            runPreview();
+          },
+        },
+          el("option", { value: "" }, options.length ? "— none —" : "— no places near this connection —"),
+          options.map(({ place: p, detour_km }) => el("option", { value: p.id, selected: chosen?.id === p.id },
+            `${categoryOf(p.category, cats).symbol} ${p.name}${detour_km != null ? ` (+${detour_km.toFixed(1)} km)` : ""}`))));
+    }
+    return el("li", {}, head, el("div", { class: "cb-alts" },
+      cbEl.straight.checked ? null : CONN_ALTS.map(option), option("s"), via));
+  }));
+  updateSaveState(gaps);
+}
+
+/** Save and download once every connection is accepted (parts that touch need nothing). */
+function updateSaveState(gaps = connGaps()) {
+  const open = gaps.filter((g) => {
+    const st = connState(g);
+    return !st.accepted && !st.direct;
+  }).length;
+  const ready = !!cb.preview && !open;
+  $("#cb-save-btn").disabled = !ready;
+  $("#cb-download").disabled = !ready;
+  $("#cb-accept-all").disabled = !cb.preview || !open;
+  const hint = $("#cb-accept-hint");
+  hint.hidden = !cb.preview || !open;
+  hint.textContent = open === 1 ? "Accept the last connection to save or download the route."
+    : `Accept the ${open} connections to save or download the route.`;
+}
+
 /** "Your ride": the combined route in words, step by step. */
 function renderRide(res) {
   $("#cb-ride").hidden = !res;
@@ -3636,12 +3841,11 @@ function renderRide(res) {
     if (km > len - 0.05) return route?.is_loop ? "the start/finish" : "the end";
     return `km ${km.toFixed(1)}`;
   };
-  const straight = res.description.includes("via straight lines");
   const direction = (p) => (p.with_route ? "in the route's own direction" : el("span", { class: "against" }, "against the route's direction (backwards)"));
   // A connector step: routed, a short straight join, or none at all (the parts touch).
   const connector = (c, to, touching) => (!c.routed && c.distance_km < 0.03 && !c.via ? touching
     : `Connector to ${to}${c.via ? `, through ${c.via.name}` : ""}: ${fmt.km(c.distance_km)}` +
-      `${c.routed && !straight ? ", routed along roads and paths" : ", joined in a straight line"}.`);
+      `${c.routed ? ", routed along roads and paths" : ", joined in a straight line"}.`);
   const steps = [[`Start at the start of part ${letter(0)}: ${where(routeOf(0), res.parts[0].start_km)} of “${routeOf(0).name}”.`]];
   res.parts.forEach((p, k) => {
     if (k) {
@@ -3658,31 +3862,6 @@ function renderRide(res) {
   setChildren($("#cb-ride-steps"), steps.map((parts) => el("li", {}, ...parts.filter((x) => x !== null && x !== ""))));
 }
 
-/** Per connector: ride it through one of your places (a café, water, a viewpoint, …). */
-function renderVias(res) {
-  const box = $("#cb-vias");
-  box.hidden = !res || !svc.visiblePlaces().length;
-  if (box.hidden) return box.replaceChildren();
-  const cats = svc.placeCategories();
-  const order = cb.order.order;
-  setChildren(box, el("strong", {}, "Through a place"), ...res.connectors.map((c, k) => {
-    const options = svc.placesForConnector(c.from, c.to);
-    const chosen = cb.vias[k] ? svc.place(cb.vias[k]) : null;
-    if (chosen && !options.some((o) => o.place.id === chosen.id)) options.unshift({ place: chosen, detour_km: null });
-    const to = k + 1 < order.length ? partLetter(order[k + 1]) : `back to ${partLetter(order[0])}`;
-    return el("label", {}, `${partLetter(order[k])} → ${to}: `,
-      el("select", {
-        onchange: (e) => {
-          cb.vias[k] = e.target.value || null;
-          runPreview();
-        },
-      },
-        el("option", { value: "" }, options.length ? "— straight to the next part —" : "— no places near this connector —"),
-        options.map(({ place: p, detour_km }) => el("option", { value: p.id, selected: chosen?.id === p.id },
-          `${categoryOf(p.category, cats).symbol} ${p.name}${detour_km != null ? ` (+${detour_km.toFixed(1)} km)` : ""}`))));
-  }));
-}
-
 function drawCombineResult() {
   cb.resultLayer.clearLayers();
   cb.markerLayer.clearLayers();
@@ -3690,7 +3869,20 @@ function drawCombineResult() {
   cbEl.stats.hidden = !res;
   cbEl.save.hidden = !res;
   renderRide(res);
-  renderVias(res);
+  renderConns();
+  // The other options of the connection whose options are shown: click one to pick it.
+  if (cb.step === "ride" && cb.altsOpen != null) {
+    const g = connGaps()[cb.altsOpen];
+    const st = g && connState(g);
+    for (const [choice, r] of Object.entries(st?.results || {})) {
+      const c = choice === "s" ? "s" : Number(choice);
+      if (c === st.choice || sameAs(st, c) != null) continue;
+      L.polyline(r.points.map(([lat, lon]) => [lat, lon]), { color: COLOR_CONNECTOR, weight: 4, opacity: 0.55, dashArray: "2 8" })
+        .bindTooltip(`${c === "s" ? "Straight line" : `Route ${c + 1}`}: ${fmt.km(r.distance_km)} (click to pick it)`, { sticky: true })
+        .on("click", () => chooseConn(cb.altsOpen, c))
+        .addTo(cb.resultLayer);
+    }
+  }
   if (!res) return;
   const order = cb.order.order;
   for (const leg of res.legs) {
@@ -3745,6 +3937,13 @@ document.addEventListener("keydown", (e) => {
   runPreview();
 }));
 cbEl.name.addEventListener("input", () => (cb.nameTouched = true));
+$("#cb-accept-all").addEventListener("click", () => {
+  for (const g of connGaps()) {
+    const st = connState(g);
+    if (st.results[st.choice]) st.accepted = true;
+  }
+  renderConns();
+});
 
 $("#cb-save-btn").addEventListener("click", async () => {
   const name = cbEl.name.value.trim();
@@ -3783,6 +3982,8 @@ async function openCombiner(ids) {
   cb.parts = [];
   cb.links = [];
   cb.vias = [];
+  cb.conns.clear();
+  cb.altsOpen = null;
   cb.preview = null;
   cb.nameTouched = false;
   cbEl.saved.textContent = "";
@@ -5411,7 +5612,8 @@ async function afterLibraryChange() {
   checked.clear();
   state.ids = [];
   closeDetail();
-  Object.assign(cb, { routeIds: [], parts: [], links: [], vias: [], placing: null, pending: null, preview: null, step: "routes", order: null });
+  Object.assign(cb, { routeIds: [], parts: [], links: [], vias: [], placing: null, pending: null, preview: null, step: "routes", order: null, altsOpen: null });
+  cb.conns.clear();
   rs.id = null;
   rs.loaded = false;
   fp.id = null;

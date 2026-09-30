@@ -1,7 +1,7 @@
 # Combine routes: redesign plan
 
-Status: agreed, 2026-09-30 (decisions below). Phases 1 and 2 are built (1.6.0); phases 3 and 4
-are not.
+Status: agreed, 2026-09-30 (decisions below). Phases 1 and 2 are built (1.6.0), phase 3 too
+(1.7.0); phase 4 is not.
 
 Built in phase 1 (engine and service):
 - `brouter.route(..., via, alternative)`, with `ALTERNATIVES = 4` (BRouter's `alternativeidx` 0–3).
@@ -24,9 +24,21 @@ Built in phase 2 (the screen):
 - Kept in step 4: *Ride the whole result the other way* (the plan listed it among the boxes
   to drop; it costs nothing and is still useful).
 
-Still to do: phase 3 (accept a connector or pick an alternative), phase 4 (the library's
-*Combine…* button, help text, new screenshots: `docs/screenshots/take_screenshots.py`
-still opens `a=`/`b=` and now lands on the Parts step).
+Built in phase 3 (validate):
+- Step 4 lists the connections (`renderConns`); each is routed with `svc.combineConnector`
+  and kept per connection key (the part ends it joins, the place, the routing options), with
+  the user's choice (route 1-4 or straight) and whether it is accepted. The preview, the GPX
+  and the save pass those as approved `connectors`, so nothing is routed again.
+- *Other options…* routes BRouter's alternatives 1-3 and the straight line, shows duplicates
+  once, and draws the other options dotted on the map (click to pick). A connection BRouter
+  can't route opens its options with the straight line as the way out.
+- Save and download wait until every connection is accepted; parts that touch (under 25 m)
+  need no acceptance.
+- `combineConnector` returns `routed: false` and `how` for straight lines; the description of
+  a combination with approved connectors says how they were made.
+
+Still to do: phase 4 (the library's *Combine…* button, help text, new screenshots:
+`docs/screenshots/take_screenshots.py` still opens `a=`/`b=` and now lands on the Parts step).
 
 ## Decisions
 

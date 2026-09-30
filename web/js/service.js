@@ -807,9 +807,14 @@ async function runCombine(req) {
   }));
   const used = [...new Map(ids.map((id) => [id, routes.get(id)])).values()];
   const through = viaPlaces.filter(Boolean).map((p) => p.name);
+  // With approved connectors, say how those were made (they may differ from each other).
+  const approved = cb.connectorsOf(result).filter((l) => l.approved);
+  const hows = approved.length === cb.connectorsOf(result).length && approved.length
+    ? [...new Set((req.connectors || []).map((c) => c?.how).filter((h) => typeof h === "string" && h))]
+    : [];
   return {
     used, result, viaPlaces,
-    description: `Combined from ${namesOf(used)} via ${how}${through.length ? `, through ${through.join(" and ")}` : ""}.`,
+    description: `Combined from ${namesOf(used)} via ${hows.length ? hows.join(" and ") : how}${through.length ? `, through ${through.join(" and ")}` : ""}.`,
   };
 }
 
@@ -817,7 +822,8 @@ async function runCombine(req) {
  * Route one connection, to show it before it is used: from the end of from_part to the start
  * of to_part (parts as in runCombine). req: {from_part, to_part, profile, prefer_unpaved,
  * straight, via: place id | null, alternative: 0 (BRouter's best route) to 3}.
- * Returns {from, to, points: [[lat, lon, ele], ...], distance_km, routed, alternative, via};
+ * Returns {from, to, points: [[lat, lon, ele], ...], distance_km, routed (false: a straight line),
+ * how (e.g. "BRouter (gravel)"), alternative, via};
  * pass it back in runCombine's `connectors` to use exactly this route.
  */
 export async function combineConnector(req) {
@@ -828,7 +834,7 @@ export async function combineConnector(req) {
   const reqParts = [req.from_part, req.to_part];
   if (reqParts.some((p) => !p)) throw new ServiceError("A connection needs the part it leaves and the part it joins");
   const { routes, tracks } = await partTracks(reqParts);
-  const { router } = connectorRouter(req, routes, alternative);
+  const { router, how } = connectorRouter(req, routes, alternative);
   const place = viaPlace(req.via);
   const [from, to] = reqParts.map((p) => trackPart(p, tracks));
   const p = cb.pointAt(from.track, from.endAt), q = cb.pointAt(to.track, to.startAt);
@@ -838,7 +844,8 @@ export async function combineConnector(req) {
     to: ll(cb.latLonOf(q)),
     points: cb.toLatLon(leg.xyz).map(([lat, lon, ele]) => [round(lat, 6), round(lon, 6), ele == null ? null : round(ele, 1)]),
     distance_km: round(cb.legLength(leg.xyz) / 1000, 2),
-    routed: leg.routed,
+    routed: leg.routed && !req.straight, // false: a straight line
+    how: leg.routed && !req.straight ? how : "straight lines",
     alternative,
     via: place ? { id: place.id, name: place.name } : null,
   };

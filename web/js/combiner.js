@@ -161,8 +161,9 @@ export function connectorEnds(parts, closed = true) {
 const APPROVED_FIT_M = 1; // an approved connector must start and end this close to its gap
 
 /**
- * A connector the user approved earlier: {from: [lat, lon], to: [lat, lon], points: [[lat, lon, ele], ...]}.
- * Used as it is (no routing), as long as it still bridges the gap from p to q.
+ * A connector the user approved earlier: {from: [lat, lon], to: [lat, lon], points: [[lat, lon, ele], ...],
+ * routed} (routed: false for a straight line). Used as it is (no routing), as long as it still
+ * bridges the gap from p to q.
  */
 function approvedConnector(p, q, approved, k) {
   const isLatLon = (v) => Array.isArray(v) && v.length >= 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]);
@@ -174,7 +175,7 @@ function approvedConnector(p, q, approved, k) {
   if (!Array.isArray(approved.points) || approved.points.length < 2 || !approved.points.every(isLatLon)) {
     throw new CombineError(`Connection ${k + 1} has no route`);
   }
-  return { kind: "connector", xyz: join([[p], fromLatLon(approved.points), [q]]), routed: true, approved: true };
+  return { kind: "connector", xyz: join([[p], fromLatLon(approved.points), [q]]), routed: approved.routed !== false, approved: true };
 }
 
 /**

@@ -435,8 +435,6 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .places-along a { color: var(--text); cursor: pointer; }
 .places-grid input[type="color"], #places-cat-form input[type="color"] { width: 34px; height: 26px; padding: 1px 2px; flex: none; }
 #places-cats input:not([type="color"]):not(.symbol-input) { min-width: 110px; }
-.cb-vias { margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
-.cb-vias select { max-width: 100%; }
 .poi-icon.osm span { background: #fff; border-width: 3px; border-style: solid; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
 .osm-badge { font-size: 9px; font-weight: 700; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; margin-left: 4px; vertical-align: middle; }
 .osm-cats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; }
@@ -517,3 +515,13 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .about-credits li { margin: 3px 0; }
 .about a.link { cursor: pointer; }
 #cb-catalog { max-height: 30vh; }
+.cb-h { font-size: 14px; margin: 4px 0; }
+.cb-conns { margin: 0; padding-left: 20px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.cb-conn-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cb-conn-head .what { flex: 1; }
+.cb-conn-head button { padding: 1px 8px; font-size: 12px; }
+.cb-ok { color: #2e7d32; font-weight: 600; }
+.cb-alts { display: flex; flex-direction: column; gap: 2px; margin: 3px 0 0; }
+.cb-alts label.check { font-size: 12px; gap: 4px; }
+.cb-conns select { max-width: 100%; font-size: 12px; }
+.cb-conns .err { color: #b3261e; }

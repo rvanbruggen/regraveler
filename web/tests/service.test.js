@@ -492,7 +492,8 @@ test("combine: route one connection, then use it as approved", async () => {
   const parts = [partOf(a, { n: 0, e: 0 }, { n: 0, e: 3000 }), partOf(b, { n: 800, e: 3000 }, { n: 800, e: 6000 })];
   const conn = await svc.combineConnector({ from_part: parts[0], to_part: parts[1], straight: true });
   approx(conn.distance_km, 0.8, { abs: 0.01 });
-  assert.equal(conn.routed, true);
+  assert.equal(conn.routed, false, "a straight line");
+  assert.equal(conn.how, "straight lines");
   assert.equal(conn.alternative, 0);
   approx(conn.from[0], at(0, 3000)[0], { abs: 1e-5 });
   approx(conn.to[0], at(800, 3000)[0], { abs: 1e-5 });
@@ -502,6 +503,12 @@ test("combine: route one connection, then use it as approved", async () => {
   const approved = { ...conn, points: [conn.points[0], bend, conn.points[conn.points.length - 1]] };
   const prev = await svc.combinePreview({ parts, closed: false, straight: true, connectors: [approved] });
   assert.equal(prev.connectors[0].approved, true);
+  assert.equal(prev.connectors[0].routed, false);
+  // The description says how the approved connectors were made, not the request's profile.
+  const routedLike = { ...approved, routed: true, how: "BRouter (gravel)" };
+  const prev2 = await svc.combinePreview({ parts, closed: false, connectors: [routedLike] });
+  assert.match(prev2.description, /via BRouter \(gravel\)\./);
+  assert.equal(prev2.connectors[0].routed, true);
   approx(prev.connectors[0].distance_km, 2 * Math.hypot(0.4, 0.5), { abs: 0.01 });
   const gpx = parseGpx((await svc.combineGpx({ parts, closed: false, straight: true, connectors: [approved], name: "x" })).text);
   assert.ok(gpx.tracks[0].points.some(([la, lo]) => Math.abs(la - bend[0]) < 1e-6 && Math.abs(lo - bend[1]) < 1e-6));

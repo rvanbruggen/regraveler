@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.6.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.7.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -309,7 +309,13 @@ The *Utilities* menu in the header has the operations on routes:
      routes' activity: *gravel*, *fastbike* for road, *mtb* for mountain biking,
      *hiking-mountain* for hiking; for gravel optionally *prefer unpaved paths*; other profiles
      or plain straight lines are possible). Points less than 25 m apart are joined directly.
-     A connector can ride *through a place* of yours near it. The preview shows the total
+     **Check each connection:** *Accept* it, or open *Other options…* to pick another of
+     BRouter's routes (up to four; routes BRouter gives twice are shown once, and the other
+     options are drawn dotted on the map, where a click picks one), a straight line, or a place
+     of yours to ride through. When BRouter can't route a connection, its options open with
+     the straight line to fall back on. *Save* and *Download GPX* work once every connection
+     is accepted (*Accept all* accepts them in one go), and use exactly the lines you
+     accepted: nothing is routed again. The preview shows the total
      distance, elevation gain, the km on the routes and the connector lengths, and **Your
      ride**: the combined route in words, step by step. *Ride the whole result the other way*
      reverses it. Save it as a new route (a new GPX file in `gpx/derived/`, source *combined*,
