@@ -1,13 +1,23 @@
 # Combine routes: redesign plan
 
-Status: proposal, 2026-09-30. Nothing is built yet.
+Status: agreed, 2026-09-30 (decisions below). Nothing is built yet.
+
+## Decisions
+
+1. **The three patterns go.** "Out on A, back on B", "Two crossings" and "A then B" are
+   removed, together with the code that suggests points for them (see *Code changes*).
+2. **More than one part from the same route is allowed**, from the first release.
+3. **At most 4 routes.** The number of parts is capped separately at 6, since one route can
+   give more than one part.
+4. **Desktop only for now.** No phone layout and no "choose from a list" fallback: connections
+   are made by clicking on the map.
 
 ## Goal
 
 Replace today's "pick A and B, pick a pattern, drag four points" screen with a step-by-step
 wizard:
 
-1. **Pick routes.** Choose 2 or more routes, using the Browse panel (collections, smart
+1. **Pick routes.** Choose 2 to 4 routes, using the Browse panel (collections, smart
    collections, areas, activities).
 2. **Keep parts.** On each route, mark the stretch (or stretches) to keep, from one point to another.
 3. **Connect.** Say "connect the end of this part to the start of that part", by clicking.
@@ -58,12 +68,12 @@ What is missing or has to change:
 - The side panel shows the Browse panel (moved in, the same way as on the Map). Clicking a
   collection, area and so on filters the list and the background lines on the map.
 - Under it: the filtered routes, each with a checkbox, plus a click on a line on the map
-  toggles that route. The chosen routes get a colour each (a palette of 6) and are listed as
+  toggles that route. The chosen routes get a colour each (a palette of 4) and are listed as
   chips.
 - Library entry point: select routes in the table → a new **Combine…** button in `#sel-bar`
   opens the wizard with them. The route panel's existing **Combine…** button (`#d-combine`)
   keeps working and adds the route to the selection.
-- Limit: 6 routes (the current `MAX_PARTS`), so that the number of BRouter calls stays low.
+- Limit: 4 routes (new `MAX_ROUTES = 4`), so that the number of BRouter calls stays low.
 
 Implementation: give `renderCatalog()` a mode. In `"filter"` mode (today) a click calls
 `setFilters`. In `"pick"` mode the click goes to a callback, and the combine view keeps its own
@@ -78,9 +88,8 @@ filter state, so the library filters are not touched.
   way round" sets `otherWay`.
 - "Whole route" button: start 0 to the end.
 - A route may have more than one kept part (for example, one stretch going out and another
-  coming back).
-- Optional help: a **Suggest** button that uses today's `suggestConnections` and
-  `suggestCrossover` to pre-fill the parts.
+  coming back): **Add another part** on that route. At most 6 parts in all.
+- No automatic suggestion of parts: the user marks them.
 
 Data: `parts: [{id, route_id, start: [lat, lon], end: [lat, lon], other_way}]`. This is
 already the shape `runCombine` takes.
@@ -134,12 +143,16 @@ already the shape `runCombine` takes.
   `closed`, or explains what is missing ("part C is not connected", "two separate chains").
 - New `suggestOrder(parts)`: the shortest chain for auto-connect (brute force is fine for 6
   or fewer parts: at most 6! × 2 orders).
+- Remove the two-route code that only served the old patterns: `combine()`,
+  `suggestConnections()`, `suggestCrossover()` and `suggestParts()` (and `along`/`samples`
+  if nothing else uses them). Today `combine()` is only called from tests.
 
 **`web/js/service.js`**
 - `combineConnector({from, to, profile, prefer_unpaved, via, alternative})` gives
   `{points, distance_m}`.
 - `runCombine` accepts `connectors: [[[lat, lon, ele], ...] | null]` and uses them when given.
-- `combineSuggest` stays as the optional "suggest parts" helper.
+  New checks: at most `MAX_ROUTES = 4` different routes and at most `MAX_PARTS = 6` parts.
+- Remove `combineSuggest` (only the old combine screen uses it).
 
 **`web/js/app.js` and `web/index.html`**
 - Rewrite the `#view-combine` side panel as a 4-step wizard: Routes → Parts → Connect →
@@ -148,36 +161,33 @@ already the shape `runCombine` takes.
 - State: `cb = {step, routeIds, parts, links, connectors: [{points, alt, accepted, via}], ...}`,
   kept in the URL hash as far as it is useful (routes and parts), as today.
 - `renderCatalog(mode, onPick)` for pick mode.
+- Drop the pattern radio buttons, the A/B selects, the swap and direction boxes, and the
+  `pattern=`/`open=` hash parameters. Old links with `a=`/`b=` still open the wizard with those
+  two routes picked.
 - A **Combine…** button in the library selection bar.
 
 **Tests** (`web/tests/combiner.test.js`, `service.test.js`)
 - `orderParts`: open chain, closed loop, missing link, branching, two chains.
 - `combineParts` with approved connectors: no router calls; the geometry is used as given.
 - 3 routes end to end with a fake router.
-- Existing tests keep passing: the A/B service API stays usable as the 2-part case.
+- Remove the tests for `combine()` and `combineSuggest` (`combiner.test.js` about lines
+  86–170, `service.test.js` lines 146, 338, 364, 379, 489). Where they check behaviour that
+  still exists (reverse riding, direct joins under 25 m, the other way round a loop), rewrite
+  them against `combineParts` so that coverage stays.
+- New: more than 4 routes or more than 6 parts is refused; two parts from one route work.
 
 ## Phasing
 
 Each phase is a release that works on its own.
 
-1. **Engine and service** (S): the alternatives, approved connectors, `orderParts` and
-   `suggestOrder`, and tests. No UI change.
-2. **Wizard, steps 1–3 and 6** (M–L): pick N routes with Browse, mark parts, connect them,
-   and save. Connectors are routed automatically, as today.
+1. **Engine and service** (S): the alternatives, approved connectors, `orderParts`,
+   `suggestOrder`, the route/part limits, and tests. No UI change; the old two-route code
+   stays until phase 2 replaces the screen that uses it.
+2. **Wizard, steps 1–3 and 6** (M–L): pick 2–4 routes with Browse, mark parts, connect
+   them, and save. Connectors are routed automatically, as today. The old screen and the
+   pattern code are removed here.
 3. **Validate** (S–M): accept or choose an alternative per connection, and keep the approved
    geometry.
-4. **Polish** (S): Auto-connect, the "suggest parts" helper, the library **Combine…** button,
+4. **Polish** (S): Auto-connect, the library **Combine…** button,
    the help text and screenshots (`docs/screenshots/combine.webp`), the changelog and the
    roadmap update.
-
-## Open questions
-
-1. **Keep the three quick patterns** ("Out on A, back on B", "Two crossings", "A then B") as
-   one-click presets in step 2? My suggestion: yes, as a "Suggest" menu, because they are
-   quick for the common two-route case.
-2. **More than one part from the same route:** allow it now, or later? The engine already
-   allows it; the UI cost is small.
-3. **Limit of 6 routes:** fine, or higher? Each extra route adds 1–4 BRouter calls on the
-   public server.
-4. **Mobile:** clicking two markers precisely on a phone is fiddly. Is a "choose from list"
-   fallback for connections acceptable?
