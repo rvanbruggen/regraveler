@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import * as cb from "../js/combiner.js";
 import * as places from "../js/places.js";
 import * as surface from "../js/surface.js";
+import { geodesicDistance } from "../js/geo.js";
 import { approx, linePoints, offset } from "./helpers.js";
 
 const START = [51.0, 4.4];
@@ -95,12 +96,27 @@ for (const [tags, expected] of tagCases) {
 
 const track = (lengthM = 10000) => cb.makeTrack(linePoints({ lengthM, stepM: 50 }));
 
+/** Points every ~10 m on the straight lines between the given [lat, lon] points. */
+function densify(points) {
+  const out = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const [a, b] = [points[i - 1], points[i]];
+    const n = Math.max(1, Math.round(geodesicDistance(a[0], a[1], b[0], b[1]) / 10));
+    for (let k = 1; k <= n; k++) out.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
+  }
+  return out;
+}
+
+const pathLength = (coords) =>
+  coords.slice(1).reduce((s, c, i) => s + geodesicDistance(coords[i][0], coords[i][1], c[0], c[1]), 0);
+
 /** Each request: first half asphalt, then 20 % sett, 30 % track without a surface tag. */
 function fakeMatcher() {
   const calls = [];
   const fn = async (waypoints) => {
     calls.push(waypoints);
-    const length = (waypoints.length - 1) * 1000; // pretend 1 km between waypoints
+    const coords = densify(waypoints);
+    const length = pathLength(coords);
     return {
       length,
       rows: [
@@ -108,7 +124,7 @@ function fakeMatcher() {
         [0.2 * length, { highway: "residential", surface: "sett" }],
         [0.3 * length, { highway: "track", tracktype: "grade3" }],
       ],
-      coords: waypoints.map(([la, lo]) => [la, lo]),
+      coords,
     };
   };
   fn.calls = calls;
@@ -124,22 +140,78 @@ test("estimate aggregates categories and chunks requests", async () => {
   assert.ok(m.calls.every((c) => c.length <= 20));
   assert.equal(m.calls.reduce((s, c) => s + c.length - 1, 0), gaps);
   assert.deepEqual(m.calls[0][m.calls[0].length - 1], m.calls[1][0]);
-  approx(res.paved_km, 0.5 * gaps);
-  approx(res.cobbles_km, 0.2 * gaps);
-  approx(res.unpaved_km, 0.3 * gaps);
-  assert.equal(res.unknown_km, 0);
-  approx(res.inferred_km, 0.3 * gaps);
+  // km along the track: every request covers its own stretch once
+  approx(res.paved_km, 5, { abs: 0.1 });
+  approx(res.cobbles_km, 2, { abs: 0.1 });
+  approx(res.unpaved_km, 3, { abs: 0.1 });
+  approx(res.paved_km + res.cobbles_km + res.unpaved_km + res.unknown_km, 10, { abs: 0.02 });
+  assert.ok(res.unknown_km < 0.05);
+  approx(res.inferred_km, 3, { abs: 0.1 });
+  approx(res.match_ratio, 1, { abs: 0.01 });
   assert.equal(res.paved_pct, 70); // cobbles count as paved
   assert.equal(res.top_surfaces[0][0], "asphalt");
   assert.ok(res.segments.every(([cat]) => ["paved", "cobbles", "unpaved"].includes(cat)));
 });
 
+// For a 3 km route heading east from START: a matcher that follows it, but at the waypoint at
+// 1500 m rides `extra` ([lat, lon] points, tagged `tags`) and, if `rejoinM`, leaves out the
+// route up to the waypoint at rejoinM (BRouter went around it).
+function detourMatcher(extra, tags, rejoinM = null) {
+  return async (waypoints) => {
+    const nearest = (m) => {
+      const p = at(0, m);
+      const ds = waypoints.map((w) => geodesicDistance(w[0], w[1], p[0], p[1]));
+      return ds.indexOf(Math.min(...ds));
+    };
+    const from = nearest(1500), to = rejoinM == null ? from : nearest(rejoinM);
+    const asphalt = { highway: "tertiary", surface: "asphalt" };
+    const before = densify(waypoints.slice(0, from + 1));
+    const detour = [waypoints[from], ...extra, waypoints[to]];
+    const after = densify(waypoints.slice(to));
+    const rows = [[pathLength(before), asphalt], [pathLength(detour), tags], [pathLength(after), asphalt]];
+    const coords = [...before, ...detour.slice(1), ...after.slice(1)];
+    return { length: pathLength(coords), rows, coords };
+  };
+}
+
+test("estimate ignores BRouter riding out and back to a waypoint", async () => {
+  // a 400 m dead end off the route, ridden there and back
+  const spur = [at(100, 1500), at(200, 1500), at(400, 1500), at(200, 1500)];
+  const res = await surface.estimate(track(3000), { matcher: detourMatcher(spur, { highway: "track" }), spacingM: 300 });
+  assert.ok(res.matched_km > 3.7); // BRouter's own path
+  approx(res.unpaved_km, 0, { abs: 0.01 });
+  approx(res.paved_km, 3, { abs: 0.02 });
+  approx(res.match_ratio, 1, { abs: 0.01 });
+  assert.ok(res.segments.every(([cat]) => cat === "paved"));
+});
+
+test("estimate counts what BRouter did not follow as unknown", async () => {
+  // leaves the route at 1500 m, rides a parallel road 300 m north, rejoins at 2100 m
+  const detour = [at(300, 1500), at(300, 2100)];
+  const res = await surface.estimate(track(3000), {
+    matcher: detourMatcher(detour, { highway: "residential", surface: "sett" }, 2100), spacingM: 300,
+  });
+  approx(res.cobbles_km, 0, { abs: 0.01 });
+  approx(res.unmatched_km, 0.6, { abs: 0.02 });
+  approx(res.paved_km + res.unknown_km, 3, { abs: 0.02 });
+  approx(res.match_ratio, 0.8, { abs: 0.01 });
+});
+
+test("estimate of a route that rides the same road twice", async () => {
+  // 2 km east and back on the same road (a waypoint at the turnaround, the ones on the way back
+  // on top of those on the way out)
+  const pts = [...linePoints({ lengthM: 2000, stepM: 50 }), ...linePoints({ start: at(0, 2000), lengthM: 2000, stepM: 50, headingDeg: 270 }).slice(1)];
+  const res = await surface.estimate(cb.makeTrack(pts), { matcher: fakeMatcher(), spacingM: 250 });
+  approx(res.paved_km + res.cobbles_km + res.unpaved_km, 4, { abs: 0.05 });
+  approx(res.match_ratio, 1, { abs: 0.01 });
+});
+
 test("estimate without enough known surface", async () => {
   const mostlyUnknown = async (waypoints) => ({
-    length: 1000, rows: [[800, { highway: "footway" }], [200, { surface: "asphalt" }]], coords: waypoints,
+    length: 1000, rows: [[800, { highway: "footway" }], [200, { surface: "asphalt" }]], coords: densify(waypoints),
   });
   const res = await surface.estimate(track(1000), { matcher: mostlyUnknown, spacingM: 500 });
-  approx(res.unknown_km, 0.8);
+  approx(res.unknown_km, 0.8, { abs: 0.02 });
   assert.equal(res.paved_pct, null);
 });
 

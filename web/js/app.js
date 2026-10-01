@@ -868,7 +868,9 @@ function renderSurface(r) {
     el("div", { class: "muted small" },
       `From OpenStreetMap, ${fmt.date(s.estimated_at)}` +
       (s.inferred_km > 0.05 ? ` · ${s.inferred_km.toFixed(1)} km guessed from the road type` : "") +
-      (s.match_ratio && Math.abs(s.match_ratio - 1) > 0.1 ? ` · rough match (${Math.round(s.match_ratio * 100)}% of the route length)` : "") +
+      (s.unmatched_km == null
+        ? s.match_ratio && Math.abs(s.match_ratio - 1) > 0.02 ? " · made by an older version, the km can be off: estimate again" : ""
+        : s.match_ratio < 0.9 ? ` · only ${Math.round(s.match_ratio * 100)}% of the route matched to OpenStreetMap` : "") +
       (s.top_surfaces?.length ? ` · mostly ${s.top_surfaces.slice(0, 3).map(([n]) => n).join(", ")}` : "")),
     el("div", { class: "actions" },
       estimateBtn,

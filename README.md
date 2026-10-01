@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.12.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.12.1 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -791,8 +791,12 @@ and generated name for all of them, identical elevation gain for 74 (the other 3
 
 - **Surface estimate:** the GPX track is "map matched" with BRouter: a route is requested
   through waypoints every 300 m along the track with the `shortest` profile, so BRouter follows
-  the track itself (the matched length is typically within 1 % of the route length), and with
-  `processUnusedTags=1` BRouter reports every OpenStreetMap tag of each way it used. Each
+  the track itself, and with `processUnusedTags=1` BRouter reports every OpenStreetMap tag of
+  each way it used. Where BRouter can't follow the track (a waypoint next to a dead end makes it
+  ride out and back, a way missing from OpenStreetMap or closed to bikes makes it detour), only
+  the parts of its path that lie on the track count, each stretch of the track once, so the km
+  add up to the route length; what it did not follow counts as unknown, and the panel says how
+  much of the route was matched when that is under 90 %. Each
   stretch is classified by its `surface` tag; without one, the road type decides (a residential
   street or cycleway is paved, a `grade1` track paved, other tracks and paths unpaved; the panel
   says how many km were guessed this way). paved % = (paved + cobbles) / (paved + cobbles +
