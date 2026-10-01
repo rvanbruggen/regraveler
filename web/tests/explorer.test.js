@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { Library, MemoryBackend } from "../js/db.js";
 import {
+  boxOf, compareTile, sharedFresh, sharedMissingCount, tileState,
   isTilesKml, lineTiles, maxCluster, maxSquare, parseTilesKml, readTilesFile, routeGain, tileBounds, tileKey, tileOf, tileRange, tileXY,
 } from "../js/explorer.js";
 import * as places from "../js/places.js";
@@ -96,6 +97,30 @@ test("what a route adds: new tiles of an explored set, or of a missing one", () 
   assert.deepEqual(routeGain(route, new Set([2, 9]), "missing"), { tiles: 4, fresh: [2] });
 });
 
+test("two sets compared: explored by one, both, missing for both; a missing set only knows its area", () => {
+  const K = (x, y) => tileKey(x, y);
+  // Rider A explored (10,10) and (11,10). Rider B's missing export: (11,10), (12,10) and (10,11),
+  // so its area is x 10..12, y 10..11, and B explored the other tiles in it.
+  const a = { mode: "explored", set: new Set([K(10, 10), K(11, 10)]) };
+  const bTiles = [K(11, 10), K(12, 10), K(10, 11)];
+  const b = { mode: "missing", set: new Set(bTiles), box: boxOf(bTiles) };
+  assert.deepEqual(b.box, { x0: 10, x1: 12, y0: 10, y1: 11 });
+  assert.equal(tileState(b, K(11, 11)), "explored");
+  assert.equal(tileState(b, K(20, 20)), "unknown");
+  assert.equal(tileState(a, K(20, 20)), "missing");
+  assert.equal(compareTile(a, b, K(10, 10)), "both");
+  assert.equal(compareTile(a, b, K(11, 10)), "a");
+  assert.equal(compareTile(a, b, K(11, 11)), "b");
+  assert.equal(compareTile(a, b, K(12, 10)), "shared");
+  assert.equal(compareTile(a, b, K(10, 11)), "shared");
+  assert.equal(compareTile(a, b, K(20, 20)), null); // B doesn't know it
+  assert.equal(compareTile(b, a, K(11, 10)), "b"); // the other way round
+  assert.equal(sharedMissingCount(a, b), 2);
+  assert.equal(sharedMissingCount(a, { mode: "explored", set: new Set() }), null); // two explored sets: no end to it
+  assert.deepEqual(sharedFresh([K(10, 10), K(12, 10), K(20, 20)], a, b), [K(12, 10)]);
+  assert.equal(boxOf([]), null);
+});
+
 // ---- stored, and against the routes
 
 beforeEach(async () => {
@@ -148,6 +173,21 @@ test("import tile sets, the active one, new tiles per route, replace by name", a
   assert.equal(res.replaced, true);
   assert.equal(svc.tileSets().length, 2);
   assert.equal(svc.newTiles(r), 0);
+
+  // Compared: Mine (explored, active) and Tom (missing x+9 only; area = that tile).
+  assert.equal(svc.compareTileSet(), null);
+  assert.equal(svc.newTilesBoth(r), null);
+  await svc.setActiveTileSet(mine.id);
+  await svc.setCompareTileSet(theirs.id);
+  assert.equal(svc.compareTileSet().name, "tom");
+  assert.deepEqual(svc.sharedMissing(), { a: "Mine", b: "tom", count: 1 });
+  assert.equal(svc.newTilesBoth(r), 0); // the route doesn't reach x+9
+  const cmp = svc.routeExplorer(r.id).other;
+  assert.equal(cmp.name, "tom");
+  assert.deepEqual(cmp.both, []);
+  // Making the compared set the active one ends the comparison.
+  await svc.setActiveTileSet(theirs.id);
+  assert.equal(svc.compareTileSet(), null);
 
   await svc.updateTileSet(theirs.id, { mode: "explored", name: "Tom's" });
   assert.equal(svc.activeTileSet().name, "Tom's");

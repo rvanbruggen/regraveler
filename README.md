@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.11.1 · **Status:** stable. What was planned and built is in
+**Version:** 1.12.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -347,6 +347,14 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
     cluster grow; its new tiles are orange on its map.
   - The library gets a **New tiles** column (only when you have tiles): sort on it to find the
     routes that get you the most new tiles.
+  - **Compare two riders:** tick *Compare* on a second set (a friend's tiles) to see both on the
+    maps: tiles explored by the first only (green), by the second only (purple), by both (grey),
+    and **missing for both** (red), with both max squares outlined. The Places tab says how many
+    tiles are missing for both, a route's panel says how many it gets for each rider and for
+    both (orange on its map), and the library's **New for both** column finds the routes to ride
+    together. A missing-tiles export only knows its own area (the box around its tiles): inside
+    it, a tile that isn't missing counts as explored; outside it, the rider's tiles are unknown.
+    Two explored sets compare everywhere (the tiles missing for both are coloured in view).
   - Tiles a route passes are worked out from its line (every tile a segment crosses, corners
     included), so they can differ from VeloViewer's by a tile where the route runs along a tile
     edge. The sets are in backups, not in *Export set*.

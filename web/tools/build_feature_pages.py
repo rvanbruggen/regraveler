@@ -152,6 +152,24 @@ PAGES = [
 """,
     },
     {
+        "slug": "veloviewer-explorer-tiles",
+        "view": "places",
+        "shot": ("explorer-tiles.webp", "Explorer tiles on the Map: the missing tiles in red, with the library's routes on top"),
+        "title": "VeloViewer explorer tiles: find the routes that get you new tiles",
+        "description": "Import your VeloViewer explorer tiles (KML) and see them under your routes: how many new tiles each route gets you, your max square and cluster, and the tiles missing for you and a friend.",
+        "h1": "VeloViewer explorer tiles",
+        "lead": "Hunting explorer tiles? Import your tiles from VeloViewer, and rerouter tells you which routes in your library get you the most new ones.",
+        "body": """
+<ul>
+  <li><strong>Import your tiles</strong>: drop VeloViewer's KML export of your <strong>explored tiles</strong>, or of the <strong>missing tiles</strong> in an area. Keep several sets side by side (yours, a friend's); a newer export under the same name replaces the old one.</li>
+  <li><strong>On every map</strong> (layer button › <em>Explorer tiles</em>): explored tiles in green, your <strong>max cluster</strong> in blue, your <strong>max square</strong> outlined, missing tiles in red, and the tile grid when you zoom in, under all your routes.</li>
+  <li><strong>New tiles per route:</strong> a route's panel says how many tiles it passes, how many are new, and how much your max square and max cluster would grow; its new tiles are orange on its map.</li>
+  <li><strong>Sort the library on New tiles</strong> to find the ride that gets you the most, or <a href="combine-routes.html">combine routes</a> into one that does.</li>
+  <li><strong>Ride together:</strong> compare your tiles with a friend's. The map shows who explored which tile and, in red, the tiles <strong>missing for both</strong> of you; the library's <em>New for both</em> column finds the routes that ride through most of them.</li>
+</ul>
+""",
+    },
+    {
         "slug": "train-rides",
         "view": "trains",
         "shot": None,
@@ -182,6 +200,7 @@ PAGES = [
   <li><strong>Map styles:</strong> OpenStreetMap, CyclOSM (with unpaved roads), OpenTopoMap (contour lines), the Belgian NGI topo map and satellite, with the signposted hiking and cycling routes as overlays. <strong>Grey map</strong> makes your routes stand out.</li>
   <li><strong>Routes near each other:</strong> shows where routes overlap or come close, with the shared km: good starting points to <a href="combine-routes.html">combine two routes</a>.</li>
   <li>Your places and areas on the same map; draw an area or add a place with a click.</li>
+  <li>Your <a href="veloviewer-explorer-tiles.html">VeloViewer explorer tiles</a> under your routes: where you have been, and which routes get you new tiles.</li>
   <li>The filters and the view are kept in the address, so a bookmark brings back the same map.</li>
 </ul>
 """,
@@ -225,7 +244,7 @@ PAGES = [
 
 HUB = {
     "title": "Features: a route manager for gravel, road, MTB and hiking",
-    "description": "What rerouter does: a library for your GPX routes, import from Komoot and RideWithGPS, combine routes, ride weather, places along a route and train rides.",
+    "description": "What rerouter does: a library for your GPX routes, import from Komoot and RideWithGPS, combine routes, ride weather, places along a route, VeloViewer explorer tiles and train rides.",
     "h1": "What rerouter does",
     "lead": "rerouter is a free route manager that runs in your browser: keep your gravel, road, mountain biking and hiking routes in one library, and do in one click what riders keep doing by hand.",
 }

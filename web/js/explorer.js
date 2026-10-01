@@ -150,6 +150,62 @@ export function routeGain(routeTiles, set, mode = "explored") {
   return { tiles: routeTiles.length, fresh };
 }
 
+// ------------------------------------------------------------------ two sets compared
+
+/** The tiles' bounding box: {x0, x1, y0, y1} (inclusive), or null for no tiles. */
+export function boxOf(keys) {
+  let box = null;
+  for (const k of keys) {
+    const [x, y] = tileXY(k);
+    if (!box) box = { x0: x, x1: x, y0: y, y1: y };
+    else {
+      if (x < box.x0) box.x0 = x; else if (x > box.x1) box.x1 = x;
+      if (y < box.y0) box.y0 = y; else if (y > box.y1) box.y1 = y;
+    }
+  }
+  return box;
+}
+
+/**
+ * What a set says of a tile: "explored", "missing" or "unknown". An explored set knows every
+ * tile (what isn't in it is missing); a missing set only knows its own area (its bounding
+ * box): in it, a tile that isn't missing is explored; outside, unknown.
+ * `s`: {set, mode, box}.
+ */
+export function tileState(s, key) {
+  if (s.mode !== "missing") return s.set.has(key) ? "explored" : "missing";
+  if (s.set.has(key)) return "missing";
+  const [x, y] = tileXY(key);
+  const b = s.box;
+  return b && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 ? "explored" : "unknown";
+}
+
+/**
+ * A tile seen by two riders: "both" (explored by both), "a" or "b" (explored by one only, the
+ * other has it missing or doesn't know), "shared" (missing for both), or null (nothing known).
+ */
+export function compareTile(a, b, key) {
+  const sa = tileState(a, key), sb = tileState(b, key);
+  if (sa === "explored") return sb === "explored" ? "both" : "a";
+  if (sb === "explored") return "b";
+  return sa === "missing" && sb === "missing" ? "shared" : null;
+}
+
+/** Missing for both riders: the tiles of a route (keys) the two still have to get. */
+export const sharedFresh = (routeTiles, a, b) => routeTiles.filter((k) => compareTile(a, b, k) === "shared");
+
+/**
+ * How many tiles are missing for both, when that is a finite number (at least one set is a
+ * missing set: its tiles are the candidates); null for two explored sets.
+ */
+export function sharedMissingCount(a, b) {
+  const from = a.mode === "missing" ? a : b.mode === "missing" ? b : null;
+  if (!from) return null;
+  let n = 0;
+  for (const k of from.set) if (compareTile(a, b, k) === "shared") n++;
+  return n;
+}
+
 // ------------------------------------------------------------------ max square, max cluster
 
 /** The biggest square of explored tiles: {size, x, y} (x, y: its top-left tile), or size 0. */

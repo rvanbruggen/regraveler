@@ -541,7 +541,7 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .cb-conns .err { color: #b3261e; }
 
 /* VeloViewer explorer tiles */
-#routes.no-tiles .tiles-col { display: none; }
+#routes.no-tiles .tiles-col, #routes.no-both .both-col { display: none; }
 #explorer-tiles { margin-bottom: 16px; }
 #tiles-sets { margin-top: 8px; }
 #tiles-sets input:not([type]) { width: 14em; }
@@ -552,4 +552,9 @@ body.starting main > :not(#starting), body.starting nav, body.starting footer, b
 .tiles-legend .cluster { background: rgba(30, 136, 229, 0.35); border-color: #1565c0; }
 .tiles-legend .square { background: none; border: 2px solid #0d47a1; }
 .tiles-legend .missing { background: rgba(229, 57, 53, 0.3); border-color: #c62828; }
+.tiles-legend .a { background: rgba(67, 160, 71, 0.35); border-color: #2e7d32; }
+.tiles-legend .b { background: rgba(142, 36, 170, 0.3); border-color: #6a1b9a; }
+.tiles-legend .both { background: rgba(96, 125, 139, 0.35); border-color: #455a64; }
+.tiles-legend .shared { background: rgba(229, 57, 53, 0.5); border-color: #b71c1c; }
+.tiles-legend .square-b { background: none; border: 2px dashed #6a1b9a; }
 .tiles-legend .fresh { background: rgba(255, 152, 0, 0.6); border-color: #e65100; }

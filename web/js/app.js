@@ -6,7 +6,7 @@ import * as brouter from "./brouter.js";
 import * as comb from "./combiner.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
-import { isTilesKml, kmlText, readTilesFile, tileBounds, tileRange, tileXY } from "./explorer.js";
+import { compareTile, isTilesKml, kmlText, readTilesFile, tileBounds, tileKey, tileRange, tileXY } from "./explorer.js";
 import { OSM_TAGS, isPlacesFileName, parsePlacesCsv, readAreasFile, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
 import { buildProfile, drawProfile, nearestIndex } from "./profile.js";
 import { unpackShare } from "./share.js";
@@ -319,8 +319,10 @@ function renderTable() {
   });
   const totalKm = routes.reduce((s, r) => s + r.distance_km, 0);
   renderWelcome();
-  const tileSet = svc.activeTileSet();
+  const tileSet = svc.activeTileSet(), otherSet = tileSet && svc.compareTileSet();
   $("#routes").classList.toggle("no-tiles", !tileSet);
+  $("#routes").classList.toggle("no-both", !otherSet);
+  $("#routes th.both-col").title = otherSet ? `Explorer tiles this route gets that are missing for both ${tileSet.name} and ${otherSet.name}` : "";
   $("#routes th.tiles-col").title = tileSet
     ? `New explorer tiles this route gets you (${tileSet.name}${tileSet.mode === "missing" ? ": among the missing tiles" : ""})`
     : "";
@@ -348,6 +350,7 @@ function renderTable() {
           ? el("td", { class: "num est", title: "Estimated from OpenStreetMap" }, `≈${fmt.pct(r.paved_pct)}`)
           : el("td", { class: "num" }, fmt.pct(r.paved_pct)),
         tileSet ? el("td", { class: "num tiles-col" }, String(svc.newTiles(r))) : el("td", { class: "tiles-col" }),
+        otherSet ? el("td", { class: "num both-col" }, String(svc.newTilesBoth(r))) : el("td", { class: "both-col" }),
         el("td", { class: "stars" }, fmt.stars(r.quality_rating)),
         el("td", {}, r.tags.map((t) => el("span", { class: "tag" }, t))),
         el("td", {}, r.source_name || "–"),
@@ -2241,11 +2244,22 @@ const TILE_STYLES = {
   fresh: { color: "#e65100", weight: 1.5, fillColor: "#ff9800", fillOpacity: 0.5 },
   grid: { color: "#555", weight: 0.4, opacity: 0.5 },
   square: { color: "#0d47a1", weight: 2.5, fill: false },
+  // Two sets compared: explored by the first only, the second only, both; missing for both.
+  a: { color: "#2e7d32", weight: 0.5, fillColor: "#43a047", fillOpacity: 0.25 },
+  b: { color: "#6a1b9a", weight: 0.5, fillColor: "#8e24aa", fillOpacity: 0.22 },
+  both: { color: "#455a64", weight: 0.5, fillColor: "#607d8b", fillOpacity: 0.25 },
+  shared: { color: "#b71c1c", weight: 0.8, fillColor: "#e53935", fillOpacity: 0.45 },
+  squareB: { color: "#6a1b9a", weight: 2.5, dashArray: "6 4", fill: false },
 };
+const MAX_COMPARED_CELLS = 20000; // tiles in view classified one by one when two sets are compared
 
-let detailTiles = null; // {id, fresh: Set} for the route in the panel
+let detailTiles = null; // {id, fresh: Set} for the route in the panel (new for both, when comparing)
 
-/** The active tile set on one map: the tiles in view, the grid, the max square, the route's new tiles. */
+/**
+ * The active tile set on one map: the tiles in view, the grid, the max square, the route's new
+ * tiles. With a second set to compare, every tile in view is coloured by who explored it, and
+ * the tiles missing for both stand out.
+ */
 function drawTiles(entry) {
   if (!entry.tiles) return;
   entry.tiles.clearLayers();
@@ -2254,12 +2268,15 @@ function drawTiles(entry) {
   const t = svc.activeTileSet();
   if (!t) return;
   const info = svc.tileSetInfo(t);
+  const other = svc.compareTileSet();
+  const oinfo = other && svc.tileSetInfo(other);
   info.clusterSet ??= new Set(info.cluster?.tiles || []);
   const b = m.getBounds();
   const { x0, x1, y0, y1 } = tileRange([[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]]);
   const add = (bounds, style) => entry.tiles.addLayer(L.rectangle(bounds, { ...style, renderer: entry.tilesRenderer, interactive: false }));
   const inView = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
-  if (m.getZoom() >= 11 && (x1 - x0 + 2) * (y1 - y0 + 2) < 4000) {
+  const cells = (x1 - x0 + 1) * (y1 - y0 + 1);
+  if (m.getZoom() >= 11 && cells < 4000) {
     const north = tileBounds(x0, y0)[1][0], south = tileBounds(x0, y1)[0][0];
     const west = tileBounds(x0, y0)[0][1], east = tileBounds(x1, y0)[1][1];
     for (let x = x0; x <= x1 + 1; x++) {
@@ -2271,15 +2288,28 @@ function drawTiles(entry) {
       entry.tiles.addLayer(L.polyline([[lat, west], [lat, east]], { ...TILE_STYLES.grid, renderer: entry.tilesRenderer, interactive: false }));
     }
   }
-  for (const k of t.tiles) {
-    const [x, y] = tileXY(k);
-    if (inView(x, y)) add(tileBounds(x, y), t.mode === "missing" ? TILE_STYLES.missing : info.clusterSet.has(k) ? TILE_STYLES.cluster : TILE_STYLES.explored);
+  if (oinfo) {
+    // Every tile in view when there aren't too many; else only the tiles in either file.
+    const keys = cells <= MAX_COMPARED_CELLS
+      ? (function* () { for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) yield tileKey(x, y); })()
+      : new Set([...t.tiles, ...other.tiles].filter((k) => inView(...tileXY(k))));
+    for (const k of keys) {
+      const c = compareTile(info, oinfo, k);
+      if (c) add(tileBounds(...tileXY(k)), TILE_STYLES[c]);
+    }
+  } else {
+    for (const k of t.tiles) {
+      const [x, y] = tileXY(k);
+      if (inView(x, y)) add(tileBounds(x, y), t.mode === "missing" ? TILE_STYLES.missing : info.clusterSet.has(k) ? TILE_STYLES.cluster : TILE_STYLES.explored);
+    }
   }
-  const sq = info.square;
-  if (sq?.size) {
+  const outline = (sq, style) => {
+    if (!sq?.size) return;
     const s = sq.size - 1;
-    add([[tileBounds(sq.x, sq.y + s)[0][0], tileBounds(sq.x, sq.y)[0][1]], [tileBounds(sq.x, sq.y)[1][0], tileBounds(sq.x + s, sq.y)[1][1]]], TILE_STYLES.square);
-  }
+    add([[tileBounds(sq.x, sq.y + s)[0][0], tileBounds(sq.x, sq.y)[0][1]], [tileBounds(sq.x, sq.y)[1][0], tileBounds(sq.x + s, sq.y)[1][1]]], style);
+  };
+  outline(info.square, TILE_STYLES.square);
+  if (oinfo) outline(oinfo.square, TILE_STYLES.squareB);
   // The new tiles of the route in the panel, on its map.
   if (m === map && detailTiles && detailRoute?.id === detailTiles.id && !detail.hidden) {
     for (const k of detailTiles.fresh) {
@@ -2289,26 +2319,28 @@ function drawTiles(entry) {
   }
 }
 
-/** In the route panel: the tiles it passes through, and how many are new. */
+/** In the route panel: the tiles it passes through, and how many are new (for each rider, and both). */
 function renderDetailTiles(r) {
   const box = $("#d-tiles");
   let g = null;
   try { g = svc.routeExplorer(r.id); } catch { g = null; }
-  detailTiles = g ? { id: r.id, fresh: new Set(g.fresh) } : null;
+  detailTiles = g ? { id: r.id, fresh: new Set(g.other ? g.other.both : g.fresh) } : null;
   box.hidden = !g;
   if (!g) {
     box.replaceChildren();
     return;
   }
   const n = g.fresh.length;
+  const newText = (k) => (k ? `${k} new` : "none new");
   setChildren(box,
     el("span", { class: "muted" }, "Explorer tiles: "),
     `${g.tiles} tile${g.tiles === 1 ? "" : "s"}, `,
-    el("strong", {}, n ? `${n} new` : "none new"),
-    g.set.mode === "missing" ? " (among the missing tiles)" : null,
+    g.other ? `${newText(n)} for ${g.set.name}, ${newText(g.other.fresh)} for ${g.other.name}, ` : null,
+    g.other ? el("strong", {}, `${g.other.both.length} missing for both`) : el("strong", {}, newText(n)),
+    !g.other && g.set.mode === "missing" ? " (among the missing tiles)" : null,
     g.square != null && g.squareAfter > g.square ? ` · max square ${g.square} → ${g.squareAfter}` : null,
     g.cluster != null && g.clusterAfter > g.cluster ? ` · max cluster ${g.cluster} → ${g.clusterAfter}` : null,
-    el("span", { class: "muted" }, ` (${g.set.name}) `),
+    g.other ? " " : el("span", { class: "muted" }, ` (${g.set.name}) `),
     tilesShown() ? null : el("a", { class: "link", onclick: () => { setTilesShown(true); renderDetailTiles(r); } }, n ? "show them on the map" : "show the tiles on the map"));
 }
 
@@ -2320,17 +2352,27 @@ async function refreshTiles() {
 
 function renderTileSets() {
   const sets = svc.tileSets();
-  const active = svc.activeTileSet();
+  const active = svc.activeTileSet(), other = svc.compareTileSet();
+  const shared = svc.sharedMissing();
+  const legend = (items) => el("caption", { class: "small muted tiles-legend" }, items.flatMap(([cls, text]) => [el("i", { class: cls }), `${text} `]));
   setChildren($("#tiles-sets"), sets.length ? [
     el("thead", {}, el("tr", {},
-      el("th", { title: "The tiles on the maps and in the routes' new tiles" }, "Use"), el("th", {}, "Name"), el("th", {}, "Tiles"),
+      el("th", { title: "The tiles on the maps and in the routes' new tiles" }, "Use"),
+      el("th", { title: "A second set (another rider) to compare with: the tiles missing for both" }, "Compare"),
+      el("th", {}, "Name"), el("th", {}, "Tiles"),
       el("th", {}, "Max square"), el("th", {}, "Max cluster"), el("th", {}, "Imported"), el("th", {}, ""))),
     el("tbody", {}, sets.map((t) => {
       const info = svc.tileSetInfo(t);
+      const isActive = t.id === active?.id;
       return el("tr", {},
         el("td", {}, el("input", {
-          type: "radio", name: "tiles-active", checked: t.id === active?.id, "aria-label": `Use ${t.name}`,
+          type: "radio", name: "tiles-active", checked: isActive, "aria-label": `Use ${t.name}`,
           onchange: async () => { await svc.setActiveTileSet(t.id); await refreshTiles(); },
+        })),
+        el("td", {}, isActive ? "" : el("input", {
+          type: "checkbox", checked: t.id === other?.id, "aria-label": `Compare ${t.name} with ${active?.name}`,
+          title: `Compare with ${active?.name}: who explored which tile, and the tiles missing for both`,
+          onchange: async (e) => { await svc.setCompareTileSet(e.target.checked ? t.id : null); setTilesShown(true); await refreshTiles(); },
         })),
         el("td", {}, el("input", {
           value: t.name, "aria-label": "Name",
@@ -2349,10 +2391,17 @@ function renderTileSets() {
           onclick: async () => { if (confirm(`Remove the explorer tiles “${t.name}”?`)) { await svc.deleteTileSet(t.id); await refreshTiles(); } },
         }, "remove")));
     })),
-    el("caption", { class: "small muted tiles-legend" },
-      el("i", { class: "explored" }), "explored ", el("i", { class: "cluster" }), "max cluster ", el("i", { class: "square" }), "max square ",
-      el("i", { class: "missing" }), "missing ", el("i", { class: "fresh" }), "new for the route in the panel"),
+    other
+      ? legend([["a", `explored by ${active.name} only`], ["b", `by ${other.name} only`], ["both", "by both"], ["shared", "missing for both"],
+          ["square", `max square ${active.name}`], ["square-b", other.name], ["fresh", "missing for both, on the route in the panel"]])
+      : legend([["explored", "explored"], ["cluster", "max cluster"], ["square", "max square"], ["missing", "missing"], ["fresh", "new for the route in the panel"]]),
   ] : []);
+  $("#tiles-compare").hidden = !shared;
+  $("#tiles-compare").textContent = !shared ? ""
+    : (shared.count != null ? `${shared.count} tiles are missing for both ${shared.a} and ${shared.b}` : `Tiles missing for both ${shared.a} and ${shared.b}`) +
+      ": red on the maps (layer button › Explorer tiles), and the library's New for both column finds the routes that ride through most of them." +
+      (svc.tileSets().some((x) => (x.id === active.id || x.id === other.id) && x.mode === "missing")
+        ? " A missing-tiles export only knows its own area: outside it, no tile is missing for both." : "");
 }
 
 async function importTilesFile(file) {

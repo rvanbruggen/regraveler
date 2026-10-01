@@ -117,7 +117,7 @@ export function importOrder(names) {
 
 // ------------------------------------------------------------------ filters
 
-const SORTABLE = new Set(["name", "distance_km", "elevation_gain_m", "paved_pct", "quality_rating", "source_name", "imported_at", "is_loop", "activity", "new_tiles"]);
+const SORTABLE = new Set(["name", "distance_km", "elevation_gain_m", "paved_pct", "quality_rating", "source_name", "imported_at", "is_loop", "activity", "new_tiles", "new_both"]);
 
 /** Filters from URLSearchParams (the same parameters the old API took). */
 export function filtersFrom(params) {
@@ -170,7 +170,7 @@ export function filterRoutes(f = {}) {
   const lower = sort === "name" || sort === "source_name";
   const dir = f.order === "desc" ? -1 : 1;
   const val = (r) => {
-    const v = sort === "new_tiles" ? newTiles(r) : r[sort];
+    const v = sort === "new_tiles" ? newTiles(r) : sort === "new_both" ? newTilesBoth(r) : r[sort];
     if (v == null) return null;
     return lower ? String(v).toLowerCase() : typeof v === "boolean" ? Number(v) : v;
   };
@@ -1789,7 +1789,8 @@ export const areasOf = (routeId) => lib.docsOf("area").filter((a) => startsIn(ge
 
 // ---- VeloViewer explorer tiles
 // Document "explorer_tiles" {name, mode: "explored" | "missing", tiles: [key, ...], active,
-// source_file, imported_at}. The active set is the one on the maps and in the route stats.
+// compare, source_file, imported_at}. The active set is the one on the maps and in the route
+// stats; another set can be compared with it (a second rider: the tiles missing for both).
 
 export const tileSets = () => lib.docsOf("explorer_tiles").sort(byNameCi);
 export const activeTileSet = () => {
@@ -1797,14 +1798,23 @@ export const activeTileSet = () => {
   return all.find((t) => t.active) || all[0] || null;
 };
 
-const tileSetCache = new Map(); // id -> {source, set, square, cluster}
-/** The tiles of a set as a Set, with its max square and max cluster (explored sets only). */
+/** The set compared with the active one (not the active one itself), or null. */
+export const compareTileSet = () => {
+  const active = activeTileSet();
+  return tileSets().find((t) => t.compare && t.id !== active?.id) || null;
+};
+
+const tileSetCache = new Map(); // id -> {source, mode, set, box, square, cluster}
+/**
+ * The tiles of a set as a Set, with its mode and bounding box (for explorer.tileState) and its
+ * max square and max cluster (explored sets only).
+ */
 export function tileSetInfo(t) {
   const hit = tileSetCache.get(t.id);
-  if (hit && hit.source === t.tiles) return hit;
+  if (hit && hit.source === t.tiles && hit.mode === t.mode) return hit;
   const set = new Set(t.tiles);
   const info = {
-    source: t.tiles, set,
+    source: t.tiles, mode: t.mode, set, box: explorer.boxOf(t.tiles),
     square: t.mode === "explored" ? explorer.maxSquare(set) : null,
     cluster: t.mode === "explored" ? explorer.maxCluster(set) : null,
   };
@@ -1835,7 +1845,35 @@ export async function updateTileSet(id, changes) {
 }
 
 export async function setActiveTileSet(id) {
-  await lib.saveDocs(tileSets().filter((t) => !!t.active !== (t.id === id)).map((t) => ({ ...t, active: t.id === id })));
+  await lib.saveDocs(tileSets().filter((t) => !!t.active !== (t.id === id) || (t.id === id && t.compare))
+    .map((t) => ({ ...t, active: t.id === id, compare: t.id === id ? false : !!t.compare })));
+}
+
+/** Compare set `id` with the active one (null: compare with none). */
+export async function setCompareTileSet(id) {
+  await lib.saveDocs(tileSets().filter((t) => !!t.compare !== (t.id === id)).map((t) => ({ ...t, compare: t.id === id })));
+}
+
+/** The active and the compared set, as {a, b} of tileSetInfo, or null without a comparison. */
+function comparison() {
+  const a = activeTileSet(), b = compareTileSet();
+  return a && b ? { a: tileSetInfo(a), b: tileSetInfo(b) } : null;
+}
+
+/** How many tiles of a route are missing for both riders (null without a comparison). */
+export function newTilesBoth(r) {
+  const c = comparison();
+  return c ? explorer.sharedFresh(routeTiles(r), c.a, c.b).length : null;
+}
+
+/**
+ * The tiles missing for both sets compared: {a, b (names), count (null: not a finite number,
+ * for two explored sets)}, or null without a comparison.
+ */
+export function sharedMissing() {
+  const a = activeTileSet(), b = compareTileSet();
+  if (!a || !b) return null;
+  return { a: a.name, b: b.name, count: explorer.sharedMissingCount(tileSetInfo(a), tileSetInfo(b)) };
 }
 
 export async function deleteTileSet(id) {
@@ -1870,6 +1908,15 @@ export function routeExplorer(id) {
   const info = tileSetInfo(t);
   const { tiles, fresh } = explorer.routeGain(routeTiles(getRoute(id)), info.set, t.mode);
   const out = { set: { id: t.id, name: t.name, mode: t.mode }, tiles, fresh };
+  const other = compareTileSet();
+  if (other) {
+    const oi = tileSetInfo(other), rt = routeTiles(getRoute(id));
+    out.other = {
+      name: other.name,
+      fresh: explorer.routeGain(rt, oi.set, other.mode).fresh.length,
+      both: explorer.sharedFresh(rt, info, oi),
+    };
+  }
   if (t.mode === "explored") {
     const after = new Set([...info.set, ...fresh]);
     Object.assign(out, {
