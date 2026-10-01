@@ -36,7 +36,7 @@
   }
   </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=1.10.0">
+  <link rel="stylesheet" href="style.css?v=1.11.0">
   <!-- Cache-busting: every module is loaded as js/<file>?v=<version>, so a new release never runs
        with modules the browser still has from the previous one (static hosts such as GitHub Pages
        let browsers keep files for 10 minutes). /bump updates the version here; a test checks that
@@ -44,35 +44,36 @@
   <script type="importmap">
   {
     "imports": {
-      "./js/app.js": "./js/app.js?v=1.10.0",
-      "./js/backup.js": "./js/backup.js?v=1.10.0",
-      "./js/brouter.js": "./js/brouter.js?v=1.10.0",
-      "./js/combiner.js": "./js/combiner.js?v=1.10.0",
-      "./js/config.js": "./js/config.js?v=1.10.0",
-      "./js/db.js": "./js/db.js?v=1.10.0",
-      "./js/fit.js": "./js/fit.js?v=1.10.0",
-      "./js/geo.js": "./js/geo.js?v=1.10.0",
-      "./js/gpx.js": "./js/gpx.js?v=1.10.0",
-      "./js/linkimport.js": "./js/linkimport.js?v=1.10.0",
-      "./js/osm.js": "./js/osm.js?v=1.10.0",
-      "./js/places.js": "./js/places.js?v=1.10.0",
-      "./js/poi.js": "./js/poi.js?v=1.10.0",
-      "./js/profile.js": "./js/profile.js?v=1.10.0",
-      "./js/remote.js": "./js/remote.js?v=1.10.0",
-      "./js/rwgps.js": "./js/rwgps.js?v=1.10.0",
-      "./js/service.js": "./js/service.js?v=1.10.0",
-      "./js/sha256.js": "./js/sha256.js?v=1.10.0",
-      "./js/share.js": "./js/share.js?v=1.10.0",
-      "./js/similarity.js": "./js/similarity.js?v=1.10.0",
-      "./js/stats.js": "./js/stats.js?v=1.10.0",
-      "./js/strava.js": "./js/strava.js?v=1.10.0",
-      "./js/surface.js": "./js/surface.js?v=1.10.0",
-      "./js/tcx.js": "./js/tcx.js?v=1.10.0",
-      "./js/trackfile.js": "./js/trackfile.js?v=1.10.0",
-      "./js/trains.js": "./js/trains.js?v=1.10.0",
-      "./js/weather.js": "./js/weather.js?v=1.10.0",
-      "./js/worker.js": "./js/worker.js?v=1.10.0",
-      "./js/zip.js": "./js/zip.js?v=1.10.0"
+      "./js/app.js": "./js/app.js?v=1.11.0",
+      "./js/backup.js": "./js/backup.js?v=1.11.0",
+      "./js/brouter.js": "./js/brouter.js?v=1.11.0",
+      "./js/combiner.js": "./js/combiner.js?v=1.11.0",
+      "./js/config.js": "./js/config.js?v=1.11.0",
+      "./js/db.js": "./js/db.js?v=1.11.0",
+      "./js/explorer.js": "./js/explorer.js?v=1.11.0",
+      "./js/fit.js": "./js/fit.js?v=1.11.0",
+      "./js/geo.js": "./js/geo.js?v=1.11.0",
+      "./js/gpx.js": "./js/gpx.js?v=1.11.0",
+      "./js/linkimport.js": "./js/linkimport.js?v=1.11.0",
+      "./js/osm.js": "./js/osm.js?v=1.11.0",
+      "./js/places.js": "./js/places.js?v=1.11.0",
+      "./js/poi.js": "./js/poi.js?v=1.11.0",
+      "./js/profile.js": "./js/profile.js?v=1.11.0",
+      "./js/remote.js": "./js/remote.js?v=1.11.0",
+      "./js/rwgps.js": "./js/rwgps.js?v=1.11.0",
+      "./js/service.js": "./js/service.js?v=1.11.0",
+      "./js/sha256.js": "./js/sha256.js?v=1.11.0",
+      "./js/share.js": "./js/share.js?v=1.11.0",
+      "./js/similarity.js": "./js/similarity.js?v=1.11.0",
+      "./js/stats.js": "./js/stats.js?v=1.11.0",
+      "./js/strava.js": "./js/strava.js?v=1.11.0",
+      "./js/surface.js": "./js/surface.js?v=1.11.0",
+      "./js/tcx.js": "./js/tcx.js?v=1.11.0",
+      "./js/trackfile.js": "./js/trackfile.js?v=1.11.0",
+      "./js/trains.js": "./js/trains.js?v=1.11.0",
+      "./js/weather.js": "./js/weather.js?v=1.11.0",
+      "./js/worker.js": "./js/worker.js?v=1.11.0",
+      "./js/zip.js": "./js/zip.js?v=1.11.0"
     }
   }
   </script>
@@ -229,6 +230,7 @@
             <th data-sort="elevation_gain_m" class="num">Gain</th>
             <th data-sort="is_loop">Loop</th>
             <th data-sort="paved_pct" class="num">Paved</th>
+            <th data-sort="new_tiles" class="num tiles-col" title="New VeloViewer explorer tiles this route gets you (the active tiles on the Places tab)">New tiles</th>
             <th data-sort="quality_rating">Quality</th>
             <th>Tags</th>
             <th data-sort="source_name">Source</th>
@@ -279,6 +281,19 @@
         or remove again; adding one twice adds nothing new.</p>
       <div class="seed-list"></div>
       <p class="seed-status small"></p>
+    </div>
+    <div id="explorer-tiles" class="panel">
+      <h3>VeloViewer explorer tiles</h3>
+      <p class="small muted">The map in squares of about 1.5 km (zoom-14 map tiles): a tile is yours once a ride passes
+        through it. Import your <em>explored tiles</em> (or <em>missing tiles</em>) as KML from
+        <a class="link" href="https://veloviewer.com/explorer" target="_blank" rel="noopener">VeloViewer</a> to see them on
+        every map (layer button, top right › <em>Explorer tiles</em>), and how many new tiles each route in your library
+        would get you. Import a newer export under the same name to update it.</p>
+      <div class="actions">
+        <label class="button secondary">Import KML…<input type="file" id="tiles-file" accept=".kml,.kmz" hidden></label>
+        <span id="tiles-status" class="muted small"></span>
+      </div>
+      <table id="tiles-sets"></table>
     </div>
     <div class="places-grid">
       <div>
@@ -1067,6 +1082,7 @@
   </div>
   <p id="d-catalog" class="small"></p>
   <p id="d-rides" class="small" hidden></p>
+  <p id="d-tiles" class="small" hidden></p>
   <p id="d-derived" class="small" hidden></p>
   <p id="d-file" class="muted small"></p>
   <h3>Places along this route</h3>
@@ -1077,6 +1093,6 @@
 </aside>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script type="module" src="js/app.js?v=1.10.0"></script>
+<script type="module" src="js/app.js?v=1.11.0"></script>
 </body>
 </html>

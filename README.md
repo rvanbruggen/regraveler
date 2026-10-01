@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.10.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.11.0 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -45,6 +45,8 @@ At a glance:
   and the routes that come near each other.
 - **Places:** cafés, water, toilets, stations, frituren, … from Google My Maps, CSV files,
   waypoints or OpenStreetMap, on every map and along every route.
+- **VeloViewer explorer tiles:** import your explored (or missing) tiles and see them on every
+  map, and how many new tiles each route in your library would get you.
 - **Utilities:** combine two routes into a new one, start a loop somewhere else, the weather
   along a route, search for places (and ride past them), and **train rides**: a day out with
   the train, with your routes as the riding part.
@@ -329,6 +331,25 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
     places (lists with the same name merged, places already there skipped).
 
 ![Places: example lists to add, your lists and categories, and the places table](docs/screenshots/places.webp)
+
+- **VeloViewer explorer tiles:** [VeloViewer](https://blog.veloviewer.com/veloviewer-explorer-overview/)
+  splits the map in squares (zoom-14 map tiles, about 1.5 km wide here); a tile is yours once
+  a ride passes through it. On the Places tab, *Import KML…* reads VeloViewer's KML export of
+  your **explored tiles**, or of **missing tiles** (the tiles still to get in an area; told
+  apart by the file's name, and changeable per set). Give each set a name (a friend's tiles
+  can sit next to yours); importing a newer export under the same name replaces it. A KML
+  export dropped on the places drop zone is recognised as tiles too.
+  - The **Explorer tiles** layer (layer button) shows the set marked *Use* on every map:
+    explored tiles in green, the max cluster (tiles with all four neighbours explored, joined
+    up) in blue, the max square outlined, missing tiles in red, and the tile grid when zoomed in.
+  - In a route's panel: the tiles it passes through and how many are **new** (not explored yet;
+    for a missing-tiles set: among the missing ones), and how much the max square and max
+    cluster grow; its new tiles are orange on its map.
+  - The library gets a **New tiles** column (only when you have tiles): sort on it to find the
+    routes that get you the most new tiles.
+  - Tiles a route passes are worked out from its line (every tile a segment crosses, corners
+    included), so they can differ from VeloViewer's by a tile where the route runs along a tile
+    edge. The sets are in backups, not in *Export set*.
 
 ### Utilities
 
@@ -842,6 +863,7 @@ web/                 the app: one page, runs in the browser (and as a static sit
     service.js       everything the app does: import, filters, combine, duplicates, names, ...
     db.js            the library in memory, stored through a backend: IndexedDB (browser) ...
     remote.js        ... or the rerouter server's storage API (self-hosted)
+    explorer.js      VeloViewer explorer tiles: KML export, the tiles a route passes, max square / cluster
     poi.js           places: KML/KMZ and CSV reading, category suggestions, places along a route,
                      OpenStreetMap tags and Overpass queries
     osm.js           asking the Overpass API (servers in turn, cache)

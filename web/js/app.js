@@ -6,6 +6,7 @@ import * as brouter from "./brouter.js";
 import * as comb from "./combiner.js";
 import { USER_SETTINGS, VERSION, applySettings, config, defaultSetting, publicBRouter, useServerDefaults } from "./config.js";
 import { Library } from "./db.js";
+import { isTilesKml, kmlText, readTilesFile, tileBounds, tileRange, tileXY } from "./explorer.js";
 import { OSM_TAGS, isPlacesFileName, parsePlacesCsv, readAreasFile, readPlacesFile, suggestCategory, waypointPlaces } from "./poi.js";
 import { buildProfile, drawProfile, nearestIndex } from "./profile.js";
 import { unpackShare } from "./share.js";
@@ -290,6 +291,7 @@ async function refresh() {
   for (const e of layeredMaps) {
     drawPlaces(e);
     drawAreas(e);
+    drawTiles(e);
   }
   if (currentView === "places") renderPlaces();
 }
@@ -317,6 +319,11 @@ function renderTable() {
   });
   const totalKm = routes.reduce((s, r) => s + r.distance_km, 0);
   renderWelcome();
+  const tileSet = svc.activeTileSet();
+  $("#routes").classList.toggle("no-tiles", !tileSet);
+  $("#routes th.tiles-col").title = tileSet
+    ? `New explorer tiles this route gets you (${tileSet.name}${tileSet.mode === "missing" ? ": among the missing tiles" : ""})`
+    : "";
   $("#count").textContent = `${routes.length} route${routes.length === 1 ? "" : "s"} · ${Math.round(totalKm)} km total`;
   $("#routes tbody").replaceChildren(
     ...routes.map((r) =>
@@ -340,6 +347,7 @@ function renderTable() {
         r.paved_source === "estimated"
           ? el("td", { class: "num est", title: "Estimated from OpenStreetMap" }, `≈${fmt.pct(r.paved_pct)}`)
           : el("td", { class: "num" }, fmt.pct(r.paved_pct)),
+        tileSet ? el("td", { class: "num tiles-col" }, String(svc.newTiles(r))) : el("td", { class: "tiles-col" }),
         el("td", { class: "stars" }, fmt.stars(r.quality_rating)),
         el("td", {}, r.tags.map((t) => el("span", { class: "tag" }, t))),
         el("td", {}, r.source_name || "–"),
@@ -672,6 +680,17 @@ function addMapLayers(map) {
   map.on("overlayadd overlayremove", (e) => {
     if (e.layer === entry.areas && !entry.applying) setAreasShown(e.type === "overlayadd");
   });
+  // VeloViewer explorer tiles (the active set): only those in view are drawn, on a canvas.
+  entry.tiles = L.layerGroup();
+  entry.tilesRenderer = L.canvas({ padding: 0.2 });
+  control.addOverlay(entry.tiles, "Explorer tiles");
+  if (tilesShown()) entry.tiles.addTo(map);
+  map.on("overlayadd overlayremove", (e) => {
+    if (e.layer !== entry.tiles) return;
+    if (!entry.applying) setTilesShown(e.type === "overlayadd");
+    drawTiles(entry);
+  });
+  map.on("moveend", () => drawTiles(entry));
   entry.grey = L.layerGroup(); // no content: switches the base map to grey
   control.addOverlay(entry.grey, "Grey map");
   if (greyWanted(map.getContainer().id)) {
@@ -769,6 +788,7 @@ async function openDetail(id) {
     ? `Ridden ${rides.length === 1 ? "once" : `${rides.length} times`}: ${rides.map((x) => fmt.date(x.date)).join(", ")}`
     : "";
   $("#d-restart").hidden = !r.is_loop;
+  renderDetailTiles(r);
   $("#d-file").textContent =
     `File: ${r.original_filename}` + (r.track_name ? ` · track ${r.track_index + 1}: "${r.track_name}"` : "") +
     ` · imported ${fmt.date(r.imported_at)}`;
@@ -815,6 +835,8 @@ function drawDetailMap(r, fit) {
     r.is_loop ? null : L.circleMarker([r.end_lat, r.end_lon], { radius: 6, color: "#b3261e", fillOpacity: 1 }).bindTooltip("End"),
   ].filter(Boolean)).addTo(m);
   if (fit) m.fitBounds([[r.min_lat, r.min_lon], [r.max_lat, r.max_lon]], { padding: [10, 10] });
+  const entry = layeredMaps.find((x) => x.map === m);
+  if (entry) drawTiles(entry);
 }
 $("#d-surface-map").addEventListener("change", () => detailRoute && drawDetailMap(detailRoute, false));
 
@@ -1397,7 +1419,14 @@ async function openPlacesFile(file) {
   const status = $("#places-status");
   status.textContent = `reading ${file.name}…`;
   try {
-    const parsed = await readPlacesFile(new Uint8Array(await file.arrayBuffer()), file.name);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // A VeloViewer explorer tiles export has squares, not places.
+    if (/\.km[lz]$/i.test(file.name) && isTilesKml(await kmlText(bytes, file.name))) {
+      status.textContent = "";
+      await importTilesFile(file);
+      return;
+    }
+    const parsed = await readPlacesFile(bytes, file.name);
     placesImport = { parsed, filename: file.name };
     status.textContent = "";
     renderPlacesPreview();
@@ -1546,6 +1575,7 @@ function renderPlaces() {
     ...lists.map((l) => el("option", { value: l.id }, `${l.name} (${perList.get(l.id) || 0})`))]);
   renderPlacesTable();
   renderPlaceSets();
+  renderTileSets();
 }
 
 function renderPlacesTable() {
@@ -2186,6 +2216,171 @@ function addAreaControl(map) {
   });
   new Control().addTo(map);
 }
+
+// ---- VeloViewer explorer tiles
+
+const TILES_KEY = "rerouter.showTiles";
+function tilesShown() {
+  try { return localStorage.getItem(TILES_KEY) === "1"; } catch { return false; }
+}
+
+function setTilesShown(on) {
+  try { localStorage.setItem(TILES_KEY, on ? "1" : "0"); } catch { /* only for now */ }
+  for (const e of layeredMaps) {
+    if (!e.tiles || e.map.hasLayer(e.tiles) === on) continue;
+    e.applying = true;
+    on ? e.tiles.addTo(e.map) : e.tiles.remove();
+    e.applying = false;
+  }
+}
+
+const TILE_STYLES = {
+  explored: { color: "#2e7d32", weight: 0.5, fillColor: "#43a047", fillOpacity: 0.25 },
+  cluster: { color: "#1565c0", weight: 0.5, fillColor: "#1e88e5", fillOpacity: 0.25 },
+  missing: { color: "#c62828", weight: 0.5, fillColor: "#e53935", fillOpacity: 0.22 },
+  fresh: { color: "#e65100", weight: 1.5, fillColor: "#ff9800", fillOpacity: 0.5 },
+  grid: { color: "#555", weight: 0.4, opacity: 0.5 },
+  square: { color: "#0d47a1", weight: 2.5, fill: false },
+};
+
+let detailTiles = null; // {id, fresh: Set} for the route in the panel
+
+/** The active tile set on one map: the tiles in view, the grid, the max square, the route's new tiles. */
+function drawTiles(entry) {
+  if (!entry.tiles) return;
+  entry.tiles.clearLayers();
+  const m = entry.map;
+  if (!m.hasLayer(entry.tiles) || !svc.library()) return;
+  const t = svc.activeTileSet();
+  if (!t) return;
+  const info = svc.tileSetInfo(t);
+  info.clusterSet ??= new Set(info.cluster?.tiles || []);
+  const b = m.getBounds();
+  const { x0, x1, y0, y1 } = tileRange([[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]]);
+  const add = (bounds, style) => entry.tiles.addLayer(L.rectangle(bounds, { ...style, renderer: entry.tilesRenderer, interactive: false }));
+  const inView = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  if (m.getZoom() >= 11 && (x1 - x0 + 2) * (y1 - y0 + 2) < 4000) {
+    const north = tileBounds(x0, y0)[1][0], south = tileBounds(x0, y1)[0][0];
+    const west = tileBounds(x0, y0)[0][1], east = tileBounds(x1, y0)[1][1];
+    for (let x = x0; x <= x1 + 1; x++) {
+      const lon = tileBounds(x, y0)[0][1];
+      entry.tiles.addLayer(L.polyline([[north, lon], [south, lon]], { ...TILE_STYLES.grid, renderer: entry.tilesRenderer, interactive: false }));
+    }
+    for (let y = y0; y <= y1 + 1; y++) {
+      const lat = tileBounds(x0, y)[1][0];
+      entry.tiles.addLayer(L.polyline([[lat, west], [lat, east]], { ...TILE_STYLES.grid, renderer: entry.tilesRenderer, interactive: false }));
+    }
+  }
+  for (const k of t.tiles) {
+    const [x, y] = tileXY(k);
+    if (inView(x, y)) add(tileBounds(x, y), t.mode === "missing" ? TILE_STYLES.missing : info.clusterSet.has(k) ? TILE_STYLES.cluster : TILE_STYLES.explored);
+  }
+  const sq = info.square;
+  if (sq?.size) {
+    const s = sq.size - 1;
+    add([[tileBounds(sq.x, sq.y + s)[0][0], tileBounds(sq.x, sq.y)[0][1]], [tileBounds(sq.x, sq.y)[1][0], tileBounds(sq.x + s, sq.y)[1][1]]], TILE_STYLES.square);
+  }
+  // The new tiles of the route in the panel, on its map.
+  if (m === map && detailTiles && detailRoute?.id === detailTiles.id && !detail.hidden) {
+    for (const k of detailTiles.fresh) {
+      const [x, y] = tileXY(k);
+      if (inView(x, y)) add(tileBounds(x, y), TILE_STYLES.fresh);
+    }
+  }
+}
+
+/** In the route panel: the tiles it passes through, and how many are new. */
+function renderDetailTiles(r) {
+  const box = $("#d-tiles");
+  let g = null;
+  try { g = svc.routeExplorer(r.id); } catch { g = null; }
+  detailTiles = g ? { id: r.id, fresh: new Set(g.fresh) } : null;
+  box.hidden = !g;
+  if (!g) {
+    box.replaceChildren();
+    return;
+  }
+  const n = g.fresh.length;
+  setChildren(box,
+    el("span", { class: "muted" }, "Explorer tiles: "),
+    `${g.tiles} tile${g.tiles === 1 ? "" : "s"}, `,
+    el("strong", {}, n ? `${n} new` : "none new"),
+    g.set.mode === "missing" ? " (among the missing tiles)" : null,
+    g.square != null && g.squareAfter > g.square ? ` · max square ${g.square} → ${g.squareAfter}` : null,
+    g.cluster != null && g.clusterAfter > g.cluster ? ` · max cluster ${g.cluster} → ${g.clusterAfter}` : null,
+    el("span", { class: "muted" }, ` (${g.set.name}) `),
+    tilesShown() ? null : el("a", { class: "link", onclick: () => { setTilesShown(true); renderDetailTiles(r); } }, n ? "show them on the map" : "show the tiles on the map"));
+}
+
+/** After a change to the tile sets: the maps, the library column, the panel, the Places screen. */
+async function refreshTiles() {
+  if (detailRoute && !detail.hidden) renderDetailTiles(detailRoute);
+  await refresh();
+}
+
+function renderTileSets() {
+  const sets = svc.tileSets();
+  const active = svc.activeTileSet();
+  setChildren($("#tiles-sets"), sets.length ? [
+    el("thead", {}, el("tr", {},
+      el("th", { title: "The tiles on the maps and in the routes' new tiles" }, "Use"), el("th", {}, "Name"), el("th", {}, "Tiles"),
+      el("th", {}, "Max square"), el("th", {}, "Max cluster"), el("th", {}, "Imported"), el("th", {}, ""))),
+    el("tbody", {}, sets.map((t) => {
+      const info = svc.tileSetInfo(t);
+      return el("tr", {},
+        el("td", {}, el("input", {
+          type: "radio", name: "tiles-active", checked: t.id === active?.id, "aria-label": `Use ${t.name}`,
+          onchange: async () => { await svc.setActiveTileSet(t.id); await refreshTiles(); },
+        })),
+        el("td", {}, el("input", {
+          value: t.name, "aria-label": "Name",
+          onchange: async (e) => { await svc.updateTileSet(t.id, { name: e.target.value }); await refreshTiles(); },
+        }), t.source_file ? el("div", { class: "small muted" }, t.source_file) : null),
+        el("td", {}, `${t.tiles.length} `, el("select", {
+          class: "osm-range", "aria-label": "What these tiles are",
+          onchange: async (e) => { await svc.updateTileSet(t.id, { mode: e.target.value }); await refreshTiles(); },
+        }, el("option", { value: "explored", selected: t.mode === "explored" }, "explored"),
+          el("option", { value: "missing", selected: t.mode === "missing" }, "missing"))),
+        el("td", {}, info.square ? `${info.square.size}×${info.square.size}` : "–"),
+        el("td", {}, info.cluster ? String(info.cluster.size) : "–"),
+        el("td", { class: "small" }, fmt.date(t.imported_at)),
+        el("td", {}, el("a", {
+          class: "link small",
+          onclick: async () => { if (confirm(`Remove the explorer tiles “${t.name}”?`)) { await svc.deleteTileSet(t.id); await refreshTiles(); } },
+        }, "remove")));
+    })),
+    el("caption", { class: "small muted tiles-legend" },
+      el("i", { class: "explored" }), "explored ", el("i", { class: "cluster" }), "max cluster ", el("i", { class: "square" }), "max square ",
+      el("i", { class: "missing" }), "missing ", el("i", { class: "fresh" }), "new for the route in the panel"),
+  ] : []);
+}
+
+async function importTilesFile(file) {
+  const status = $("#tiles-status");
+  status.textContent = `reading ${file.name}…`;
+  try {
+    const parsed = await readTilesFile(new Uint8Array(await file.arrayBuffer()), file.name);
+    const name = prompt(
+      `${file.name}: ${parsed.tiles.length} ${parsed.mode} tiles. A name for them (tiles you already have under the same name are replaced):`,
+      file.name.replace(/\.[^.]*$/, ""));
+    if (!name || !name.trim()) {
+      status.textContent = "";
+      return;
+    }
+    const res = await svc.importTileSet(parsed, { name, source_file: file.name });
+    status.textContent = `${res.set.name}: ${parsed.tiles.length} ${parsed.mode} tiles ${res.replaced ? "updated" : "imported"}` +
+      (parsed.skipped ? ` (${parsed.skipped} shapes that aren't tiles left out)` : "") + ".";
+    setTilesShown(true);
+    await refreshTiles();
+  } catch (err) {
+    status.textContent = `${file.name}: ${err.message}`;
+  }
+}
+
+$("#tiles-file").addEventListener("change", async (e) => {
+  if (e.target.files[0]) await importTilesFile(e.target.files[0]);
+  e.target.value = "";
+});
 
 // ------------------------------------------------------------------ share links
 

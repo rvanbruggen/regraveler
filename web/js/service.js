@@ -4,6 +4,7 @@
 
 import * as brouter from "./brouter.js";
 import * as cb from "./combiner.js";
+import * as explorer from "./explorer.js";
 import { VERSION, config } from "./config.js";
 import { geodesicDistance, pointInPolygon, round, simplifyLatLon, toMetric } from "./geo.js";
 import { GpxError, writeGpx } from "./gpx.js";
@@ -116,7 +117,7 @@ export function importOrder(names) {
 
 // ------------------------------------------------------------------ filters
 
-const SORTABLE = new Set(["name", "distance_km", "elevation_gain_m", "paved_pct", "quality_rating", "source_name", "imported_at", "is_loop", "activity"]);
+const SORTABLE = new Set(["name", "distance_km", "elevation_gain_m", "paved_pct", "quality_rating", "source_name", "imported_at", "is_loop", "activity", "new_tiles"]);
 
 /** Filters from URLSearchParams (the same parameters the old API took). */
 export function filtersFrom(params) {
@@ -169,7 +170,7 @@ export function filterRoutes(f = {}) {
   const lower = sort === "name" || sort === "source_name";
   const dir = f.order === "desc" ? -1 : 1;
   const val = (r) => {
-    const v = r[sort];
+    const v = sort === "new_tiles" ? newTiles(r) : r[sort];
     if (v == null) return null;
     return lower ? String(v).toLowerCase() : typeof v === "boolean" ? Number(v) : v;
   };
@@ -1785,6 +1786,99 @@ export async function importAreas(found) {
 
 /** The areas a route starts in. */
 export const areasOf = (routeId) => lib.docsOf("area").filter((a) => startsIn(getRoute(routeId), a)).sort(byNameCi);
+
+// ---- VeloViewer explorer tiles
+// Document "explorer_tiles" {name, mode: "explored" | "missing", tiles: [key, ...], active,
+// source_file, imported_at}. The active set is the one on the maps and in the route stats.
+
+export const tileSets = () => lib.docsOf("explorer_tiles").sort(byNameCi);
+export const activeTileSet = () => {
+  const all = tileSets();
+  return all.find((t) => t.active) || all[0] || null;
+};
+
+const tileSetCache = new Map(); // id -> {source, set, square, cluster}
+/** The tiles of a set as a Set, with its max square and max cluster (explored sets only). */
+export function tileSetInfo(t) {
+  const hit = tileSetCache.get(t.id);
+  if (hit && hit.source === t.tiles) return hit;
+  const set = new Set(t.tiles);
+  const info = {
+    source: t.tiles, set,
+    square: t.mode === "explored" ? explorer.maxSquare(set) : null,
+    cluster: t.mode === "explored" ? explorer.maxCluster(set) : null,
+  };
+  tileSetCache.set(t.id, info);
+  return info;
+}
+
+/** Import a parsed export (explorer.readTilesFile); a set with the same name is replaced. */
+export async function importTileSet(parsed, { name, source_file = null } = {}) {
+  name = String(name || parsed.name || "").trim();
+  if (!name) throw new ServiceError("Explorer tiles need a name");
+  const same = tileSets().find((t) => t.name.toLowerCase() === name.toLowerCase());
+  const [doc] = await lib.saveDocs([{
+    ...(same || { kind: "explorer_tiles", active: !tileSets().length }),
+    name, mode: parsed.mode, zoom: explorer.TILE_ZOOM, tiles: parsed.tiles, source_file, imported_at: new Date().toISOString(),
+  }]);
+  return { set: doc, replaced: !!same };
+}
+
+export async function updateTileSet(id, changes) {
+  const t = lib.getDoc("explorer_tiles", id);
+  if (!t) throw new ServiceError("Explorer tiles not found", 404);
+  const next = { ...t };
+  if (changes.name != null && String(changes.name).trim()) next.name = String(changes.name).trim();
+  if (changes.mode === "explored" || changes.mode === "missing") next.mode = changes.mode;
+  await lib.saveDocs([next]);
+  tileSetCache.delete(id);
+}
+
+export async function setActiveTileSet(id) {
+  await lib.saveDocs(tileSets().filter((t) => !!t.active !== (t.id === id)).map((t) => ({ ...t, active: t.id === id })));
+}
+
+export async function deleteTileSet(id) {
+  await lib.deleteDocs([`explorer_tiles:${id}`]);
+  tileSetCache.delete(id);
+}
+
+const routeTilesCache = new Map(); // route id -> {source, tiles}
+/** The explorer tiles a route passes through (keys, in order). */
+export function routeTiles(r) {
+  const hit = routeTilesCache.get(r.id);
+  if (hit && hit.source === r.geometry) return hit.tiles;
+  const tiles = explorer.lineTiles(r.geometry);
+  routeTilesCache.set(r.id, { source: r.geometry, tiles });
+  return tiles;
+}
+
+/** How many new tiles a route gets you in the active set (null without one). */
+export function newTiles(r) {
+  const t = activeTileSet();
+  return t ? explorer.routeGain(routeTiles(r), tileSetInfo(t).set, t.mode).fresh.length : null;
+}
+
+/**
+ * A route against the active set: {set: {id, name, mode}, tiles, fresh: [key, ...], square,
+ * squareAfter, cluster, clusterAfter} (the max square and cluster before and after riding it,
+ * for an explored set), or null without a set.
+ */
+export function routeExplorer(id) {
+  const t = activeTileSet();
+  if (!t) return null;
+  const info = tileSetInfo(t);
+  const { tiles, fresh } = explorer.routeGain(routeTiles(getRoute(id)), info.set, t.mode);
+  const out = { set: { id: t.id, name: t.name, mode: t.mode }, tiles, fresh };
+  if (t.mode === "explored") {
+    const after = new Set([...info.set, ...fresh]);
+    Object.assign(out, {
+      square: info.square.size, squareAfter: fresh.length ? explorer.maxSquare(after).size : info.square.size,
+      cluster: info.cluster.size, clusterAfter: fresh.length ? explorer.maxCluster(after).size : info.cluster.size,
+    });
+  }
+  return out;
+}
 
 // ---- the whole catalog, with counts (for the browse tree)
 
