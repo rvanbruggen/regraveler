@@ -2381,6 +2381,18 @@ $("#tiles-file").addEventListener("change", async (e) => {
   if (e.target.files[0]) await importTilesFile(e.target.files[0]);
   e.target.value = "";
 });
+{
+  const drop = $("#tiles-drop");
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    const file = [...e.dataTransfer.files].find((f) => /\.km[lz]$/i.test(f.name));
+    if (file) await importTilesFile(file);
+    else $("#tiles-status").textContent = "Drop VeloViewer's explorer tiles export (a KML or KMZ file).";
+  });
+}
 
 // ------------------------------------------------------------------ share links
 

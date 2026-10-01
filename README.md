@@ -23,7 +23,7 @@ The whole app is one page (`web/`) that runs in the browser, and it runs two way
 
 Both use the same backup format, so a library moves between them in either direction.
 
-**Version:** 1.11.0 · **Status:** stable. What was planned and built is in
+**Version:** 1.11.1 · **Status:** stable. What was planned and built is in
 [docs/ROADMAP.md](docs/ROADMAP.md); the version
 history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -334,7 +334,7 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
 
 - **VeloViewer explorer tiles:** [VeloViewer](https://blog.veloviewer.com/veloviewer-explorer-overview/)
   splits the map in squares (zoom-14 map tiles, about 1.5 km wide here); a tile is yours once
-  a ride passes through it. On the Places tab, *Import KML…* reads VeloViewer's KML export of
+  a ride passes through it. On the Places tab, drop VeloViewer's KML export (or choose the file) of
   your **explored tiles**, or of **missing tiles** (the tiles still to get in an area; told
   apart by the file's name, and changeable per set). Give each set a name (a friend's tiles
   can sit next to yours); importing a newer export under the same name replaces it. A KML
@@ -350,6 +350,8 @@ of the menu bar opens *Library & settings* (backups, storage, the routing server
   - Tiles a route passes are worked out from its line (every tile a segment crosses, corners
     included), so they can differ from VeloViewer's by a tile where the route runs along a tile
     edge. The sets are in backups, not in *Export set*.
+
+![Explorer tiles: missing tiles in red on the Map, with the library's routes on top](docs/screenshots/explorer-tiles.webp)
 
 ### Utilities
 
